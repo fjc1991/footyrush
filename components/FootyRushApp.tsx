@@ -118,6 +118,9 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     () => currentResult?.events.filter((event) => event.second <= liveSecond) ?? [],
     [currentResult, liveSecond]
   );
+  // Live score = goals that have actually happened by the current minute, not the final result.
+  const liveHomeGoals = visibleEvents.filter((event) => event.code === "goal" && event.teamId === currentHumanFixture?.homeId).length;
+  const liveAwayGoals = visibleEvents.filter((event) => event.code === "goal" && event.teamId === currentHumanFixture?.awayId).length;
   const leaderboard = useMemo(
     () => aggregateLeaderboard([...demoLeaderboardRecords(), ...leaderboardRecords], leaderboardPeriod),
     [leaderboardPeriod, leaderboardRecords]
@@ -835,7 +838,9 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
               <MatchHeader
                 home={managerById.get(currentHumanFixture.homeId)}
                 away={managerById.get(currentHumanFixture.awayId)}
-                result={currentResult}
+                started={Boolean(currentResult)}
+                homeGoals={liveHomeGoals}
+                awayGoals={liveAwayGoals}
                 flashing={scoreFlashing}
               />
             )}
@@ -1313,12 +1318,16 @@ function FormationGlyph({ formationId }: { formationId: string }) {
 function MatchHeader({
   home,
   away,
-  result,
+  started,
+  homeGoals,
+  awayGoals,
   flashing
 }: {
   home?: ManagerSquad;
   away?: ManagerSquad;
-  result: FixtureResult | null;
+  started: boolean;
+  homeGoals: number;
+  awayGoals: number;
   flashing?: boolean;
 }) {
   return (
@@ -1328,7 +1337,7 @@ function MatchHeader({
         <strong>{home?.displayName}</strong>
       </div>
       <div className={`score${flashing ? " flashing" : ""}`}>
-        {result ? `${result.homeGoals} – ${result.awayGoals}` : "v"}
+        {started ? `${homeGoals} – ${awayGoals}` : "v"}
       </div>
       <div>
         <span>{away?.kind === "reserve" ? "Reserve" : "You"}</span>

@@ -738,7 +738,8 @@ p {
   display: flex;
   flex-direction: column-reverse;
   gap: 8px;
-  height: 380px;
+  min-height: 120px;
+  max-height: 380px;
   overflow: auto;
   padding: 12px;
   background: #0b0d0c;
@@ -1899,6 +1900,6 @@ p {
   }
 
   .commentary-log {
-    height: 300px;
+    max-height: 300px;
   }
 }
