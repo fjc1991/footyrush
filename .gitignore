@@ -1,0 +1,14 @@
+node_modules/
+.next/
+.playwright-cli/
+coverage/
+dist/
+tmp/
+output/
+tsconfig.tsbuildinfo
+*.log
+._*
+**/._*
+.env
+.env.local
+.env.*.local

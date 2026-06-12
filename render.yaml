@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: footyrush
+    runtime: node
+    plan: free
+    region: singapore
+    branch: main
+    autoDeploy: true
+    buildCommand: npm ci && npm run build
+    startCommand: npm run start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: FOOTYRUSH_IP_HASH_SALT
+        generateValue: true
