@@ -105,7 +105,7 @@ export function recordsFromLeague(params: {
       opponentStrength: Math.round(
         params.managers
           .filter((manager) => manager.id !== standing.managerId)
-          .reduce((sum, manager) => sum + (strengthByManager.get(manager.id) ?? 1000), 0) / Math.max(1, params.managers.length - 1)
+          .reduce((sum, manager) => sum + (strengthByManager.get(manager.id) ?? 65), 0) / Math.max(1, params.managers.length - 1)
       ),
       completedAt: params.completedAt
     }));
@@ -123,7 +123,7 @@ export function demoLeaderboardRecords(now = new Date()): LeaderboardRecord[] {
     goalDifference: 7 - index,
     goalsFor: 12 - index,
     leagueTitles: index === 0 ? 1 : 0,
-    opponentStrength: 980 + index * 18,
+    opponentStrength: 62 + index * 2,
     completedAt: new Date(now.getTime() - index * 2 * 60 * 60 * 1000).toISOString()
   }));
 }

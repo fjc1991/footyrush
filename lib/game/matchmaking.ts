@@ -20,13 +20,13 @@ export function getSkillBand(completedLeagues: number, mmr: number): string {
   if (completedLeagues < 3) {
     return "rookie";
   }
-  if (mmr < 900) {
+  if (mmr < 55) {
     return "bronze";
   }
-  if (mmr < 1100) {
+  if (mmr < 70) {
     return "silver";
   }
-  if (mmr < 1300) {
+  if (mmr < 85) {
     return "gold";
   }
   return "elite";
@@ -62,13 +62,13 @@ export function createMinileague(params: {
 
   const reserves = Array.from({ length: 5 }, (_, index) => {
     const formation = pickOne(FORMATION_LIST, rng).id;
-    const bandOffset = skillBand === "rookie" ? -90 : skillBand === "elite" ? 170 : skillBand === "gold" ? 80 : 0;
+    const bandOffset = skillBand === "rookie" ? -6 : skillBand === "elite" ? 12 : skillBand === "gold" ? 5 : 0;
     return autoDraftManager({
       id: `reserve-${index + 1}`,
       displayName: reserveNames[(index + Math.floor(rng() * reserveNames.length)) % reserveNames.length],
       formationId: formation,
       seed: `${params.seed}:reserve:${index}`,
-      mmr: Math.round(params.mmr + bandOffset + (rng() - 0.5) * 90),
+      mmr: Math.round(params.mmr + bandOffset + (rng() - 0.5) * 6),
       completedLeagues: skillBand === "rookie" ? Math.floor(rng() * 3) : 3 + Math.floor(rng() * 20)
     });
   });
