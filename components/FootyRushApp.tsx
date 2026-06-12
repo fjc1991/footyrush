@@ -26,6 +26,7 @@ import {
   simulateFixture
 } from "@/lib/game/simulation";
 import { getSupabaseBrowserClient, hasSupabaseConfig } from "@/lib/supabase/client";
+import type { Session } from "@supabase/supabase-js";
 import type {
   DraftMode,
   DraftPick,
@@ -82,7 +83,9 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
   const [guestStatus, setGuestStatus] = useState<GuestStatus>({ allowed: true, played: false });
   const [showAuthGate, setShowAuthGate] = useState(false);
   const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
   const [authMessage, setAuthMessage] = useState("");
+  const [isAdmin, setIsAdmin] = useState(false);
   const [leaderboardPeriod, setLeaderboardPeriod] = useState<Period>("daily");
   const [leaderboardRecords, setLeaderboardRecords] = useState<LeaderboardRecord[]>([]);
   const [league, setLeague] = useState<LeagueState | null>(null);
@@ -169,17 +172,33 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
       .catch(() => undefined);
 
     const supabase = getSupabaseBrowserClient();
-    supabase?.auth.getSession().then(({ data }) => {
-      if (data.session?.user) {
-        const email = data.session.user.email ?? "";
-        persistProfile({
-          id: data.session.user.id,
-          displayName: email.split("@")[0] || "Manager",
-          email,
-          demo: false
-        });
+    if (!supabase) {
+      return;
+    }
+
+    const applySession = (session: Session | null) => {
+      if (!session?.user) {
+        return;
       }
-    });
+      const email = session.user.email ?? "";
+      const admin = session.user.app_metadata?.role === "admin";
+      setIsAdmin(admin);
+      persistProfile({
+        id: session.user.id,
+        displayName: admin ? "Admin (tester)" : email.split("@")[0] || "Manager",
+        email,
+        demo: false
+      });
+      // The admin testing account always starts from zero.
+      if (admin) {
+        resetToNewUser();
+      }
+    };
+
+    supabase.auth.getSession().then(({ data }) => applySession(data.session));
+    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => applySession(session));
+    return () => authListener.subscription.unsubscribe();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -220,6 +239,24 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     setProfile(nextProfile);
     window.localStorage.setItem(profileKey, JSON.stringify(nextProfile));
     setShowAuthGate(false);
+  }
+
+  // Wipe all local progress back to a brand-new-user state. Used by the admin testing
+  // account, which resets on every load so the new-user experience can be replayed endlessly.
+  function resetToNewUser() {
+    window.localStorage.removeItem(recordsKey);
+    window.localStorage.removeItem(managerScoreKey);
+    window.localStorage.removeItem(completedLeaguesKey);
+    window.localStorage.removeItem(expertUnlockedKey);
+    window.localStorage.removeItem(localGuestKey);
+    setLeaderboardRecords([]);
+    setManagerScore(STARTING_MANAGER_SCORE);
+    setCompletedLeagues(0);
+    setExpertUnlockedEarned(false);
+    setExpertUnlockedThisRun(false);
+    setLastScoreDelta(null);
+    setGuestStatus({ allowed: true, played: false });
+    resetDraft("setup");
   }
 
   function resetDraft(nextPhase: Phase = "setup") {
@@ -456,6 +493,57 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
         redirectTo: `${window.location.origin}/${locale}`
       }
     });
+  }
+
+  async function signInWithPassword(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setAuthMessage("");
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase) {
+      setAuthMessage("Sign-in is unavailable until Supabase is configured.");
+      return;
+    }
+    const { error } = await supabase.auth.signInWithPassword({ email: authEmail.trim(), password: authPassword });
+    if (error) {
+      setAuthMessage(error.message);
+      return;
+    }
+    // onAuthStateChange applies the profile (and admin reset). Clear the password field.
+    setAuthPassword("");
+    setAuthMessage("");
+  }
+
+  async function signUpWithPassword() {
+    setAuthMessage("");
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase) {
+      setAuthMessage("Sign-up is unavailable until Supabase is configured.");
+      return;
+    }
+    const email = authEmail.trim();
+    if (!email || authPassword.length < 6) {
+      setAuthMessage("Enter an email and a password of at least 6 characters.");
+      return;
+    }
+    const { data, error } = await supabase.auth.signUp({ email, password: authPassword });
+    if (error) {
+      setAuthMessage(error.message);
+      return;
+    }
+    setAuthPassword("");
+    setAuthMessage(data.session ? "Account created. You're signed in." : "Account created. Check your email to confirm, then sign in.");
+  }
+
+  async function signOut() {
+    const supabase = getSupabaseBrowserClient();
+    await supabase?.auth.signOut();
+    setProfile(null);
+    setIsAdmin(false);
+    window.localStorage.removeItem(profileKey);
+    setAuthEmail("");
+    setAuthPassword("");
+    setAuthMessage("");
+    setShowAuthGate(false);
   }
 
   async function signInWithEmail(event: FormEvent<HTMLFormElement>) {
@@ -957,18 +1045,57 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
               </div>
               <Shield size={22} />
             </div>
-            <p>{copy.signInCopy}</p>
-            <button className="primary-button wide" type="button" onClick={signInWithGoogle}>
-              <LogIn size={18} />
-              {copy.google}
-            </button>
-            <form className="email-form" onSubmit={signInWithEmail}>
-              <input value={authEmail} onChange={(event) => setAuthEmail(event.target.value)} placeholder="manager@gmail.com" inputMode="email" />
-              <button className="secondary-button" type="submit">
-                <Mail size={16} />
-                {copy.email}
-              </button>
-            </form>
+            {profile ? (
+              <>
+                <p>
+                  Signed in as <strong>{profile.displayName}</strong>
+                  {profile.email ? ` (${profile.email})` : ""}.
+                  {isAdmin ? " Admin testing mode — your progress resets to a brand-new user on every load." : ""}
+                </p>
+                <button className="primary-button wide" type="button" onClick={signOut}>
+                  <LogIn size={18} />
+                  Sign out
+                </button>
+              </>
+            ) : (
+              <>
+                <p>{copy.signInCopy}</p>
+                <form className="auth-stack" onSubmit={signInWithPassword}>
+                  <input
+                    value={authEmail}
+                    onChange={(event) => setAuthEmail(event.target.value)}
+                    placeholder="you@example.com"
+                    inputMode="email"
+                    autoComplete="email"
+                  />
+                  <input
+                    value={authPassword}
+                    onChange={(event) => setAuthPassword(event.target.value)}
+                    placeholder="Password"
+                    type="password"
+                    autoComplete="current-password"
+                  />
+                  <button className="primary-button wide" type="submit">
+                    <LogIn size={18} />
+                    Sign in
+                  </button>
+                  <button className="secondary-button wide" type="button" onClick={signUpWithPassword}>
+                    Create account
+                  </button>
+                </form>
+                <p className="auth-divider">or</p>
+                <button className="secondary-button wide" type="button" onClick={signInWithGoogle}>
+                  <LogIn size={16} />
+                  {copy.google}
+                </button>
+                <form className="email-form" onSubmit={signInWithEmail}>
+                  <button className="secondary-button wide" type="submit">
+                    <Mail size={16} />
+                    {copy.email}
+                  </button>
+                </form>
+              </>
+            )}
             {!hasSupabaseConfig() && <p className="fine-print">Local demo mode is active until Supabase env vars are added.</p>}
             {authMessage && <p className="auth-message">{authMessage}</p>}
           </section>

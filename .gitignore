@@ -12,3 +12,5 @@ tsconfig.tsbuildinfo
 .env
 .env.local
 .env.*.local
+ADMIN_CREDENTIALS.local.md
+*.local.md
