@@ -919,6 +919,54 @@ p {
   color: var(--text);
 }
 
+.manager-pick {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 14px 0;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 7%, var(--panel));
+}
+
+.manager-pick-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.manager-pick-head .eyebrow {
+  margin: 0;
+}
+
+.manager-pick-rating {
+  font-size: 1.5rem;
+  font-weight: 800;
+  color: var(--accent);
+  line-height: 1;
+}
+
+.manager-pick-name {
+  font-size: 1.15rem;
+  font-weight: 800;
+}
+
+.manager-pick-club {
+  font-size: 0.9rem;
+  opacity: 0.8;
+}
+
+.manager-pick-prompt {
+  margin: 2px 0 8px;
+  font-size: 0.9rem;
+  opacity: 0.85;
+}
+
+.manager-pick .wide {
+  margin-top: 6px;
+}
+
 .auth-stack {
   display: flex;
   flex-direction: column;

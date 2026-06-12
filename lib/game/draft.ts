@@ -72,6 +72,7 @@ export function autoDraftManager(params: {
     mode: params.mode ?? "classic",
     picks,
     mmr: params.mmr ?? 1000,
+    managerRating: params.mmr ?? 1000,
     completedLeagues: params.completedLeagues ?? 0,
     injuredPlayerIds: [],
     suspendedPlayerIds: [],

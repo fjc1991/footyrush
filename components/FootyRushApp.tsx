@@ -5,7 +5,8 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import { en } from "@/lib/i18n/en";
 import { FORMATION_LIST, getStarterSlots } from "@/lib/game/formations";
 import { getNextDraftSlot, makeDraftPick } from "@/lib/game/draft";
-import { loadFootballData, spinForSlot } from "@/lib/game/data";
+import { loadFootballData, spinForSlot, getFootballData } from "@/lib/game/data";
+import { MANAGER_POOL, managerRatingForPosition } from "@/lib/game/managers";
 import { createMinileague } from "@/lib/game/matchmaking";
 import { renderCommentary } from "@/lib/game/commentary";
 import { aggregateLeaderboard, demoLeaderboardRecords, recordsFromLeague } from "@/lib/game/leaderboard";
@@ -50,6 +51,21 @@ interface LocalProfile {
   demo: boolean;
 }
 
+interface SelectedManager {
+  teamCode: string;
+  teamName: string;
+  year: number;
+  manager: string;
+  position: number;
+  rating: number;
+}
+
+function ordinal(n: number): string {
+  const s = ["th", "st", "nd", "rd"];
+  const v = n % 100;
+  return n + (s[(v - 20) % 10] ?? s[v] ?? s[0]);
+}
+
 interface GuestStatus {
   allowed: boolean;
   played: boolean;
@@ -68,6 +84,7 @@ const profileKey = "footyrush.profile";
 const recordsKey = "footyrush.leaderboardRecords";
 const localGuestKey = "footyrush.guestPlayed";
 const managerScoreKey = "footyrush.mmr";
+const managerKey = "footyrush.manager";
 const completedLeaguesKey = "footyrush.completedLeagues";
 const expertUnlockedKey = "footyrush.expertUnlocked";
 const TESTING_MODE = process.env.NEXT_PUBLIC_TESTING_MODE === "true";
@@ -98,6 +115,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
   const [dataReady, setDataReady] = useState(false);
   const [dataError, setDataError] = useState(false);
   const [managerScore, setManagerScore] = useState(STARTING_MANAGER_SCORE);
+  const [selectedManager, setSelectedManager] = useState<SelectedManager | null>(null);
   const [completedLeagues, setCompletedLeagues] = useState(0);
   const [expertUnlockedEarned, setExpertUnlockedEarned] = useState(false);
   const [lastScoreDelta, setLastScoreDelta] = useState<number | null>(null);
@@ -161,7 +179,13 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
       setLeaderboardRecords(JSON.parse(storedRecords) as LeaderboardRecord[]);
     }
 
-    const storedManagerScore = Number(window.localStorage.getItem(managerScoreKey) ?? STARTING_MANAGER_SCORE);
+    const storedManager = window.localStorage.getItem(managerKey);
+    const parsedManager = storedManager ? (JSON.parse(storedManager) as SelectedManager) : null;
+    if (parsedManager) {
+      setSelectedManager(parsedManager);
+    }
+    const storedScoreRaw = window.localStorage.getItem(managerScoreKey);
+    const storedManagerScore = storedScoreRaw !== null ? Number(storedScoreRaw) : parsedManager?.rating ?? STARTING_MANAGER_SCORE;
     setManagerScore(storedManagerScore);
     setCompletedLeagues(Number(window.localStorage.getItem(completedLeaguesKey) ?? 0));
     setExpertUnlockedEarned(window.localStorage.getItem(expertUnlockedKey) === "true" || isExpertUnlocked(storedManagerScore));
@@ -244,6 +268,31 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     setShowAuthGate(false);
   }
 
+  // Appoint a random real manager from the pool. Their finish-derived rating becomes the
+  // starting manager score (replacing the old flat 1000) and grants a slight simulation edge.
+  function shuffleManager() {
+    const entry = MANAGER_POOL[Math.floor(Math.random() * MANAGER_POOL.length)];
+    const rating = managerRatingForPosition(entry.position);
+    let teamName = entry.teamCode;
+    try {
+      teamName = getFootballData().teams[entry.teamCode]?.name ?? entry.teamCode;
+    } catch {
+      // Football data not loaded yet — fall back to the team code.
+    }
+    const next: SelectedManager = {
+      teamCode: entry.teamCode,
+      teamName,
+      year: entry.year,
+      manager: entry.manager,
+      position: entry.position,
+      rating
+    };
+    setSelectedManager(next);
+    window.localStorage.setItem(managerKey, JSON.stringify(next));
+    setManagerScore(rating);
+    window.localStorage.setItem(managerScoreKey, String(rating));
+  }
+
   // Wipe all local progress back to a brand-new-user state. Used by the admin testing
   // account, which resets on every load so the new-user experience can be replayed endlessly.
   function resetToNewUser() {
@@ -252,8 +301,10 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     window.localStorage.removeItem(completedLeaguesKey);
     window.localStorage.removeItem(expertUnlockedKey);
     window.localStorage.removeItem(localGuestKey);
+    window.localStorage.removeItem(managerKey);
     setLeaderboardRecords([]);
     setManagerScore(STARTING_MANAGER_SCORE);
+    setSelectedManager(null);
     setCompletedLeagues(0);
     setExpertUnlockedEarned(false);
     setExpertUnlockedThisRun(false);
@@ -356,6 +407,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
       mode: draftMode,
       completedLeagues,
       mmr: managerScore,
+      managerRating: selectedManager?.rating ?? managerScore,
       seed: `${Date.now()}:${profile?.id ?? "guest"}`
     });
 
@@ -634,7 +686,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
         </div>
         <div>
           <span>Score</span>
-          <strong>{managerScore}</strong>
+          <strong>{selectedManager ? managerScore : "—"}</strong>
         </div>
         <div>
           <span>Draft level</span>
@@ -679,12 +731,45 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
             <p className="eyebrow">{copy.setupTitle}</p>
             <h2>Draft fast, then manage the damage.</h2>
             <p>{copy.setupCopy}</p>
-            <ProgressionPanel
-              score={managerScore}
-              completedLeagues={completedLeagues}
-              expertUnlocked={expertUnlocked}
-            />
-            <button className="primary-button" type="button" onClick={startDraft}>
+
+            <div className="manager-pick">
+              {selectedManager ? (
+                <>
+                  <div className="manager-pick-head">
+                    <p className="eyebrow">Your manager</p>
+                    <span className="manager-pick-rating">{selectedManager.rating}</span>
+                  </div>
+                  <strong className="manager-pick-name">{selectedManager.manager}</strong>
+                  <span className="manager-pick-club">
+                    {selectedManager.teamName} {selectedManager.year} · finished {ordinal(selectedManager.position)}
+                  </span>
+                  <button className="secondary-button wide" type="button" onClick={shuffleManager}>
+                    <Shuffle size={16} />
+                    Re-shuffle manager
+                  </button>
+                </>
+              ) : (
+                <>
+                  <p className="eyebrow">Appoint your manager</p>
+                  <p className="manager-pick-prompt">
+                    Shuffle to draw a real manager. Their league finish sets your starting score and a slight match-day edge.
+                  </p>
+                  <button className="primary-button wide" type="button" onClick={shuffleManager}>
+                    <Shuffle size={16} />
+                    Shuffle manager
+                  </button>
+                </>
+              )}
+            </div>
+
+            {selectedManager && (
+              <ProgressionPanel
+                score={managerScore}
+                completedLeagues={completedLeagues}
+                expertUnlocked={expertUnlocked}
+              />
+            )}
+            <button className="primary-button" type="button" onClick={startDraft} disabled={!selectedManager}>
               <Play size={18} />
               {copy.startDraft}
             </button>
@@ -1157,6 +1242,7 @@ function SquadPanel({ picks, formationId, mode }: { picks: DraftPick[]; formatio
         mode,
         picks,
         mmr: 1000,
+        managerRating: 1000,
         completedLeagues: 0,
         injuredPlayerIds: [],
         suspendedPlayerIds: [],

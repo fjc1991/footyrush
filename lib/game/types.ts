@@ -94,6 +94,8 @@ export interface ManagerSquad {
   mode: DraftMode;
   picks: DraftPick[];
   mmr: number;
+  /** Inherent manager quality (from the chosen real-world manager's finish); drives a slight sim edge. */
+  managerRating: number;
   completedLeagues: number;
   injuredPlayerIds: number[];
   suspendedPlayerIds: number[];

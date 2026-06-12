@@ -39,6 +39,8 @@ export function createMinileague(params: {
   mode: DraftMode;
   completedLeagues: number;
   mmr: number;
+  /** The human's chosen manager rating; falls back to mmr if not provided. */
+  managerRating?: number;
   seed: string;
 }): { id: string; managers: ManagerSquad[]; rounds: Fixture[][]; skillBand: string } {
   const rng = createRng(params.seed);
@@ -51,6 +53,7 @@ export function createMinileague(params: {
     mode: params.mode,
     picks: params.humanPicks,
     mmr: params.mmr,
+    managerRating: params.managerRating ?? params.mmr,
     completedLeagues: params.completedLeagues,
     injuredPlayerIds: [],
     suspendedPlayerIds: [],
