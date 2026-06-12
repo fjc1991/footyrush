@@ -84,5 +84,11 @@ const normalizedSquads = squadRows.map((row) => ({
   phy: row.phy
 }));
 
-await upsert("squad_players", normalizedSquads, { onConflict: "team_season_id,player_id", size: 400 });
-console.log(`Seed complete: ${teams.length} teams, ${seasons.length} seasons, ${playersById.size} players, ${normalizedSquads.length} squad rows.`);
+// A handful of source squads list the same player twice; Postgres rejects a batch that
+// targets the same (team_season_id, player_id) conflict key more than once, so de-duplicate.
+const dedupedSquads = Array.from(
+  new Map(normalizedSquads.map((row) => [`${row.team_season_id}|${row.player_id}`, row])).values()
+);
+
+await upsert("squad_players", dedupedSquads, { onConflict: "team_season_id,player_id", size: 400 });
+console.log(`Seed complete: ${teams.length} teams, ${seasons.length} seasons, ${playersById.size} players, ${dedupedSquads.length} squad rows.`);
