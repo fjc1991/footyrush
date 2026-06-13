@@ -12,7 +12,6 @@ import { renderCommentary } from "@/lib/game/commentary";
 import { aggregateLeaderboard, demoLeaderboardRecords, recordsFromLeague } from "@/lib/game/leaderboard";
 import {
   EXPERT_SCORE_THRESHOLD,
-  MAX_MANAGER_SCORE,
   MIN_MANAGER_SCORE,
   STARTING_MANAGER_SCORE,
   expertProgress,
@@ -86,6 +85,9 @@ const recordsKey = "footyrush.leaderboardRecords";
 const localGuestKey = "footyrush.guestPlayed";
 const managerScoreKey = "footyrush.mmr";
 const managerKey = "footyrush.manager";
+const scoreModelKey = "footyrush.scoreModel";
+// Bump when the manager-score model changes so returning testers reset cleanly.
+const SCORE_MODEL = "v3-zero-to-1000";
 const completedLeaguesKey = "footyrush.completedLeagues";
 const expertUnlockedKey = "footyrush.expertUnlocked";
 const TESTING_MODE = process.env.NEXT_PUBLIC_TESTING_MODE === "true";
@@ -180,23 +182,22 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
       setLeaderboardRecords(JSON.parse(storedRecords) as LeaderboardRecord[]);
     }
 
-    const storedManager = window.localStorage.getItem(managerKey);
-    let parsedManager = storedManager ? (JSON.parse(storedManager) as SelectedManager) : null;
-    // Migration: discard data from the old 1000-centred scale (ratings were ~700–1300) so
-    // returning testers re-appoint a manager on the new 0–100 scale instead of seeing stale numbers.
-    if (parsedManager && parsedManager.rating > MAX_MANAGER_SCORE) {
-      parsedManager = null;
+    // One-time reset when the score model changes, so returning testers re-appoint a manager
+    // and start from 0 on the current model instead of carrying stale scores from an old scale.
+    if (window.localStorage.getItem(scoreModelKey) !== SCORE_MODEL) {
       window.localStorage.removeItem(managerKey);
       window.localStorage.removeItem(managerScoreKey);
+      window.localStorage.removeItem(expertUnlockedKey);
+      window.localStorage.setItem(scoreModelKey, SCORE_MODEL);
     }
+
+    const storedManager = window.localStorage.getItem(managerKey);
+    const parsedManager = storedManager ? (JSON.parse(storedManager) as SelectedManager) : null;
     if (parsedManager) {
       setSelectedManager(parsedManager);
     }
     const storedScoreRaw = window.localStorage.getItem(managerScoreKey);
-    let storedManagerScore = storedScoreRaw !== null ? Number(storedScoreRaw) : parsedManager?.rating ?? STARTING_MANAGER_SCORE;
-    if (storedManagerScore > MAX_MANAGER_SCORE) {
-      storedManagerScore = parsedManager?.rating ?? STARTING_MANAGER_SCORE;
-    }
+    const storedManagerScore = storedScoreRaw !== null ? Number(storedScoreRaw) : parsedManager?.rating ?? STARTING_MANAGER_SCORE;
     setManagerScore(storedManagerScore);
     setCompletedLeagues(Number(window.localStorage.getItem(completedLeaguesKey) ?? 0));
     setExpertUnlockedEarned(window.localStorage.getItem(expertUnlockedKey) === "true" || isExpertUnlocked(storedManagerScore));
@@ -527,7 +528,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
       const currentScore = Number(window.localStorage.getItem(managerScoreKey) ?? managerScore);
       const wonTitle = finalStandings[0]?.managerId === "human";
       const delta = scoreDeltaForStanding(human, wonTitle);
-      const nextScore = Math.min(MAX_MANAGER_SCORE, Math.max(MIN_MANAGER_SCORE, currentScore + delta));
+      const nextScore = Math.max(MIN_MANAGER_SCORE, currentScore + delta);
       const wasExpert = hasExpertAccess(currentScore, expertUnlockedEarned);
       const nextExpert = hasExpertAccess(nextScore, wasExpert);
       setManagerScore(nextScore);
@@ -1253,7 +1254,7 @@ function SquadPanel({ picks, formationId, mode }: { picks: DraftPick[]; formatio
         mode,
         picks,
         mmr: STARTING_MANAGER_SCORE,
-        managerRating: STARTING_MANAGER_SCORE,
+        managerRating: 50,
         completedLeagues: 0,
         injuredPlayerIds: [],
         suspendedPlayerIds: [],

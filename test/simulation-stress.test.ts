@@ -162,7 +162,7 @@ describe("simulation engine — full minileague invariants (60 leagues)", () => 
         formationId: FORMATIONS[s % FORMATIONS.length],
         mode: "classic",
         completedLeagues: s % 7,
-        mmr: 55 + (s % 5) * 6,
+        mmr: 200 + (s % 5) * 180,
         seed: `league-${s}`
       });
 

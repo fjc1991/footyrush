@@ -6,8 +6,8 @@
 // This is reference data — spot-check / edit freely; nothing else depends on the names.
 //
 // The manager's rating is derived from finishing position (see managerRatingForPosition):
-// 1st ≈ 90, mid-table ≈ 65, 20th ≈ 42 (a 0–100 scale, capped at 100). Selecting a manager
-// sets the player's starting manager score and grants a slight simulation edge.
+// 1st = 100 … 20th = 5 (a 0–100 head-start). A player starts at 0, the appointed manager adds
+// this rating, and the score then climbs through results — expert mode unlocks at 1000.
 
 export interface ManagerEntry {
   teamCode: string;
@@ -174,11 +174,11 @@ export const MANAGER_POOL: ManagerEntry[] = [
 ];
 
 /**
- * Map a final league position (1 = champions … 20 = bottom) to a manager rating on the
- * same 0–100 scale as player ratings: 1st ≈ 90, mid-table ≈ 65, 20th ≈ 42. The score can
- * then climb toward the 100 cap through results.
+ * Map a final league position (1 = champions … 20 = bottom) to a manager rating, 0–100:
+ * 1st = 100, each place down is −5, 20th = 5. This rating is the head-start added to a
+ * player's starting score of 0, and also drives the slight simulation edge.
  */
 export function managerRatingForPosition(position: number): number {
   const clamped = Math.min(20, Math.max(1, position));
-  return Math.round(90 - (clamped - 1) * (48 / 19));
+  return Math.round(100 - (clamped - 1) * 5);
 }

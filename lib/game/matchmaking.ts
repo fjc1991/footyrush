@@ -20,13 +20,13 @@ export function getSkillBand(completedLeagues: number, mmr: number): string {
   if (completedLeagues < 3) {
     return "rookie";
   }
-  if (mmr < 55) {
+  if (mmr < 300) {
     return "bronze";
   }
-  if (mmr < 70) {
+  if (mmr < 600) {
     return "silver";
   }
-  if (mmr < 85) {
+  if (mmr < 900) {
     return "gold";
   }
   return "elite";
@@ -39,7 +39,7 @@ export function createMinileague(params: {
   mode: DraftMode;
   completedLeagues: number;
   mmr: number;
-  /** The human's chosen manager rating; falls back to mmr if not provided. */
+  /** The human's manager rating (0–100 quality, for the sim edge); defaults to an average 50. */
   managerRating?: number;
   seed: string;
 }): { id: string; managers: ManagerSquad[]; rounds: Fixture[][]; skillBand: string } {
@@ -53,7 +53,8 @@ export function createMinileague(params: {
     mode: params.mode,
     picks: params.humanPicks,
     mmr: params.mmr,
-    managerRating: params.managerRating ?? params.mmr,
+    // managerRating is the 0–100 manager-quality used for the sim edge, NOT the cumulative score.
+    managerRating: params.managerRating ?? 50,
     completedLeagues: params.completedLeagues,
     injuredPlayerIds: [],
     suspendedPlayerIds: [],
@@ -62,15 +63,17 @@ export function createMinileague(params: {
 
   const reserves = Array.from({ length: 5 }, (_, index) => {
     const formation = pickOne(FORMATION_LIST, rng).id;
-    const bandOffset = skillBand === "rookie" ? -6 : skillBand === "elite" ? 12 : skillBand === "gold" ? 5 : 0;
-    return autoDraftManager({
+    const bandOffset = skillBand === "rookie" ? -90 : skillBand === "elite" ? 170 : skillBand === "gold" ? 80 : 0;
+    const reserve = autoDraftManager({
       id: `reserve-${index + 1}`,
       displayName: reserveNames[(index + Math.floor(rng() * reserveNames.length)) % reserveNames.length],
       formationId: formation,
       seed: `${params.seed}:reserve:${index}`,
-      mmr: Math.round(params.mmr + bandOffset + (rng() - 0.5) * 6),
+      mmr: Math.max(0, Math.round(params.mmr + bandOffset + (rng() - 0.5) * 90)),
       completedLeagues: skillBand === "rookie" ? Math.floor(rng() * 3) : 3 + Math.floor(rng() * 20)
     });
+    // AI managers get an average 0–100 quality (45–65) so the human's pick is the edge that matters.
+    return { ...reserve, managerRating: 45 + Math.round(rng() * 20) };
   });
 
   const managers = [human, ...reserves];

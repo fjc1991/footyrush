@@ -1,9 +1,8 @@
 import type { Standing } from "./types";
 
-export const STARTING_MANAGER_SCORE = 65;
-export const MIN_MANAGER_SCORE = 30;
-export const MAX_MANAGER_SCORE = 100;
-export const EXPERT_SCORE_THRESHOLD = 80;
+export const STARTING_MANAGER_SCORE = 0;
+export const MIN_MANAGER_SCORE = 0;
+export const EXPERT_SCORE_THRESHOLD = 1000;
 
 export function isExpertUnlocked(score: number): boolean {
   return score >= EXPERT_SCORE_THRESHOLD;
@@ -19,9 +18,9 @@ export function expertProgress(score: number): number {
 }
 
 export function scoreDeltaForStanding(standing: Pick<Standing, "points" | "goalDifference" | "goalsFor">, wonTitle: boolean): number {
-  // Small per-league movements on the 0–100 scale: a title-winning run ≈ +8, a poor one ≈ -5.
-  const pointsScore = (standing.points - 7) * 0.45;
-  const goalDifferenceScore = Math.max(-2, Math.min(2, Math.round(standing.goalDifference * 0.3)));
-  const goalsForScore = Math.min(2, Math.floor(standing.goalsFor / 4));
-  return Math.round(pointsScore + goalDifferenceScore + goalsForScore + (wonTitle ? 2 : 0));
+  // Points accumulate toward the 1000 expert milestone: a title-winning run ≈ +38, a poor one ≈ -10.
+  const pointsScore = standing.points * 3 - 14;
+  const goalDifferenceScore = Math.max(-8, Math.min(8, standing.goalDifference));
+  const goalsForScore = Math.min(5, Math.floor(standing.goalsFor / 2));
+  return pointsScore + goalDifferenceScore + goalsForScore + (wonTitle ? 10 : 0);
 }

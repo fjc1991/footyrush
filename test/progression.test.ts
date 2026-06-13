@@ -29,8 +29,7 @@ describe("manager progression", () => {
     const strong = scoreDeltaForStanding({ points: 11, goalDifference: 5, goalsFor: 9 }, true);
     const poor = scoreDeltaForStanding({ points: 1, goalDifference: -7, goalsFor: 2 }, false);
 
-    expect(strong).toBeGreaterThan(poor);
-    expect(strong).toBeGreaterThan(4);
-    expect(poor).toBeLessThan(-2);
+    expect(strong).toBeGreaterThan(25);
+    expect(poor).toBeLessThan(-10);
   });
 });
