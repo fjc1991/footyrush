@@ -1,4 +1,5 @@
 import { effectiveRating } from "./data";
+import { applyBoostToRating } from "./boosts";
 import { getStarterSlots } from "./formations";
 import { clamp, createRng, pickOne } from "./rng";
 import type { DraftPick, Fixture, FixtureResult, FormationSlot, ManagerSquad, MatchEvent, Player, Standing } from "./types";
@@ -210,7 +211,7 @@ function getActiveStarters(manager: ManagerSquad): ActivePlayer[] {
     }
     return {
       pick: replacement,
-      rating: replacement ? effectiveRating(replacement.player, slot.target) - 2 : starter.effectiveRating - 9,
+      rating: replacement ? applyBoostToRating(effectiveRating(replacement.player, slot.target), replacement.boost, replacement.boostActive) - 2 : starter.effectiveRating - 9,
       slot
     };
   });
@@ -220,7 +221,7 @@ function selectBestSub(picks: DraftPick[], target: DraftPick["target"], excluded
   return (
     picks
       .filter((pick) => pick.target === "SUB" && !excludedIds.includes(pick.player.i))
-      .map((pick) => ({ pick, rating: effectiveRating(pick.player, target) }))
+      .map((pick) => ({ pick, rating: applyBoostToRating(effectiveRating(pick.player, target), pick.boost, pick.boostActive) }))
       .filter((entry) => entry.rating > 0)
       .sort((first, second) => second.rating - first.rating)[0]?.pick ?? null
   );
@@ -325,7 +326,13 @@ function chooseScorerAt(manager: ManagerSquad, second: number, offMap: Map<numbe
   const picks = availablePicks.length > 0 ? availablePicks : manager.picks;
   const weighted = picks.flatMap((pick) => {
     const attackingPosition = pick.player.p.some((position) => ["ST", "CF", "LW", "RW", "CAM"].includes(position));
-    const weight = attackingPosition ? 8 : pick.player.p.includes("CM") ? 4 : 1;
+    const boostWeight =
+      pick.boostActive && (pick.boost?.id === "poacher" || pick.boost?.id === "talisman")
+        ? 3
+        : pick.boostActive && pick.boost?.id === "playmaker"
+          ? 1
+          : 0;
+    const weight = (attackingPosition ? 8 : pick.player.p.includes("CM") ? 4 : 1) + boostWeight;
     return Array.from({ length: weight }, () => pick.player);
   });
   if (weighted.length > 0) {

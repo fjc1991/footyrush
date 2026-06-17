@@ -1,11 +1,12 @@
 "use client";
 
-import { Activity, BarChart3, Gamepad2, HeartPulse, LogIn, Mail, Moon, Play, Shield, Shirt, Shuffle, Sun, Timer, Trophy, Users } from "lucide-react";
+import { Activity, BarChart3, BadgeInfo, ChevronRight, Gamepad2, HeartPulse, Lock, LogIn, Mail, Moon, Play, Shield, Shirt, Shuffle, Sparkles, Sun, Timer, Trophy, Users } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { en } from "@/lib/i18n/en";
 import { FORMATION_LIST, getStarterSlots } from "@/lib/game/formations";
-import { getNextDraftSlot, makeDraftPick } from "@/lib/game/draft";
-import { loadFootballData, spinForSlot, getFootballData } from "@/lib/game/data";
+import { autoDraftManager, getDraftSlots, getOpenDraftSlots, makeDraftPick } from "@/lib/game/draft";
+import { loadFootballData, spinForOpenSlots, getFootballData } from "@/lib/game/data";
+import { BOOST_LIMIT } from "@/lib/game/boosts";
 import { MANAGER_POOL, managerRatingForPosition } from "@/lib/game/managers";
 import { createMinileague } from "@/lib/game/matchmaking";
 import { renderCommentary } from "@/lib/game/commentary";
@@ -41,7 +42,7 @@ import type {
 
 type Copy = typeof en;
 type Theme = "dark" | "light";
-type Phase = "setup" | "draft" | "league" | "complete";
+type Phase = "setup" | "draft" | "league" | "complete" | "exhibition";
 type MainView = "play" | "leaderboards";
 
 interface LocalProfile {
@@ -66,6 +67,14 @@ function ordinal(n: number): string {
   return n + (s[(v - 20) % 10] ?? s[v] ?? s[0]);
 }
 
+function fitLabelFor(fit: number): "perfect" | "good" | "okay" {
+  return fit >= 1 ? "perfect" : fit >= 0.9 ? "good" : "okay";
+}
+
+function fitTextFor(fit: number): string {
+  return fit >= 1 ? "Perfect" : fit >= 0.9 ? "Good fit" : "Okay";
+}
+
 interface GuestStatus {
   allowed: boolean;
   played: boolean;
@@ -80,17 +89,27 @@ interface LeagueState {
   results: FixtureResult[];
 }
 
+interface ExhibitionState {
+  home: ManagerSquad;
+  away: ManagerSquad;
+  result: FixtureResult;
+}
+
 const profileKey = "footyrush.profile";
 const recordsKey = "footyrush.leaderboardRecords";
 const localGuestKey = "footyrush.guestPlayed";
 const managerScoreKey = "footyrush.mmr";
 const managerKey = "footyrush.manager";
+const managerSpinsKey = "footyrush.managerSpinsLeft";
+const snapshotsKey = "footyrush.communitySnapshots";
 const scoreModelKey = "footyrush.scoreModel";
 // Bump when the manager-score model changes so returning testers reset cleanly.
 const SCORE_MODEL = "v3-zero-to-1000";
 const completedLeaguesKey = "footyrush.completedLeagues";
 const expertUnlockedKey = "footyrush.expertUnlocked";
 const TESTING_MODE = process.env.NEXT_PUBLIC_TESTING_MODE === "true";
+const DRAFT_RESHUFFLE_LIMIT = 5;
+const MANAGER_SPIN_LIMIT = 3;
 
 export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: string }) {
   const [theme, setTheme] = useState<Theme>("dark");
@@ -115,10 +134,14 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
   const [readyToRecord, setReadyToRecord] = useState(false);
   const [selectedSub, setSelectedSub] = useState<string | null>(null);
   const [spinning, setSpinning] = useState(false);
+  const [slotPickerCandidateId, setSlotPickerCandidateId] = useState<number | null>(null);
+  const [draftReshufflesLeft, setDraftReshufflesLeft] = useState(DRAFT_RESHUFFLE_LIMIT);
   const [dataReady, setDataReady] = useState(false);
   const [dataError, setDataError] = useState(false);
   const [managerScore, setManagerScore] = useState(STARTING_MANAGER_SCORE);
   const [selectedManager, setSelectedManager] = useState<SelectedManager | null>(null);
+  const [managerSpinsLeft, setManagerSpinsLeft] = useState(MANAGER_SPIN_LIMIT);
+  const [managerSpinning, setManagerSpinning] = useState(false);
   const [completedLeagues, setCompletedLeagues] = useState(0);
   const [expertUnlockedEarned, setExpertUnlockedEarned] = useState(false);
   const [lastScoreDelta, setLastScoreDelta] = useState<number | null>(null);
@@ -127,10 +150,15 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
   const [scoreFlashing, setScoreFlashing] = useState(false);
   const [lastFlashedGoalCount, setLastFlashedGoalCount] = useState(0);
   const [roundSummaryData, setRoundSummaryData] = useState<{ round: number; fixtures: FixtureResult[]; managers: ManagerSquad[] } | null>(null);
+  const [exhibition, setExhibition] = useState<ExhibitionState | null>(null);
+  const [exhibitionSecond, setExhibitionSecond] = useState(0);
+  const [exhibitionPlaying, setExhibitionPlaying] = useState(false);
 
-  const nextSlot = useMemo(() => getNextDraftSlot(formationId, picks), [formationId, picks]);
-  const draftComplete = picks.length === 16;
+  const draftSlots = useMemo(() => getDraftSlots(formationId), [formationId]);
+  const openSlots = useMemo(() => getOpenDraftSlots(formationId, picks), [formationId, picks]);
+  const draftComplete = openSlots.length === 0;
   const usedPlayerIds = useMemo(() => new Set(picks.map((pick) => pick.player.i)), [picks]);
+  const activeBoostCount = useMemo(() => picks.filter((pick) => pick.boostActive).length, [picks]);
   const standings = useMemo(() => (league ? computeStandings(league.managers, league.results) : []), [league]);
   const currentRoundFixtures = league?.rounds[league.currentRound] ?? [];
   const currentHumanFixture = currentRoundFixtures.find((fixture) => fixture.homeId === "human" || fixture.awayId === "human");
@@ -142,15 +170,22 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
   // Live score = goals that have actually happened by the current minute, not the final result.
   const liveHomeGoals = visibleEvents.filter((event) => event.code === "goal" && event.teamId === currentHumanFixture?.homeId).length;
   const liveAwayGoals = visibleEvents.filter((event) => event.code === "goal" && event.teamId === currentHumanFixture?.awayId).length;
+  const exhibitionEvents = useMemo(
+    () => exhibition?.result.events.filter((event) => event.second <= exhibitionSecond) ?? [],
+    [exhibition, exhibitionSecond]
+  );
+  const exhibitionHomeGoals = exhibitionEvents.filter((event) => event.code === "goal" && event.teamId === "human").length;
+  const exhibitionAwayGoals = exhibitionEvents.filter((event) => event.code === "goal" && event.teamId === exhibition?.away.id).length;
   const leaderboard = useMemo(
     () => aggregateLeaderboard([...demoLeaderboardRecords(), ...leaderboardRecords], leaderboardPeriod),
     [leaderboardPeriod, leaderboardRecords]
   );
   const expertUnlocked = hasExpertAccess(managerScore, expertUnlockedEarned);
   const draftMode: DraftMode = expertUnlocked ? "expert" : "classic";
-  const draftStatus = phase === "complete" ? "Complete" : `${picks.length}/16`;
-  const leagueStatus = phase === "complete" ? "Complete" : league ? `Round ${Math.min(league.currentRound + 1, 5)}/5` : "Not joined";
+  const draftStatus = phase === "complete" || phase === "exhibition" ? "Complete" : `${picks.length}/${draftSlots.length}`;
+  const leagueStatus = phase === "complete" ? "Complete" : phase === "exhibition" ? "Exhibition" : league ? `Round ${Math.min(league.currentRound + 1, 5)}/5` : "Not joined";
   const humanStanding = standings.find((standing) => standing.managerId === "human");
+  const pendingCandidate = spin?.candidates.find((candidate) => candidate.player.i === slotPickerCandidateId) ?? null;
   const latestHumanInjury = [...visibleEvents]
     .reverse()
     .find((event) => event.code === "injury" && event.teamId === "human" && !selectedSub);
@@ -187,6 +222,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     if (window.localStorage.getItem(scoreModelKey) !== SCORE_MODEL) {
       window.localStorage.removeItem(managerKey);
       window.localStorage.removeItem(managerScoreKey);
+      window.localStorage.removeItem(managerSpinsKey);
       window.localStorage.removeItem(expertUnlockedKey);
       window.localStorage.setItem(scoreModelKey, SCORE_MODEL);
     }
@@ -199,6 +235,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     const storedScoreRaw = window.localStorage.getItem(managerScoreKey);
     const storedManagerScore = storedScoreRaw !== null ? Number(storedScoreRaw) : parsedManager?.rating ?? STARTING_MANAGER_SCORE;
     setManagerScore(storedManagerScore);
+    setManagerSpinsLeft(Number(window.localStorage.getItem(managerSpinsKey) ?? MANAGER_SPIN_LIMIT));
     setCompletedLeagues(Number(window.localStorage.getItem(completedLeaguesKey) ?? 0));
     setExpertUnlockedEarned(window.localStorage.getItem(expertUnlockedKey) === "true" || isExpertUnlocked(storedManagerScore));
 
@@ -265,6 +302,24 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
   }, [isPlaying, matchSpeed]);
 
   useEffect(() => {
+    if (!exhibitionPlaying) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      setExhibitionSecond((second) => {
+        if (second >= 90) {
+          window.clearInterval(timer);
+          setExhibitionPlaying(false);
+          return 90;
+        }
+        return second + 1;
+      });
+    }, 1000 / matchSpeed);
+
+    return () => window.clearInterval(timer);
+  }, [exhibitionPlaying, matchSpeed]);
+
+  useEffect(() => {
     const goalCount = visibleEvents.filter((e) => e.code === "goal").length;
     if (goalCount > lastFlashedGoalCount) {
       setScoreFlashing(true);
@@ -283,26 +338,37 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
   // Appoint a random real manager from the pool. Their finish-derived rating becomes the
   // starting manager score (replacing the old flat 1000) and grants a slight simulation edge.
   function shuffleManager() {
-    const entry = MANAGER_POOL[Math.floor(Math.random() * MANAGER_POOL.length)];
-    const rating = managerRatingForPosition(entry.position);
-    let teamName = entry.teamCode;
-    try {
-      teamName = getFootballData().teams[entry.teamCode]?.name ?? entry.teamCode;
-    } catch {
-      // Football data not loaded yet — fall back to the team code.
+    if (managerSpinning || managerSpinsLeft <= 0) {
+      return;
     }
-    const next: SelectedManager = {
-      teamCode: entry.teamCode,
-      teamName,
-      year: entry.year,
-      manager: entry.manager,
-      position: entry.position,
-      rating
-    };
-    setSelectedManager(next);
-    window.localStorage.setItem(managerKey, JSON.stringify(next));
-    setManagerScore(rating);
-    window.localStorage.setItem(managerScoreKey, String(rating));
+    const nextSpinsLeft = managerSpinsLeft - 1;
+    setManagerSpinsLeft(nextSpinsLeft);
+    window.localStorage.setItem(managerSpinsKey, String(nextSpinsLeft));
+    setManagerSpinning(true);
+
+    window.setTimeout(() => {
+      const entry = MANAGER_POOL[Math.floor(Math.random() * MANAGER_POOL.length)];
+      const rating = managerRatingForPosition(entry.position);
+      let teamName = entry.teamCode;
+      try {
+        teamName = getFootballData().teams[entry.teamCode]?.name ?? entry.teamCode;
+      } catch {
+        // Football data not loaded yet — fall back to the team code.
+      }
+      const next: SelectedManager = {
+        teamCode: entry.teamCode,
+        teamName,
+        year: entry.year,
+        manager: entry.manager,
+        position: entry.position,
+        rating
+      };
+      setSelectedManager(next);
+      window.localStorage.setItem(managerKey, JSON.stringify(next));
+      setManagerScore(rating);
+      window.localStorage.setItem(managerScoreKey, String(rating));
+      setManagerSpinning(false);
+    }, 820);
   }
 
   // Wipe all local progress back to a brand-new-user state. Used by the admin testing
@@ -314,9 +380,13 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     window.localStorage.removeItem(expertUnlockedKey);
     window.localStorage.removeItem(localGuestKey);
     window.localStorage.removeItem(managerKey);
+    window.localStorage.removeItem(managerSpinsKey);
+    window.localStorage.removeItem(snapshotsKey);
     setLeaderboardRecords([]);
     setManagerScore(STARTING_MANAGER_SCORE);
     setSelectedManager(null);
+    setManagerSpinsLeft(MANAGER_SPIN_LIMIT);
+    setManagerSpinning(false);
     setCompletedLeagues(0);
     setExpertUnlockedEarned(false);
     setExpertUnlockedThisRun(false);
@@ -334,6 +404,11 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     setIsPlaying(false);
     setReadyToRecord(false);
     setSelectedSub(null);
+    setSlotPickerCandidateId(null);
+    setDraftReshufflesLeft(DRAFT_RESHUFFLE_LIMIT);
+    setExhibition(null);
+    setExhibitionSecond(0);
+    setExhibitionPlaying(false);
     setExpertUnlockedThisRun(false);
     setPhase(nextPhase);
   }
@@ -343,25 +418,40 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
   }
 
   function spinRound() {
-    if (!nextSlot || spinning) {
+    if (openSlots.length === 0 || spinning || !dataReady) {
       return;
     }
+    const consumesReshuffle = Boolean(spin);
+    if (consumesReshuffle && draftReshufflesLeft <= 0) {
+      return;
+    }
+    if (consumesReshuffle) {
+      setDraftReshufflesLeft((left) => Math.max(0, left - 1));
+    }
     setSpin(null);
+    setSlotPickerCandidateId(null);
     setSpinning(true);
     const seed = `${Date.now()}:${picks.length}:${formationId}`;
     window.setTimeout(() => {
-      setSpin(spinForSlot(nextSlot, usedPlayerIds, seed));
+      setSpin(spinForOpenSlots(openSlots, usedPlayerIds, seed));
       setSpinning(false);
     }, 650);
   }
 
-  function queueSpinForSlot(slot: FormationSlot, nextPicks: DraftPick[]) {
+  function queueSpinForOpenSlots(nextPicks: DraftPick[]) {
+    const nextOpenSlots = getOpenDraftSlots(formationId, nextPicks);
+    if (nextOpenSlots.length === 0) {
+      setSpin(null);
+      setSlotPickerCandidateId(null);
+      return;
+    }
     setSpin(null);
+    setSlotPickerCandidateId(null);
     setSpinning(true);
     const nextUsedPlayerIds = new Set(nextPicks.map((pick) => pick.player.i));
     const seed = `${Date.now()}:${nextPicks.length}:${formationId}`;
     window.setTimeout(() => {
-      setSpin(spinForSlot(slot, nextUsedPlayerIds, seed));
+      setSpin(spinForOpenSlots(nextOpenSlots, nextUsedPlayerIds, seed));
       setSpinning(false);
     }, 500);
   }
@@ -373,7 +463,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     setSelectedSub(subName);
   }
 
-  function choosePlayer(candidateIndex: number) {
+  function choosePlayer(candidateIndex: number, slotId?: string) {
     if (!spin) {
       return;
     }
@@ -381,22 +471,33 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     if (!candidate || usedPlayerIds.has(candidate.player.i)) {
       return;
     }
+    const slotOption =
+      slotId !== undefined
+        ? candidate.slotOptions.find((option) => option.slotId === slotId)
+        : candidate.slotOptions.length === 1
+          ? candidate.slotOptions[0]
+          : null;
+    if (!slotOption) {
+      setSlotPickerCandidateId(candidate.player.i);
+      return;
+    }
+    const slot = draftSlots.find((entry) => entry.id === slotOption.slotId);
+    if (!slot) {
+      return;
+    }
 
     const nextPick = makeDraftPick({
-      slot: spin.slot,
+      slot,
       teamCode: spin.teamCode,
       teamName: spin.teamName,
       year: spin.year,
-      candidate
+      candidate,
+      slotOption,
+      boostActive: Boolean(candidate.boost && activeBoostCount < BOOST_LIMIT)
     });
     const nextPicks = [...picks, nextPick];
     setPicks(nextPicks);
-    const upcomingSlot = getNextDraftSlot(formationId, nextPicks);
-    if (upcomingSlot) {
-      queueSpinForSlot(upcomingSlot, nextPicks);
-    } else {
-      setSpin(null);
-    }
+    queueSpinForOpenSlots(nextPicks);
   }
 
   function canEnterLeague(): boolean {
@@ -545,6 +646,113 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
       setGuestStatus({ allowed: false, played: true });
     }
 
+    saveCommunitySnapshot(completedLeague);
+    setPhase("complete");
+  }
+
+  function readCommunitySnapshots(): ManagerSquad[] {
+    try {
+      const stored = window.localStorage.getItem(snapshotsKey);
+      return stored ? (JSON.parse(stored) as ManagerSquad[]) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function saveCommunitySnapshot(completedLeague: LeagueState) {
+    const human = completedLeague.managers.find((manager) => manager.id === "human");
+    if (!human) {
+      return;
+    }
+    const snapshot: ManagerSquad = {
+      ...human,
+      id: `snapshot-${Date.now()}`,
+      displayName: `${profile?.displayName ?? "Guest Manager"} XI`,
+      kind: "reserve",
+      source: "snapshot",
+      injuredPlayerIds: [],
+      suspendedPlayerIds: [],
+      substitutions: {}
+    };
+    const snapshots = [snapshot, ...readCommunitySnapshots()].slice(0, 8);
+    window.localStorage.setItem(snapshotsKey, JSON.stringify(snapshots));
+  }
+
+  function buildDemoSnapshot(): ManagerSquad | null {
+    try {
+      const demo = autoDraftManager({
+        id: "snapshot-demo",
+        displayName: "Northbank 98 XI",
+        formationId: "4-3-3",
+        seed: "footyrush-community-demo",
+        mmr: 640,
+        completedLeagues: 4
+      });
+      return {
+        ...demo,
+        kind: "reserve",
+        source: "snapshot",
+        managerRating: 58,
+        injuredPlayerIds: [],
+        suspendedPlayerIds: [],
+        substitutions: {}
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  function getCommunityOpponent(): ManagerSquad | null {
+    const snapshots = readCommunitySnapshots();
+    return snapshots[1] ?? buildDemoSnapshot();
+  }
+
+  function startExhibition() {
+    if (!league || !dataReady) {
+      return;
+    }
+    const human = league.managers.find((manager) => manager.id === "human");
+    const opponent = getCommunityOpponent();
+    if (!human || !opponent) {
+      return;
+    }
+    const home: ManagerSquad = {
+      ...human,
+      injuredPlayerIds: [],
+      suspendedPlayerIds: [],
+      substitutions: {}
+    };
+    const away: ManagerSquad = {
+      ...opponent,
+      id: opponent.id === "human" ? "snapshot-opponent" : opponent.id,
+      kind: "reserve",
+      source: "snapshot",
+      injuredPlayerIds: [],
+      suspendedPlayerIds: [],
+      substitutions: {}
+    };
+    const fixture = { id: `exhibition-${Date.now()}`, round: 1, homeId: "human", awayId: away.id };
+    const result = simulateFixture({
+      fixture,
+      home,
+      away,
+      seed: `${fixture.id}:${home.displayName}:${away.displayName}`
+    });
+    setExhibition({ home, away, result });
+    setExhibitionSecond(0);
+    setExhibitionPlaying(true);
+    setPhase("exhibition");
+  }
+
+  function finishExhibitionNow() {
+    setExhibitionSecond(90);
+    setExhibitionPlaying(false);
+  }
+
+  function returnFromExhibition() {
+    setExhibition(null);
+    setExhibitionSecond(0);
+    setExhibitionPlaying(false);
     setPhase("complete");
   }
 
@@ -654,11 +862,36 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     resetDraft("setup");
   }
 
+  const assistantMood =
+    phase === "complete" && humanStanding && humanStanding.points >= 8
+      ? "happy"
+      : phase === "complete" && humanStanding && humanStanding.points <= 3
+        ? "sad"
+        : phase === "draft" || phase === "league" || phase === "exhibition"
+          ? "thinking"
+          : "ready";
+  const assistantLine =
+    phase === "setup"
+      ? selectedManager
+        ? `You have ${managerSpinsLeft} manager spin${managerSpinsLeft === 1 ? "" : "s"} left. Pick a shape and start the draft.`
+        : "Spin the manager wheel, then pick a shape for the squad."
+      : phase === "draft"
+        ? draftComplete
+          ? "Squad is full. Take it into the historical league."
+          : spin
+            ? `This draw is ${spin.teamName} ${spin.year}. Pick any player, then assign their role.`
+            : `Open roles: ${openSlots.slice(0, 4).map((slot) => slot.label).join(", ")}${openSlots.length > 4 ? "..." : ""}. Spin a club-season when ready.`
+        : phase === "league"
+          ? "These are historical opponents. Your season result goes to the real-player leaderboard."
+          : phase === "exhibition"
+            ? "This exhibition is just for pride. No score, injuries or leaderboard points are changed."
+            : "Season recorded. Try the community exhibition or build another squad.";
+
   return (
     <main className="app-shell">
       <header className="topbar">
         <div className="brand-lockup">
-          <div className="brand-mark">FR</div>
+          <FootyRushLogo />
           <div>
             <p className="eyebrow">{copy.appName}</p>
             <h1>{copy.tagline}</h1>
@@ -718,15 +951,21 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
         <button
           type="button"
           className={`tab-button${view === "leaderboards" ? " active" : ""}`}
-          onClick={() => !isPlaying && setView("leaderboards")}
-          disabled={isPlaying}
-          title={isPlaying ? copy.tabLockedHint : undefined}
+          onClick={() => !isPlaying && !exhibitionPlaying && setView("leaderboards")}
+          disabled={isPlaying || exhibitionPlaying}
+          title={isPlaying || exhibitionPlaying ? copy.tabLockedHint : undefined}
         >
           <BarChart3 size={17} />
           {copy.tabLeaderboards}
-          {isPlaying && <span className="tab-lock">· {copy.tabLive}</span>}
+          {(isPlaying || exhibitionPlaying) && <span className="tab-lock">· {copy.tabLive}</span>}
         </button>
       </nav>
+
+      {view === "play" && (
+        <section className="assistant-strip" aria-label="Assistant tip">
+          <ManagerAvatar mood={assistantMood} line={assistantLine} compact />
+        </section>
+      )}
 
       {view === "leaderboards" && (
         <LeaderboardsScreen
@@ -745,7 +984,18 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
             <p>{copy.setupCopy}</p>
 
             <div className="manager-pick">
-              {selectedManager ? (
+              {managerSpinning ? (
+                <>
+                  <p className="eyebrow">Manager wheel</p>
+                  <div className="manager-wheel" aria-live="polite">
+                    <span>Guardiola</span>
+                    <span>Klopp</span>
+                    <span>Arteta</span>
+                    <span>Tuchel</span>
+                  </div>
+                  <p className="manager-pick-prompt">Revealing your appointment...</p>
+                </>
+              ) : selectedManager ? (
                 <>
                   <div className="manager-pick-head">
                     <p className="eyebrow">Your manager</p>
@@ -755,10 +1005,17 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                   <span className="manager-pick-club">
                     {selectedManager.teamName} {selectedManager.year} · finished {ordinal(selectedManager.position)}
                   </span>
-                  <button className="secondary-button wide" type="button" onClick={shuffleManager}>
+                  <span className="spin-bank">{managerSpinsLeft} manager spin{managerSpinsLeft === 1 ? "" : "s"} left</span>
+                  <button className="secondary-button wide" type="button" onClick={shuffleManager} disabled={managerSpinsLeft <= 0 || managerSpinning}>
                     <Shuffle size={16} />
                     Re-shuffle manager
                   </button>
+                  {managerSpinsLeft <= 0 && (
+                    <button className="secondary-button wide locked-button" type="button" disabled>
+                      <Lock size={16} />
+                      Extra spins coming later
+                    </button>
+                  )}
                 </>
               ) : (
                 <>
@@ -766,7 +1023,8 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                   <p className="manager-pick-prompt">
                     Shuffle to draw a real manager. Their league finish sets your starting score and a slight match-day edge.
                   </p>
-                  <button className="primary-button wide" type="button" onClick={shuffleManager}>
+                  <span className="spin-bank">{managerSpinsLeft} manager spins available</span>
+                  <button className="primary-button wide" type="button" onClick={shuffleManager} disabled={managerSpinsLeft <= 0 || managerSpinning}>
                     <Shuffle size={16} />
                     Shuffle manager
                   </button>
@@ -781,7 +1039,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                 expertUnlocked={expertUnlocked}
               />
             )}
-            <button className="primary-button" type="button" onClick={startDraft} disabled={!selectedManager}>
+            <button className="primary-button" type="button" onClick={startDraft} disabled={!selectedManager || managerSpinning}>
               <Play size={18} />
               {copy.startDraft}
             </button>
@@ -802,10 +1060,6 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                 </button>
               ))}
             </div>
-            <ManagerAvatar
-              mood="ready"
-              line="Pick your shape, gaffer. We'll draft the bodies to fit it."
-            />
           </div>
         </section>
       )}
@@ -816,9 +1070,9 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
             <div className="panel-header">
               <div>
                 <p className="eyebrow">
-                  {copy.draftRound} {Math.min(picks.length + 1, 16)} / 16
+                  {copy.draftRound} {Math.min(picks.length + 1, draftSlots.length)} / {draftSlots.length}
                 </p>
-                <h2>{nextSlot ? `Fill ${nextSlot.label}` : "Squad complete"}</h2>
+                <h2>{draftComplete ? "Squad complete" : "Spin team/year, then assign a role"}</h2>
               </div>
               {dataError ? (
                 <button className="secondary-button" type="button" onClick={loadData}>
@@ -826,11 +1080,32 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                   Data failed to load — retry
                 </button>
               ) : (
-                <button className="secondary-button" type="button" onClick={spinRound} disabled={!nextSlot || spinning || !dataReady}>
-                  <Shuffle size={17} className={spinning ? "spin-icon" : ""} />
-                  {!dataReady ? "Loading…" : spinning ? "Drawing…" : copy.spin}
-                </button>
+                <div className="draft-spin-controls">
+                  <span className="spin-bank">{draftReshufflesLeft} reshuffle{draftReshufflesLeft === 1 ? "" : "s"} left</span>
+                  <button
+                    className="secondary-button"
+                    type="button"
+                    onClick={spinRound}
+                    disabled={draftComplete || spinning || !dataReady || (Boolean(spin) && draftReshufflesLeft <= 0)}
+                  >
+                    <Shuffle size={17} className={spinning ? "spin-icon" : ""} />
+                    {!dataReady ? "Loading..." : spinning ? "Drawing..." : spin ? "Re-spin draw" : copy.spin}
+                  </button>
+                  {spin && draftReshufflesLeft <= 0 && (
+                    <button className="secondary-button locked-button" type="button" disabled>
+                      <Lock size={16} />
+                      Extra reshuffles later
+                    </button>
+                  )}
+                </div>
               )}
+            </div>
+
+            <div className="fit-explainer">
+              <BadgeInfo size={16} />
+              <span><strong>Perfect</strong> is a natural role.</span>
+              <span><strong>Good Fit</strong> is an adjacent role with a small penalty.</span>
+              <span><strong>Okay</strong> is an emergency fit.</span>
             </div>
 
             {spin ? (
@@ -841,25 +1116,66 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                   <span>YEAR</span>
                   <strong>{spin.year}</strong>
                   <small>{spin.teamName}</small>
+                  <small>Open roles: {openSlots.slice(0, 5).map((slot) => slot.label).join(", ")}{openSlots.length > 5 ? "..." : ""}</small>
                 </div>
+                {pendingCandidate && (
+                  <div className="slot-picker">
+                    <div>
+                      <p className="eyebrow">Assign role</p>
+                      <strong>{pendingCandidate.player.n}</strong>
+                    </div>
+                    <div className="slot-option-grid">
+                      {pendingCandidate.slotOptions.map((option) => {
+                        const optionFitLabel = fitLabelFor(option.fit);
+                        const candidateIndex = spin.candidates.findIndex((entry) => entry.player.i === pendingCandidate.player.i);
+                        return (
+                          <button
+                            key={option.slotId}
+                            type="button"
+                            className={`slot-option ${optionFitLabel}`}
+                            onClick={() => choosePlayer(candidateIndex, option.slotId)}
+                          >
+                            <span>{option.slotLabel}</span>
+                            <strong>{fitTextFor(option.fit)}</strong>
+                            {draftMode === "classic" && <small>{Math.round(option.effectiveRating)} OVR</small>}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
                 <div className="candidate-grid">
                   {spin.candidates.map((candidate, index) => {
-                    const fitLabel = candidate.fit >= 1 ? "perfect" : candidate.fit >= 0.9 ? "good" : "okay";
-                    const fitText = candidate.fit >= 1 ? "■ Perfect" : candidate.fit >= 0.9 ? "▲ Good fit" : "● Okay";
+                    const fitLabel = fitLabelFor(candidate.fit);
+                    const fitText = fitTextFor(candidate.fit);
                     const cardFitClass = draftMode === "classic" ? ` ${fitLabel}` : "";
+                    const boostWillActivate = Boolean(candidate.boost && activeBoostCount < BOOST_LIMIT);
                     return (
-                      <button className={`player-card fm-card${cardFitClass}`} key={candidate.player.i} type="button" onClick={() => choosePlayer(index)}>
+                      <div className={`player-card fm-card${cardFitClass}`} key={candidate.player.i}>
                         <div className="fm-card-top">
-                          <span className="card-pos">{spin.slot.label}</span>
+                          <span className="card-pos">{candidate.slotOptions.length} role{candidate.slotOptions.length === 1 ? "" : "s"}</span>
                           {draftMode === "classic" ? (
                             <span className="card-ovr">{Math.round(candidate.effectiveRating)}</span>
                           ) : (
                             <span className="card-ovr hidden">?</span>
                           )}
                         </div>
-                        <span className="shirt">#{candidate.player.num}</span>
+                        <span className="player-shirt">
+                          <Shirt size={42} strokeWidth={1.7} />
+                          <span>{candidate.player.num}</span>
+                        </span>
                         <strong>{candidate.player.n}</strong>
                         <span className="card-positions">{candidate.player.p.join(" / ")}</span>
+                        <span className="role-targets">
+                          {candidate.slotOptions.slice(0, 3).map((option) => option.slotLabel).join(" · ")}
+                          {candidate.slotOptions.length > 3 ? " · +" : ""}
+                        </span>
+                        {candidate.boost && (
+                          <span className={`boost-badge${boostWillActivate ? "" : " inactive"}`}>
+                            <Sparkles size={13} />
+                            {candidate.boost.label}{boostWillActivate ? "" : " (inactive)"}
+                          </span>
+                        )}
                         {draftMode === "classic" ? (
                           <>
                             <span className={`fit-badge ${fitLabel}`}>{fitText}</span>
@@ -877,7 +1193,11 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                           <div className="hidden-stats">Stats hidden</div>
                         )}
                         <span className="team-chip">{spin.teamCode} &apos;{String(spin.year).slice(2)}</span>
-                      </button>
+                        <button className="primary-button pick-button" type="button" onClick={() => choosePlayer(index)}>
+                          {candidate.slotOptions.length === 1 ? `Add to ${candidate.slotOptions[0].slotLabel}` : "Pick role"}
+                          <ChevronRight size={16} />
+                        </button>
+                      </div>
                     );
                   })}
                 </div>
@@ -889,21 +1209,10 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                   <span className="empty-state-icon">
                     <Shuffle size={28} />
                   </span>
-                  <p>Spin a club-season draw for the next open slot.</p>
+                  <p>Spin a club-season draw for the remaining open roles.</p>
                 </div>
               </div>
             )}
-
-            <ManagerAvatar
-              mood={draftComplete ? "happy" : "thinking"}
-              line={
-                draftComplete
-                  ? "That's a squad I can work with. Take us to the league."
-                  : nextSlot
-                    ? `Need a ${nextSlot.label} next. Spin the draw and I'll size up the options.`
-                    : "Spin the draw and let's see who turns up."
-              }
-            />
 
             {draftComplete && (
               <button className="primary-button wide" type="button" onClick={enterLeague}>
@@ -922,7 +1231,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
           <div className="panel match-panel">
             <div className="panel-header">
               <div>
-                <p className="eyebrow">Minileague · {league.skillBand}</p>
+                <p className="eyebrow">Historical league · {league.skillBand}</p>
                 <h2>Round {league.currentRound + 1}</h2>
               </div>
               <div className="timer">
@@ -1081,29 +1390,91 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                 <Shuffle size={18} />
                 Build another squad
               </button>
+              <button className="secondary-button" type="button" onClick={startExhibition} disabled={!dataReady}>
+                <Users size={18} />
+                Community exhibition
+              </button>
               <button className="secondary-button" type="button" onClick={() => setView("leaderboards")}>
                 <BarChart3 size={18} />
                 View leaderboards
               </button>
             </div>
-            <ManagerAvatar
-              mood={
-                humanStanding && humanStanding.points >= 8
-                  ? "happy"
-                  : humanStanding && humanStanding.points <= 3
-                    ? "sad"
-                    : "thinking"
-              }
-              line={
-                humanStanding && humanStanding.points >= 8
-                  ? "Top work out there. The board's noticed — check the tables."
-                  : humanStanding && humanStanding.points <= 3
-                    ? "Tough window. The board wants answers — let's go again."
-                    : "We live to fight another window. Reload and go again."
-              }
-            />
           </div>
           <StandingsPanel standings={standings} />
+        </section>
+      )}
+
+      {view === "play" && phase === "exhibition" && exhibition && (
+        <section className="league-layout matchday exhibition-layout">
+          <div className="panel match-panel">
+            <div className="panel-header">
+              <div>
+                <p className="eyebrow">Community exhibition</p>
+                <h2>One-off match</h2>
+              </div>
+              <div className="timer">
+                <Timer size={18} />
+                {exhibitionSecond}&apos;
+              </div>
+            </div>
+            <MatchHeader
+              home={exhibition.home}
+              away={exhibition.away}
+              started
+              homeGoals={exhibitionHomeGoals}
+              awayGoals={exhibitionAwayGoals}
+            />
+            <div className="commentary-log" aria-live="polite">
+              {exhibitionEvents.map((event) => (
+                <div
+                  className={`commentary-line${event.code === "goal" ? " goal-flash" : event.code === "red_card" ? " red-flash" : ""}`}
+                  key={event.id}
+                >
+                  <span>{event.second}&apos;</span>
+                  <p>{renderCommentary(event, locale)}</p>
+                </div>
+              ))}
+            </div>
+            <div className="match-actions">
+              <div className="speed-controls" aria-label="Match speed">
+                {([1, 2, 4] as const).map((speed) => (
+                  <button
+                    key={speed}
+                    type="button"
+                    className={matchSpeed === speed ? "active" : ""}
+                    onClick={() => setMatchSpeed(speed)}
+                  >
+                    {speed}x
+                  </button>
+                ))}
+              </div>
+              {exhibitionPlaying ? (
+                <button className="secondary-button" type="button" onClick={finishExhibitionNow}>
+                  Finish now
+                </button>
+              ) : (
+                <button className="primary-button" type="button" onClick={returnFromExhibition}>
+                  Back to season review
+                </button>
+              )}
+            </div>
+          </div>
+          <div className="side-stack">
+            <div className="panel exhibition-note">
+              <p className="eyebrow">No stakes</p>
+              <h2>Friendly only</h2>
+              <p>This match does not change manager score, injuries, standings or leaderboard points.</p>
+            </div>
+            <div className="panel squad-panel">
+              <div className="panel-header">
+                <div>
+                  <p className="eyebrow">Opponent snapshot</p>
+                  <h2>{exhibition.away.displayName}</h2>
+                </div>
+              </div>
+              <FormationPitch picks={exhibition.away.picks} formationId={exhibition.away.formationId} />
+            </div>
+          </div>
         </section>
       )}
 
@@ -1207,6 +1578,21 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
   );
 }
 
+function FootyRushLogo() {
+  return (
+    <div className="brand-mark" aria-hidden="true">
+      <svg viewBox="0 0 64 64" className="brand-logo">
+        <path className="brand-logo-trail" d="M 8 40 C 17 28 28 22 46 20" />
+        <path className="brand-logo-trail short" d="M 11 49 C 22 39 34 34 55 33" />
+        <circle className="brand-logo-ball" cx="40" cy="26" r="13" />
+        <path className="brand-logo-seam" d="M 32 18 L 40 13 L 48 18 L 45 29 L 35 29 Z" />
+        <path className="brand-logo-seam" d="M 28 27 L 35 29 M 45 29 L 53 27 M 32 18 L 28 27 M 48 18 L 53 27" />
+      </svg>
+      <span>FR</span>
+    </div>
+  );
+}
+
 function ProgressionPanel({
   score,
   completedLeagues,
@@ -1245,6 +1631,7 @@ function ProgressionPanel({
 }
 
 function SquadPanel({ picks, formationId, mode }: { picks: DraftPick[]; formationId: string; mode: DraftMode }) {
+  const activeBoosts = picks.filter((pick) => pick.boostActive).length;
   const strength = picks.length === 16
     ? calculateSquadStrength({
         id: "preview",
@@ -1272,6 +1659,12 @@ function SquadPanel({ picks, formationId, mode }: { picks: DraftPick[]; formatio
         {strength && <strong className="rating-chip">{Math.round(strength.overall)}</strong>}
       </div>
       <FormationPitch picks={picks} formationId={formationId} />
+      {picks.length > 0 && (
+        <div className="boost-cap">
+          <Sparkles size={14} />
+          <span>{activeBoosts}/{BOOST_LIMIT} active player boosts</span>
+        </div>
+      )}
     </div>
   );
 }
@@ -1348,16 +1741,17 @@ function FormationPitch({
                 key={pick.slotId}
                 className="pitch-player"
                 style={{ left: `${xPct}%`, top: `${yPct}%` }}
-                title={`${pick.player.n} · ${pick.target} · ${pick.teamCode} '${String(pick.year).slice(2)}`}
+                title={`${pick.player.n} · ${pick.slotLabel} · ${pick.teamCode} '${String(pick.year).slice(2)}${pick.boostActive && pick.boost ? ` · ${pick.boost.label}` : ""}`}
               >
                 <span className={tokenClass}>
                   <Shirt size={34} strokeWidth={1.5} className="kit-icon" />
                   <span className="kit-num">{pick.player.num}</span>
                   {isInjured && <span className="token-flag injury">＋</span>}
                   {isSuspended && <span className="token-flag susp">▌</span>}
+                  {pick.boostActive && <span className="token-flag boost">B</span>}
                 </span>
                 <span className="pitch-name">{lastName}</span>
-                <span className="pitch-pos">{pick.target}</span>
+                <span className="pitch-pos">{pick.slotLabel}</span>
               </div>
             );
           });
@@ -1372,6 +1766,8 @@ function FormationPitch({
               <div key={pick.slotId} className={`bench-player${isOut ? " out" : ""}`} title={pick.player.n}>
                 <span className="bench-num">{pick.player.num}</span>
                 <span>{pick.player.n.split(/[\s.]+/).filter(Boolean).slice(-1)[0]}</span>
+                <small>{pick.benchRole}</small>
+                {pick.boostActive && <span className="bench-boost">B</span>}
               </div>
             );
           })}
@@ -1431,18 +1827,26 @@ function MatchHeader({
   return (
     <div className="scoreboard">
       <div>
-        <span>{home?.kind === "reserve" ? "Reserve" : "You"}</span>
+        <span>{managerSourceLabel(home)}</span>
         <strong>{home?.displayName}</strong>
       </div>
       <div className={`score${flashing ? " flashing" : ""}`}>
         {started ? `${homeGoals} – ${awayGoals}` : "v"}
       </div>
       <div>
-        <span>{away?.kind === "reserve" ? "Reserve" : "You"}</span>
+        <span>{managerSourceLabel(away)}</span>
         <strong>{away?.displayName}</strong>
       </div>
     </div>
   );
+}
+
+function managerSourceLabel(manager?: ManagerSquad): string {
+  if (!manager) return "";
+  if (manager.kind === "human" || manager.source === "human") return "You";
+  if (manager.source === "historical") return "Historical";
+  if (manager.source === "snapshot") return "Community";
+  return "Reserve";
 }
 
 function StandingsPanel({ standings }: { standings: ReturnType<typeof computeStandings> }) {
@@ -1450,7 +1854,7 @@ function StandingsPanel({ standings }: { standings: ReturnType<typeof computeSta
     <div className="panel table-panel">
       <div className="panel-header">
         <div>
-          <p className="eyebrow">Minileague</p>
+          <p className="eyebrow">Historical league</p>
           <h2>Standings</h2>
         </div>
         <Trophy size={21} />
@@ -1708,10 +2112,18 @@ const MANAGER_MOOD: Record<string, { brow: string; mouth: string; arm: string }>
   }
 };
 
-function ManagerAvatar({ mood = "ready", line }: { mood?: "ready" | "thinking" | "happy" | "sad"; line: string }) {
+function ManagerAvatar({
+  mood = "ready",
+  line,
+  compact = false
+}: {
+  mood?: "ready" | "thinking" | "happy" | "sad";
+  line: string;
+  compact?: boolean;
+}) {
   const config = MANAGER_MOOD[mood] ?? MANAGER_MOOD.ready;
   return (
-    <div className="manager-avatar">
+    <div className={`manager-avatar${compact ? " compact" : ""}`}>
       <div className={`manager-figure ${config.arm}`}>
         <svg viewBox="0 0 100 120" width="76" height="92" role="img" aria-label="Team manager">
           {/* ground shadow */}

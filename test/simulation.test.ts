@@ -1,10 +1,10 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import rawData from "../data.json";
 import { effectiveRating, seedFootballData } from "@/lib/game/data";
-import { autoDraftManager } from "@/lib/game/draft";
+import { autoDraftManager, draftTeamSeasonSquad } from "@/lib/game/draft";
 import { getStarterSlots } from "@/lib/game/formations";
 import type { RawFootballData } from "@/lib/game/types";
-import { buildRoundRobin } from "@/lib/game/matchmaking";
+import { buildRoundRobin, createMinileague } from "@/lib/game/matchmaking";
 import { applyFixtureInjuries, calculateSquadStrength, computeStandings, simulateFixture } from "@/lib/game/simulation";
 
 describe("match simulation", () => {
@@ -91,6 +91,29 @@ describe("match simulation", () => {
     expect(strength.attack).toBeCloseTo(expectedAttack, 5);
   });
 
+  it("active boosts increase squad strength", () => {
+    const picks = draftTeamSeasonSquad({
+      teamCode: "MCI",
+      year: 2023,
+      formationId: "4-3-3",
+      seed: "boost-strength"
+    });
+    const boosted = {
+      ...autoDraftManager({ id: "boosted", displayName: "Boosted", formationId: "4-3-3", seed: "boosted-shell" }),
+      picks
+    };
+    const inactive = {
+      ...boosted,
+      picks: picks.map((pick) => ({
+        ...pick,
+        boostActive: false,
+        effectiveRating: pick.baseEffectiveRating
+      }))
+    };
+
+    expect(calculateSquadStrength(boosted).overall).toBeGreaterThan(calculateSquadStrength(inactive).overall);
+  });
+
   it("can interleave away goals before home goals in mixed scorelines", () => {
     const { home, away, fixture } = makeManagers();
     let foundAwayBeforeHome = false;
@@ -116,5 +139,24 @@ describe("match simulation", () => {
     const rounds = buildRoundRobin(managers);
     expect(rounds).toHaveLength(5);
     expect(rounds.every((round) => round.length === 3)).toBe(true);
+  });
+
+  it("creates historical club-season opponents for minileagues", () => {
+    const humanPicks = autoDraftManager({ id: "human", displayName: "Human", formationId: "4-3-3", seed: "human-history" }).picks;
+    const league = createMinileague({
+      humanPicks,
+      humanName: "Tester",
+      formationId: "4-3-3",
+      mode: "classic",
+      completedLeagues: 4,
+      mmr: 500,
+      seed: "historical-league"
+    });
+    const opponents = league.managers.filter((manager) => manager.id !== "human");
+
+    expect(opponents).toHaveLength(5);
+    expect(opponents.every((manager) => manager.source === "historical")).toBe(true);
+    expect(opponents.every((manager) => manager.picks.length === 16)).toBe(true);
+    expect(opponents.every((manager) => manager.picks.filter((pick) => pick.target === "SUB").length === 5)).toBe(true);
   });
 });

@@ -1,11 +1,16 @@
-import type { Formation, FormationSlot, Position } from "./types";
+import type { BenchRole, Formation, FormationSlot, Position } from "./types";
 
-const benchSlots: FormationSlot[] = Array.from({ length: 5 }, (_, index) => ({
-  id: `SUB${index + 1}`,
-  label: `SUB ${index + 1}`,
-  target: "SUB",
-  line: "bench"
-}));
+const benchSlots: FormationSlot[] = [
+  benchSlot("SUB_GK", "SUB GK", "GK"),
+  benchSlot("SUB_DEF", "SUB DEF", "DEF"),
+  benchSlot("SUB_MID1", "SUB MID 1", "MID"),
+  benchSlot("SUB_MID2", "SUB MID 2", "MID"),
+  benchSlot("SUB_ATT", "SUB ATT", "ATT")
+];
+
+function benchSlot(id: string, label: string, benchRole: BenchRole): FormationSlot {
+  return { id, label, target: "SUB", line: "bench", benchRole };
+}
 
 function slot(id: string, target: Position, line: FormationSlot["line"]): FormationSlot {
   return { id, label: id, target, line };

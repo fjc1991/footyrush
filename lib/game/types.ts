@@ -17,7 +17,17 @@ export type Position =
 
 export type DraftMode = "classic" | "expert";
 export type ManagerKind = "human" | "reserve";
+export type ManagerSource = "human" | "reserve" | "historical" | "snapshot";
 export type Period = "daily" | "weekly" | "monthly";
+export type BenchRole = "GK" | "DEF" | "MID" | "ATT";
+export type PlayerBoostId = "talisman" | "playmaker" | "poacher" | "engine" | "stopper" | "sweeper_keeper";
+
+export interface PlayerBoost {
+  id: PlayerBoostId;
+  label: string;
+  description: string;
+  ratingBonus: number;
+}
 
 export interface Player {
   i: number;
@@ -51,6 +61,7 @@ export interface FormationSlot {
   label: string;
   target: Position | "SUB";
   line: "keeper" | "defense" | "midfield" | "attack" | "bench";
+  benchRole?: BenchRole;
 }
 
 export interface Formation {
@@ -63,12 +74,18 @@ export interface DraftPick {
   slotId: string;
   slotLabel: string;
   target: Position | "SUB";
+  line: FormationSlot["line"];
+  benchRole?: BenchRole;
+  roleTarget?: Position;
   teamCode: string;
   teamName: string;
   year: number;
   player: Player;
   fit: number;
+  baseEffectiveRating: number;
   effectiveRating: number;
+  boost?: PlayerBoost;
+  boostActive: boolean;
 }
 
 export interface SpinResult {
@@ -76,20 +93,35 @@ export interface SpinResult {
   teamName: string;
   year: number;
   slot: FormationSlot;
+  openSlots: FormationSlot[];
   candidates: DraftCandidate[];
   redraws: number;
+}
+
+export interface DraftSlotOption {
+  slotId: string;
+  slotLabel: string;
+  target: Position | "SUB";
+  line: FormationSlot["line"];
+  benchRole?: BenchRole;
+  roleTarget?: Position;
+  fit: number;
+  effectiveRating: number;
 }
 
 export interface DraftCandidate {
   player: Player;
   fit: number;
   effectiveRating: number;
+  slotOptions: DraftSlotOption[];
+  boost?: PlayerBoost;
 }
 
 export interface ManagerSquad {
   id: string;
   displayName: string;
   kind: ManagerKind;
+  source?: ManagerSource;
   formationId: string;
   mode: DraftMode;
   picks: DraftPick[];

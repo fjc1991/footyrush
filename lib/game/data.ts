@@ -1,6 +1,9 @@
 import { clamp, createRng, pickOne, shuffle } from "./rng";
+import { getPlayerBoost } from "./boosts";
 import type {
+  BenchRole,
   DraftCandidate,
+  DraftSlotOption,
   FormationSlot,
   Player,
   Position,
@@ -49,6 +52,13 @@ const centralPairs: Record<string, Position[]> = {
   CAM: ["CM", "CF"],
   CF: ["ST", "CAM"],
   ST: ["CF"]
+};
+
+const benchRoleTargets: Record<BenchRole, Position[]> = {
+  GK: ["GK"],
+  DEF: ["CB", "LB", "RB", "LWB", "RWB", "CDM"],
+  MID: ["CM", "CDM", "CAM", "LM", "RM"],
+  ATT: ["ST", "CF", "LW", "RW", "CAM"]
 };
 
 export function squadKey(teamCode: string, year: number): string {
@@ -120,6 +130,58 @@ export function effectiveRating(player: Player, target: Position | "SUB"): numbe
   return clamp(player.o * fit + roleBonus / 10, 1, 99);
 }
 
+export function slotOptionForPlayer(player: Player, slot: FormationSlot): DraftSlotOption | null {
+  if (slot.line === "bench" && slot.benchRole) {
+    const best = benchRoleTargets[slot.benchRole]
+      .map((target) => ({
+        roleTarget: target,
+        fit: positionFit(target, player.p),
+        effectiveRating: effectiveRating(player, target)
+      }))
+      .filter((option) => option.fit > 0)
+      .sort((first, second) => second.effectiveRating - first.effectiveRating || second.fit - first.fit)[0];
+
+    if (!best) {
+      return null;
+    }
+    return {
+      slotId: slot.id,
+      slotLabel: slot.label,
+      target: slot.target,
+      line: slot.line,
+      benchRole: slot.benchRole,
+      roleTarget: best.roleTarget,
+      fit: best.fit,
+      effectiveRating: best.effectiveRating
+    };
+  }
+
+  if (slot.target === "SUB") {
+    return null;
+  }
+
+  const fit = positionFit(slot.target, player.p);
+  if (fit <= 0) {
+    return null;
+  }
+  return {
+    slotId: slot.id,
+    slotLabel: slot.label,
+    target: slot.target,
+    line: slot.line,
+    roleTarget: slot.target,
+    fit,
+    effectiveRating: effectiveRating(player, slot.target)
+  };
+}
+
+export function getSlotOptionsForPlayer(player: Player, slots: FormationSlot[]): DraftSlotOption[] {
+  return slots
+    .map((slot) => slotOptionForPlayer(player, slot))
+    .filter((option): option is DraftSlotOption => option !== null)
+    .sort((first, second) => second.effectiveRating - first.effectiveRating || second.fit - first.fit);
+}
+
 export function getCandidates(
   teamCode: string,
   year: number,
@@ -128,13 +190,47 @@ export function getCandidates(
 ): DraftCandidate[] {
   return getSquad(teamCode, year)
     .filter((player) => !usedPlayerIds.has(player.i))
-    .map((player) => ({
-      player,
-      fit: positionFit(slot.target, player.p),
-      effectiveRating: effectiveRating(player, slot.target)
-    }))
-    .filter((candidate) => candidate.fit > 0)
+    .map((player) => {
+      const option = slotOptionForPlayer(player, slot);
+      const boost = getPlayerBoost(player);
+      return option
+        ? {
+            player,
+            fit: option.fit,
+            effectiveRating: option.effectiveRating,
+            slotOptions: [option],
+            ...(boost ? { boost } : {})
+          }
+        : null;
+    })
+    .filter((candidate): candidate is DraftCandidate => candidate !== null)
     .sort((first, second) => second.effectiveRating - first.effectiveRating);
+}
+
+export function getFlexibleCandidates(
+  teamCode: string,
+  year: number,
+  openSlots: FormationSlot[],
+  usedPlayerIds: Set<number>
+): DraftCandidate[] {
+  return getSquad(teamCode, year)
+    .filter((player) => !usedPlayerIds.has(player.i))
+    .map((player) => {
+      const slotOptions = getSlotOptionsForPlayer(player, openSlots);
+      const best = slotOptions[0];
+      const boost = getPlayerBoost(player);
+      return best
+        ? {
+            player,
+            fit: best.fit,
+            effectiveRating: best.effectiveRating,
+            slotOptions,
+            ...(boost ? { boost } : {})
+          }
+        : null;
+    })
+    .filter((candidate): candidate is DraftCandidate => candidate !== null)
+    .sort((first, second) => second.effectiveRating - first.effectiveRating || second.fit - first.fit);
 }
 
 export function spinForSlot(slot: FormationSlot, usedPlayerIds: Set<number>, seed = `${Date.now()}:${Math.random()}`): SpinResult {
@@ -151,6 +247,7 @@ export function spinForSlot(slot: FormationSlot, usedPlayerIds: Set<number>, see
         teamName: getTeamName(teamCode),
         year,
         slot,
+        openSlots: [slot],
         candidates: candidates.slice(0, 8),
         redraws
       };
@@ -159,6 +256,39 @@ export function spinForSlot(slot: FormationSlot, usedPlayerIds: Set<number>, see
   }
 
   throw new Error(`No legal candidates are available for ${slot.label}.`);
+}
+
+export function spinForOpenSlots(
+  openSlots: FormationSlot[],
+  usedPlayerIds: Set<number>,
+  seed = `${Date.now()}:${Math.random()}`
+): SpinResult {
+  if (openSlots.length === 0) {
+    throw new Error("No open draft slots are available.");
+  }
+
+  const data = getFootballData();
+  const rng = createRng(seed);
+  const combos = shuffle(data.combos, rng);
+  let redraws = 0;
+
+  for (const [teamCode, year] of combos) {
+    const candidates = getFlexibleCandidates(teamCode, year, openSlots, usedPlayerIds);
+    if (candidates.length > 0) {
+      return {
+        teamCode,
+        teamName: getTeamName(teamCode),
+        year,
+        slot: openSlots[0],
+        openSlots,
+        candidates: candidates.slice(0, 8),
+        redraws
+      };
+    }
+    redraws += 1;
+  }
+
+  throw new Error("No legal candidates are available for the remaining squad slots.");
 }
 
 export function chooseWeightedCandidate(candidates: DraftCandidate[], seed: string): DraftCandidate {
