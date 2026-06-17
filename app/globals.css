@@ -1364,6 +1364,21 @@ p {
   30% { background: color-mix(in srgb, var(--danger) 28%, var(--panel-strong)); }
 }
 
+/* Bright two-colour flash for a goal, settling on the persistent highlighted box. */
+@keyframes goalLineFlash {
+  0%   { background: color-mix(in srgb, var(--amber) 60%, var(--panel-strong)); box-shadow: 0 0 0 2px var(--amber), 0 0 24px color-mix(in srgb, var(--amber) 55%, transparent); }
+  25%  { background: color-mix(in srgb, var(--accent) 65%, var(--panel-strong)); box-shadow: 0 0 0 2px var(--accent), 0 0 24px color-mix(in srgb, var(--accent) 55%, transparent); }
+  50%  { background: color-mix(in srgb, var(--amber) 60%, var(--panel-strong)); box-shadow: 0 0 0 2px var(--amber), 0 0 24px color-mix(in srgb, var(--amber) 55%, transparent); }
+  75%  { background: color-mix(in srgb, var(--accent) 65%, var(--panel-strong)); box-shadow: 0 0 0 2px var(--accent), 0 0 24px color-mix(in srgb, var(--accent) 55%, transparent); }
+  100% { background: color-mix(in srgb, var(--accent) 24%, var(--panel-strong)); box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent); }
+}
+
+@keyframes goalIconPop {
+  0%   { transform: scale(0.4) rotate(-25deg); opacity: 0; }
+  55%  { transform: scale(1.25) rotate(8deg); opacity: 1; }
+  100% { transform: scale(1) rotate(0deg); opacity: 1; }
+}
+
 .spin-icon {
   animation: spinDrum 0.55s linear infinite;
 }
@@ -1382,7 +1397,28 @@ p {
 .player-card:nth-child(8) { animation: cardIn 0.18s ease-out 0.49s both; }
 
 .commentary-line.goal-flash {
-  animation: goalFlash 0.5s ease-out;
+  background: color-mix(in srgb, var(--accent) 24%, var(--panel-strong));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent);
+  animation: goalLineFlash 1.4s ease-out;
+}
+
+.commentary-line.goal-flash span {
+  color: var(--amber);
+}
+
+.commentary-line.goal-flash p {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: #ffffff;
+  font-weight: 800;
+}
+
+.goal-icon {
+  flex-shrink: 0;
+  color: var(--amber);
+  transform-origin: center;
+  animation: goalIconPop 0.5s ease-out;
 }
 
 .commentary-line.red-flash {

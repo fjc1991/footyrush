@@ -1,6 +1,6 @@
 "use client";
 
-import { Activity, BarChart3, BadgeInfo, ChevronRight, Gamepad2, HeartPulse, Lock, LogIn, Mail, Moon, Play, Shield, Shirt, Shuffle, Sparkles, Sun, Timer, Trophy, Users } from "lucide-react";
+import { Activity, BarChart3, BadgeInfo, ChevronRight, Gamepad2, Goal, HeartPulse, Lock, LogIn, Mail, Moon, Play, Shield, Shirt, Shuffle, Sparkles, Sun, Timer, Trophy, Users } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { en } from "@/lib/i18n/en";
 import { FORMATION_LIST, getStarterSlots } from "@/lib/game/formations";
@@ -1290,7 +1290,10 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                       key={event.id}
                     >
                       <span>{event.second}&apos;</span>
-                      <p>{renderCommentary(event, locale)}</p>
+                      <p>
+                        {event.code === "goal" && <Goal className="goal-icon" size={18} aria-label="Goal" />}
+                        {renderCommentary(event, locale)}
+                      </p>
                     </div>
                   ))}
                 </div>
@@ -1450,7 +1453,10 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                   key={event.id}
                 >
                   <span>{event.second}&apos;</span>
-                  <p>{renderCommentary(event, locale)}</p>
+                  <p>
+                    {event.code === "goal" && <Goal className="goal-icon" size={18} aria-label="Goal" />}
+                    {renderCommentary(event, locale)}
+                  </p>
                 </div>
               ))}
             </div>
