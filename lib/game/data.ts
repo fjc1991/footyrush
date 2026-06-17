@@ -248,7 +248,7 @@ export function spinForSlot(slot: FormationSlot, usedPlayerIds: Set<number>, see
         year,
         slot,
         openSlots: [slot],
-        candidates: candidates.slice(0, 8),
+        candidates,
         redraws
       };
     }
@@ -281,7 +281,7 @@ export function spinForOpenSlots(
         year,
         slot: openSlots[0],
         openSlots,
-        candidates: candidates.slice(0, 8),
+        candidates,
         redraws
       };
     }

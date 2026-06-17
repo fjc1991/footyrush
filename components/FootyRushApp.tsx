@@ -1119,10 +1119,28 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                   <small>Open roles: {openSlots.slice(0, 5).map((slot) => slot.label).join(", ")}{openSlots.length > 5 ? "..." : ""}</small>
                 </div>
                 {pendingCandidate && (
-                  <div className="slot-picker">
-                    <div>
-                      <p className="eyebrow">Assign role</p>
-                      <strong>{pendingCandidate.player.n}</strong>
+                  <div
+                    className="slot-picker-overlay"
+                    role="dialog"
+                    aria-modal="true"
+                    aria-label={`Assign a role to ${pendingCandidate.player.n}`}
+                    onClick={() => setSlotPickerCandidateId(null)}
+                  >
+                    <div className="slot-picker" onClick={(event) => event.stopPropagation()}>
+                    <div className="slot-picker-head">
+                      <div>
+                        <p className="eyebrow">Assign role</p>
+                        <strong>{pendingCandidate.player.n}</strong>
+                        <span className="slot-picker-positions">{pendingCandidate.player.p.join(" / ")}</span>
+                      </div>
+                      <button
+                        className="slot-picker-close"
+                        type="button"
+                        onClick={() => setSlotPickerCandidateId(null)}
+                        aria-label="Cancel role selection"
+                      >
+                        ×
+                      </button>
                     </div>
                     <div className="slot-option-grid">
                       {pendingCandidate.slotOptions.map((option) => {
@@ -1141,6 +1159,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                           </button>
                         );
                       })}
+                    </div>
                     </div>
                   </div>
                 )}
