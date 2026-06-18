@@ -47,6 +47,8 @@ export function simulateFixture(params: {
   home: ManagerSquad;
   away: ManagerSquad;
   seed: string;
+  homeExpectedGoalsModifier?: number;
+  awayExpectedGoalsModifier?: number;
 }): FixtureResult {
   const rng = createRng(params.seed);
   const homeStrength = calculateSquadStrength(params.home);
@@ -54,8 +56,25 @@ export function simulateFixture(params: {
   // Slight edge from manager quality: a full ~48-point rating gap (0–100 scale) shifts each
   // side's expected goals by ~0.24, so a better manager nudges results without overriding the squad.
   const managerEdge = (params.home.managerRating - params.away.managerRating) / 200;
-  const homeExpected = clamp(1.15 + (homeStrength.attack - awayStrength.defense) / 21 + (homeStrength.overall - awayStrength.overall) / 32 + 0.08 + managerEdge, 0.15, 3.6);
-  const awayExpected = clamp(1.05 + (awayStrength.attack - homeStrength.defense) / 21 + (awayStrength.overall - homeStrength.overall) / 32 - managerEdge, 0.15, 3.6);
+  const homeExpected = clamp(
+    1.15 +
+      (homeStrength.attack - awayStrength.defense) / 21 +
+      (homeStrength.overall - awayStrength.overall) / 32 +
+      0.08 +
+      managerEdge +
+      (params.homeExpectedGoalsModifier ?? 0),
+    0.15,
+    3.6
+  );
+  const awayExpected = clamp(
+    1.05 +
+      (awayStrength.attack - homeStrength.defense) / 21 +
+      (awayStrength.overall - homeStrength.overall) / 32 -
+      managerEdge +
+      (params.awayExpectedGoalsModifier ?? 0),
+    0.15,
+    3.6
+  );
   const homeGoals = sampleGoals(homeExpected, rng);
   const awayGoals = sampleGoals(awayExpected, rng);
   const events: MatchEvent[] = [

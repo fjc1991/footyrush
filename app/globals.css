@@ -434,6 +434,7 @@ p {
 }
 
 .choice-card span,
+.choice-card small,
 .player-card span,
 .player-card small {
   display: block;
@@ -1001,7 +1002,7 @@ p {
 
 .commentary-log {
   display: flex;
-  flex-direction: column-reverse;
+  flex-direction: column;
   gap: 8px;
   min-height: 120px;
   max-height: 380px;
@@ -1639,6 +1640,131 @@ p {
 
 .prematch-stat span {
   color: var(--muted);
+}
+
+.season-pregame {
+  gap: 14px;
+}
+
+.season-event-card {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.season-event-card.active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, var(--panel));
+}
+
+.season-event-card.danger {
+  border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, var(--panel));
+}
+
+.season-event-card strong,
+.season-result-row strong {
+  display: block;
+}
+
+.season-event-card p {
+  margin: 4px 0 0;
+}
+
+.inline-actions {
+  justify-content: flex-start;
+  margin-top: 10px;
+}
+
+.season-results {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px dashed var(--line);
+}
+
+.compact-header {
+  margin-bottom: 10px;
+}
+
+.compact-header h2 {
+  margin-bottom: 0;
+  font-size: 1.1rem;
+}
+
+.season-result-row {
+  display: grid;
+  grid-template-columns: 34px 70px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  padding: 9px 10px;
+  background: var(--panel-strong);
+  border: 1px solid transparent;
+  border-radius: 8px;
+}
+
+.season-result-row span {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  color: #06110b;
+  font-size: 0.78rem;
+  font-weight: 950;
+}
+
+.season-result-row.outcome-w span {
+  background: var(--accent);
+}
+
+.season-result-row.outcome-d span {
+  background: var(--amber);
+}
+
+.season-result-row.outcome-l {
+  border-color: var(--danger);
+}
+
+.season-result-row.outcome-l span {
+  background: var(--danger);
+  color: #fff;
+}
+
+.season-result-row small {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.season-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.season-stat-grid div {
+  padding: 10px;
+  border-radius: 8px;
+  background: var(--panel-strong);
+}
+
+.season-stat-grid span {
+  display: block;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.season-stat-grid strong {
+  display: block;
+  margin-top: 3px;
+  font-size: 1.12rem;
 }
 
 .manager-quote {
