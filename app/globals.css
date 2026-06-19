@@ -3640,3 +3640,612 @@ body,
 h2 {
   letter-spacing: -0.01em;
 }
+
+/* ============================================================
+   FootyRush — brand color and motion pass
+   ============================================================ */
+:root,
+:root[data-theme="light"] {
+  --display-font: Impact, Haettenschweiler, "Arial Black", "Segoe UI Black", fantasy;
+  --brand-blue: #1877f2;
+  --brand-blue-deep: #123c8c;
+  --brand-teal: #12c8a3;
+  --brand-gold: #ffc638;
+  --brand-orange: #ff7a1a;
+  --brand-rose: #ff3d6e;
+  --brand-violet: #6c4df6;
+  --edge-light: #8ec2ff;
+  --edge-core: #1877f2;
+  --edge-deep: #123c8c;
+  --motion-shadow: 0 16px 34px rgba(18, 60, 140, 0.16);
+}
+
+:root[data-theme="dark"] {
+  --brand-blue: #6aa6ff;
+  --brand-blue-deep: #2355ba;
+  --brand-teal: #32e2bd;
+  --brand-gold: #ffd86a;
+  --brand-orange: #ff9a45;
+  --brand-rose: #ff6f95;
+  --brand-violet: #9a86ff;
+  --edge-light: #bfd9ff;
+  --edge-core: #6aa6ff;
+  --edge-deep: #2355ba;
+  --motion-shadow: 0 18px 42px rgba(0, 0, 0, 0.52);
+}
+
+@property --edge-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
+@keyframes footyrush-edge-spin {
+  to {
+    --edge-angle: 360deg;
+  }
+}
+
+h1,
+h2,
+.eyebrow {
+  letter-spacing: 0;
+}
+
+.topbar {
+  padding: 16px 20px;
+  background:
+    radial-gradient(520px 140px at 96% -36%, rgba(18, 200, 163, 0.36), transparent 64%),
+    radial-gradient(420px 160px at -8% 10%, rgba(255, 198, 56, 0.24), transparent 60%),
+    linear-gradient(120deg, #123c8c 0%, #1764c7 46%, #1a4aa3 74%, #0c7c72 100%);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow: 0 18px 44px rgba(18, 60, 140, 0.2);
+}
+
+.brand-lockup {
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+
+.brand-lockup > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.topbar .eyebrow {
+  margin: 0;
+  color: #ffffff;
+  font-family: var(--display-font);
+  font-size: clamp(1.45rem, 2.6vw, 2.15rem);
+  font-weight: 900;
+  line-height: 0.92;
+  text-shadow: 0 3px 0 rgba(4, 18, 46, 0.18), 0 12px 28px rgba(0, 0, 0, 0.22);
+}
+
+.topbar h1 {
+  max-width: none;
+  color: rgba(255, 255, 255, 0.86);
+  font-size: clamp(0.82rem, 1.35vw, 1rem);
+  font-weight: 800;
+  line-height: 1.25;
+}
+
+.brand-mark {
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.96), rgba(236, 246, 255, 0.92));
+  color: var(--brand-blue-deep);
+  box-shadow: 0 10px 28px rgba(2, 19, 52, 0.18);
+}
+
+.brand-logo-ball,
+.brand-logo-trail {
+  fill: var(--brand-blue);
+  stroke: var(--brand-blue);
+}
+
+.brand-logo-seam {
+  stroke: #ffffff;
+}
+
+.topbar .icon-button,
+.topbar .profile-pill,
+.lang-btn {
+  background: rgba(255, 255, 255, 0.13);
+  border-color: rgba(255, 255, 255, 0.25);
+  color: #ffffff;
+}
+
+.lang-btn.active,
+.topbar .icon-button:hover:not(:disabled),
+.topbar .profile-pill:hover:not(:disabled) {
+  background: #ffffff;
+  color: var(--brand-blue-deep);
+  border-color: #ffffff;
+}
+
+.status-strip div {
+  --tile-accent: var(--brand-blue);
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--tile-accent) 10%, var(--panel)) 0%, var(--panel) 74%);
+  border-bottom: 2px solid color-mix(in srgb, var(--tile-accent) 62%, transparent);
+}
+
+.status-strip div:nth-child(2) {
+  --tile-accent: var(--brand-teal);
+}
+
+.status-strip div:nth-child(3) {
+  --tile-accent: var(--brand-gold);
+}
+
+.status-strip div:nth-child(4) {
+  --tile-accent: var(--brand-violet);
+}
+
+.setup-grid {
+  background:
+    radial-gradient(640px 320px at 82% 12%, color-mix(in srgb, var(--brand-teal) 10%, transparent), transparent 62%),
+    radial-gradient(620px 300px at 12% 4%, color-mix(in srgb, var(--brand-blue) 10%, transparent), transparent 64%),
+    color-mix(in srgb, var(--panel) 86%, transparent);
+  border: 1px solid color-mix(in srgb, var(--brand-blue) 12%, var(--line));
+}
+
+.setup-grid .mode-grid,
+.main-tabs {
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--brand-blue) 8%, var(--panel-strong)), color-mix(in srgb, var(--brand-teal) 7%, var(--panel-strong)));
+}
+
+.primary-button:not(.locked-button):not(:disabled) {
+  background: linear-gradient(135deg, var(--brand-rose), var(--brand-orange));
+  border-color: transparent;
+  color: #ffffff;
+}
+
+.primary-button:not(.locked-button):hover:not(:disabled) {
+  box-shadow: 0 14px 30px color-mix(in srgb, var(--brand-rose) 30%, transparent);
+}
+
+.tab-button.active {
+  background: linear-gradient(135deg, var(--brand-blue), var(--brand-violet));
+  border-color: transparent;
+  color: #ffffff;
+}
+
+.secondary-button:hover:not(:disabled),
+.formation-button:hover:not(:disabled),
+.choice-card:hover:not(:disabled),
+.tab-button:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--brand-blue) 55%, var(--line));
+}
+
+.choice-card.active,
+.formation-button.active,
+.segmented .active {
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--brand-blue) 10%, var(--panel)), color-mix(in srgb, var(--brand-teal) 8%, var(--panel)));
+  border-color: transparent;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--brand-blue) 72%, transparent), var(--shadow-sm);
+}
+
+.formation-glyph-pitch {
+  fill: color-mix(in srgb, var(--brand-blue) 10%, var(--panel));
+}
+
+.formation-glyph-dot,
+.formation-button.active .formation-glyph-dot {
+  fill: var(--brand-blue);
+}
+
+.choice-card,
+.formation-button,
+.tab-button,
+.primary-button:not(.locked-button),
+.secondary-button,
+.pick-button,
+.slot-option,
+.segmented button {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  transition:
+    transform 180ms cubic-bezier(0.2, 0.85, 0.25, 1.35),
+    box-shadow 180ms ease,
+    border-color 180ms ease,
+    background 180ms ease;
+}
+
+.choice-card::after,
+.formation-button::after,
+.tab-button::after,
+.primary-button:not(.locked-button)::after,
+.secondary-button::after,
+.pick-button::after,
+.slot-option::after,
+.segmented button::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  padding: 2px;
+  border-radius: inherit;
+  background:
+    conic-gradient(
+      from var(--edge-angle),
+      color-mix(in srgb, var(--edge-core) 35%, transparent),
+      var(--edge-light) 80deg,
+      var(--edge-core) 160deg,
+      var(--edge-deep) 250deg,
+      var(--edge-core) 320deg,
+      color-mix(in srgb, var(--edge-core) 35%, transparent)
+    );
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 160ms ease;
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+}
+
+.choice-card:hover:not(:disabled),
+.formation-button:hover:not(:disabled),
+.tab-button:hover:not(:disabled),
+.primary-button:not(.locked-button):hover:not(:disabled),
+.secondary-button:hover:not(:disabled),
+.pick-button:hover:not(:disabled),
+.slot-option:hover:not(:disabled),
+.segmented button:hover:not(:disabled) {
+  transform: translateY(-2px) scale(1.01);
+  box-shadow: var(--motion-shadow);
+}
+
+.choice-card:active:not(:disabled),
+.formation-button:active:not(:disabled),
+.tab-button:active:not(:disabled),
+.primary-button:not(.locked-button):active:not(:disabled),
+.secondary-button:active:not(:disabled),
+.pick-button:active:not(:disabled),
+.slot-option:active:not(:disabled),
+.segmented button:active:not(:disabled) {
+  transform: translateY(-1px) scale(1.025);
+}
+
+.choice-card.active::after,
+.formation-button.active::after,
+.tab-button.active::after,
+.segmented .active::after,
+.choice-card:hover:not(:disabled)::after,
+.formation-button:hover:not(:disabled)::after,
+.tab-button:hover:not(:disabled)::after,
+.primary-button:not(.locked-button):hover:not(:disabled)::after,
+.secondary-button:hover:not(:disabled)::after,
+.pick-button:hover:not(:disabled)::after,
+.slot-option:hover:not(:disabled)::after,
+.segmented button:hover:not(:disabled)::after {
+  opacity: 0.9;
+  animation: footyrush-edge-spin 1.35s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .choice-card,
+  .formation-button,
+  .tab-button,
+  .primary-button:not(.locked-button),
+  .secondary-button,
+  .pick-button,
+  .slot-option,
+  .segmented button {
+    transition: none;
+  }
+
+  .choice-card:hover:not(:disabled),
+  .formation-button:hover:not(:disabled),
+  .tab-button:hover:not(:disabled),
+  .primary-button:not(.locked-button):hover:not(:disabled),
+  .secondary-button:hover:not(:disabled),
+  .pick-button:hover:not(:disabled),
+  .slot-option:hover:not(:disabled),
+  .segmented button:hover:not(:disabled),
+  .choice-card:active:not(:disabled),
+  .formation-button:active:not(:disabled),
+  .tab-button:active:not(:disabled),
+  .primary-button:not(.locked-button):active:not(:disabled),
+  .secondary-button:active:not(:disabled),
+  .pick-button:active:not(:disabled),
+  .slot-option:active:not(:disabled),
+  .segmented button:active:not(:disabled) {
+    transform: none;
+  }
+
+  .choice-card.active::after,
+  .formation-button.active::after,
+  .tab-button.active::after,
+  .segmented .active::after,
+  .choice-card:hover:not(:disabled)::after,
+  .formation-button:hover:not(:disabled)::after,
+  .tab-button:hover:not(:disabled)::after,
+  .primary-button:not(.locked-button):hover:not(:disabled)::after,
+  .secondary-button:hover:not(:disabled)::after,
+  .pick-button:hover:not(:disabled)::after,
+  .slot-option:hover:not(:disabled)::after,
+  .segmented button:hover:not(:disabled)::after {
+    animation: none;
+  }
+}
+
+/* ============================================================
+   FootyRush — fluid page blend pass
+   ============================================================ */
+:root,
+:root[data-theme="light"] {
+  --page-pad: clamp(12px, 2.5vw, 28px);
+  --page-max: 1240px;
+}
+
+html,
+body {
+  min-height: 100dvh;
+  overflow-x: hidden;
+}
+
+.app-shell {
+  width: 100%;
+  max-width: var(--page-max);
+  min-height: 100dvh;
+  padding: clamp(10px, 1.8dvh, 18px) var(--page-pad) clamp(18px, 3dvh, 34px);
+}
+
+.topbar {
+  position: relative;
+  width: calc(100% + var(--page-pad) + var(--page-pad));
+  margin-left: calc(0px - var(--page-pad));
+  margin-right: calc(0px - var(--page-pad));
+  margin-bottom: clamp(10px, 1.4dvh, 16px);
+  padding: clamp(12px, 1.7dvh, 18px) var(--page-pad);
+  border: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.topbar::after {
+  content: "";
+  position: absolute;
+  right: var(--page-pad);
+  bottom: 0;
+  left: var(--page-pad);
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.55), transparent);
+  pointer-events: none;
+}
+
+.topbar .profile-pill {
+  white-space: nowrap;
+}
+
+.status-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 145px), 1fr));
+  gap: clamp(8px, 1.2vw, 12px);
+  margin: 0 0 clamp(12px, 1.8dvh, 18px);
+  overflow: visible;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.status-strip div,
+.status-strip div:last-child {
+  min-height: clamp(52px, 7dvh, 72px);
+  padding: clamp(10px, 1.5vw, 16px);
+  border: 0;
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-sm);
+}
+
+.main-tabs {
+  width: fit-content;
+  max-width: 100%;
+  margin-bottom: clamp(12px, 1.8dvh, 18px);
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  flex-wrap: wrap;
+}
+
+.tab-button {
+  min-height: clamp(38px, 5.2dvh, 46px);
+}
+
+.layout-grid,
+.draft-layout,
+.league-layout {
+  gap: clamp(12px, 1.7vw, 22px);
+}
+
+.setup-grid {
+  grid-template-columns: minmax(min(100%, 450px), 1.08fr) minmax(min(100%, 330px), 0.92fr);
+  gap: clamp(14px, 2vw, 24px);
+  align-items: start;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.setup-grid > .panel {
+  min-width: 0;
+}
+
+.setup-grid .mode-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+  gap: clamp(8px, 1.2vw, 12px);
+  padding: 0;
+  background: transparent;
+}
+
+.setup-grid .formation-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 172px), 1fr));
+  gap: clamp(8px, 1.1vw, 12px);
+}
+
+.panel {
+  padding: clamp(16px, 2vw, 22px);
+}
+
+.intro-panel {
+  gap: clamp(12px, 1.7dvh, 20px);
+}
+
+.choice-card,
+.formation-button,
+.manager-pick,
+.progression-panel {
+  min-width: 0;
+}
+
+@media (max-width: 980px) {
+  .layout-grid,
+  .draft-layout,
+  .league-layout,
+  .setup-grid,
+  .complete-grid,
+  .personal-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .topbar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
+
+  .brand-lockup {
+    width: 100%;
+  }
+
+  .topbar-actions {
+    width: 100%;
+    justify-content: space-between;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .lang-switcher {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .main-tabs {
+    width: 100%;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 170px), 1fr));
+  }
+
+  .main-tabs .tab-button {
+    justify-content: center;
+  }
+}
+
+@media (max-width: 560px) {
+  .topbar {
+    gap: 10px;
+  }
+
+  .brand-lockup {
+    align-items: flex-start;
+  }
+
+  .brand-mark {
+    width: 40px;
+    height: 40px;
+  }
+
+  .brand-logo {
+    width: 31px;
+    height: 31px;
+  }
+
+  .topbar .eyebrow {
+    font-size: clamp(1.22rem, 7vw, 1.62rem);
+  }
+
+  .topbar h1 {
+    font-size: 0.82rem;
+  }
+
+  .topbar-actions {
+    display: grid;
+    grid-template-columns: 1fr auto;
+  }
+
+  .lang-switcher {
+    grid-column: 1 / -1;
+  }
+
+  .topbar .profile-pill {
+    min-width: 0;
+    padding-inline: 12px;
+  }
+
+  .status-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .status-strip div,
+  .status-strip div:last-child {
+    min-height: auto;
+    padding: 11px 12px;
+  }
+
+  .setup-grid .choice-card,
+  .setup-grid .formation-button {
+    min-height: 56px;
+  }
+}
+
+@media (max-width: 380px) {
+  .status-strip,
+  .main-tabs {
+    grid-template-columns: 1fr;
+  }
+
+  .topbar-actions {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-height: 820px) and (min-width: 721px) {
+  .app-shell {
+    padding-top: 8px;
+  }
+
+  .topbar {
+    padding-top: 10px;
+    padding-bottom: 10px;
+    margin-bottom: 10px;
+  }
+
+  .status-strip div {
+    min-height: 50px;
+  }
+
+  .intro-panel > .primary-button,
+  .intro-panel .primary-button.wide {
+    min-height: 44px;
+  }
+}

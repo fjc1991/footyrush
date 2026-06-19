@@ -1,6 +1,6 @@
 export const es = {
   appName: "FootyRush",
-  tagline: "Gira la temporada. Elige la plantilla. Sobrevive la liga.",
+  tagline: "Elige tu XI. Persigue la tabla. Haz historia.",
   setupTitle: "Construye tu equipo para el partido",
   setupCopy: "Elige un modo y una formación, luego gira temporadas de clubes para fichar a 11 titulares y 5 suplentes.",
   classic: "Clásico",

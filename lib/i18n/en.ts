@@ -1,6 +1,6 @@
 export const en = {
   appName: "FootyRush",
-  tagline: "Spin the season. Draft the squad. Survive the league.",
+  tagline: "Draft your XI. Chase the table. Make history.",
   setupTitle: "Build your matchday squad",
   setupCopy: "Pick a shape, build your manager score, and unlock expert drafting through results.",
   classic: "Classic",
