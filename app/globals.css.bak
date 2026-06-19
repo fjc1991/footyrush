@@ -1,82 +1,36 @@
-/* ============================================================
-   FootyRush design tokens  (clean-modern, light + dark)
-   ============================================================ */
 :root,
 :root[data-theme="light"] {
   color-scheme: light;
-
-  /* surfaces */
-  --bg: #eef2f7;
-  --bg-tint: radial-gradient(1200px 600px at 80% -10%, rgba(15, 178, 116, 0.08), transparent 60%),
-             radial-gradient(900px 500px at -10% 0%, rgba(15, 178, 116, 0.05), transparent 55%);
+  --bg: #eef3f8;
   --panel: #ffffff;
-  --panel-strong: #eef2f8;
-  --panel-soft: #f6f9fc;
-
-  /* text */
-  --text: #0c1a2b;
-  --muted: #5a6b80;
-  --line: #e1e8f1;
-  --line-strong: #cdd8e6;
-
-  /* brand */
-  --accent: #0a9b66;          /* readable emerald (text, borders, icons) */
-  --accent-strong: #077a50;   /* deeper emerald (gradients, pressed) */
-  --accent-bright: #14c684;   /* vibrant emerald (dots, glows, fills) */
-  --accent-soft: color-mix(in srgb, var(--accent) 12%, var(--panel));
-  --amber: #e0920a;           /* rewards / score highlight */
-  --amber-bright: #f6b53a;
-  --danger: #e23b48;          /* destructive only */
-
-  /* buttons */
-  --button: var(--accent);
+  --panel-strong: #f6f9fd;
+  --text: #061f3d;
+  --muted: #607083;
+  --line: #d7e2ee;
+  --accent: #0057b8;
+  --accent-strong: #003f8f;
+  --amber: #f4b000;
+  --danger: #d71920;
+  --button: #e30613;
   --button-text: #ffffff;
-
-  /* effects */
-  --ring: color-mix(in srgb, var(--accent) 55%, transparent);
-  --shadow-sm: 0 1px 2px rgba(12, 26, 43, 0.05);
-  --shadow: 0 1px 2px rgba(12, 26, 43, 0.04), 0 10px 26px rgba(12, 26, 43, 0.08);
-  --shadow-lg: 0 6px 14px rgba(12, 26, 43, 0.08), 0 24px 50px rgba(12, 26, 43, 0.16);
-
-  /* radii */
-  --r-xs: 8px;
-  --r-sm: 10px;
-  --r-md: 12px;
-  --r-lg: 16px;
-  --r-xl: 22px;
-  --r-pill: 999px;
+  --shadow: 0 8px 22px rgba(13, 49, 91, 0.08);
 }
 
 :root[data-theme="dark"] {
-  color-scheme: dark;
-
-  --bg: #0a0f1a;
-  --bg-tint: radial-gradient(1200px 600px at 80% -10%, rgba(46, 230, 160, 0.10), transparent 60%),
-             radial-gradient(900px 500px at -10% 0%, rgba(46, 230, 160, 0.06), transparent 55%);
-  --panel: #131b29;
-  --panel-strong: #1b2536;
-  --panel-soft: #18212f;
-
-  --text: #e9eef6;
-  --muted: #95a6bc;
-  --line: #283447;
-  --line-strong: #36475e;
-
-  --accent: #2ee6a0;
-  --accent-strong: #18c98a;
-  --accent-bright: #34f0a8;
-  --accent-soft: color-mix(in srgb, var(--accent) 16%, var(--panel));
-  --amber: #fbbf24;
-  --amber-bright: #fcd34d;
-  --danger: #f4636e;
-
-  --button: var(--accent-strong);
-  --button-text: #03150d;
-
-  --ring: color-mix(in srgb, var(--accent) 60%, transparent);
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
-  --shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 12px 30px rgba(0, 0, 0, 0.45);
-  --shadow-lg: 0 8px 18px rgba(0, 0, 0, 0.45), 0 28px 60px rgba(0, 0, 0, 0.6);
+  color-scheme: light;
+  --bg: #e7eef7;
+  --panel: #ffffff;
+  --panel-strong: #f4f8fd;
+  --text: #061f3d;
+  --muted: #5c6f84;
+  --line: #cfdae8;
+  --accent: #004fa3;
+  --accent-strong: #002f69;
+  --amber: #e1a100;
+  --danger: #c9141b;
+  --button: #d71920;
+  --button-text: #ffffff;
+  --shadow: 0 8px 22px rgba(13, 49, 91, 0.1);
 }
 
 * {
@@ -87,8 +41,7 @@ html,
 body {
   margin: 0;
   min-height: 100%;
-  background: var(--bg-tint), var(--bg);
-  background-attachment: fixed;
+  background: var(--bg);
   color: var(--text);
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -131,7 +84,7 @@ button:disabled {
     linear-gradient(135deg, color-mix(in srgb, var(--accent) 10%, transparent), transparent 54%),
     linear-gradient(180deg, color-mix(in srgb, white 3%, transparent), transparent),
     var(--panel);
-  border-radius: var(--r-md);
+  border-radius: 8px;
   box-shadow: var(--shadow);
 }
 
@@ -152,7 +105,7 @@ button:disabled {
   place-items: center;
   width: 58px;
   height: 58px;
-  border-radius: var(--r-md);
+  border-radius: 8px;
   background:
     linear-gradient(145deg, color-mix(in srgb, var(--accent) 88%, white), var(--accent-strong));
   color: #07110c;
@@ -241,7 +194,7 @@ p {
 .segmented button,
 .sub-row button {
   border: 1px solid var(--line);
-  border-radius: var(--r-md);
+  border-radius: 8px;
 }
 
 .icon-button,
@@ -326,7 +279,7 @@ p {
   gap: 1px;
   overflow: hidden;
   margin: 18px 0;
-  border-radius: var(--r-lg);
+  border-radius: 8px;
   background: var(--line);
 }
 
@@ -370,7 +323,7 @@ p {
   position: relative;
   padding: 18px;
   background: var(--panel);
-  border-radius: var(--r-md);
+  border-radius: 8px;
   box-shadow: var(--shadow);
 }
 
@@ -408,7 +361,7 @@ p {
   margin: 18px 0;
   padding: 14px;
   border: 1px solid var(--line);
-  border-radius: var(--r-md);
+  border-radius: 8px;
   background: var(--panel-strong);
 }
 
@@ -576,7 +529,7 @@ p {
   min-height: 34px;
   padding: 0 10px;
   border: 1px solid var(--line);
-  border-radius: var(--r-md);
+  border-radius: 8px;
   background: color-mix(in srgb, var(--accent-strong) 8%, var(--panel-strong));
   color: var(--accent-strong);
   font-size: 0.78rem;
@@ -595,7 +548,7 @@ p {
   margin: -4px 0 14px;
   padding: 10px 12px;
   border: 1px solid var(--line);
-  border-radius: var(--r-md);
+  border-radius: 8px;
   background: color-mix(in srgb, var(--accent-strong) 6%, var(--panel-strong));
   color: var(--muted);
   font-size: 0.82rem;
@@ -615,7 +568,7 @@ p {
   padding: 14px;
   background: var(--panel-strong);
   border: 1px dashed var(--accent);
-  border-radius: var(--r-md);
+  border-radius: 8px;
 }
 
 .draw-ticket strong {
@@ -682,7 +635,7 @@ p {
   width: 30px;
   height: 30px;
   border: 1px solid var(--line);
-  border-radius: var(--r-md);
+  border-radius: 8px;
   background: var(--panel);
   color: var(--text);
   font-size: 1.3rem;
@@ -704,7 +657,7 @@ p {
   min-height: 62px;
   padding: 8px;
   border: 1px solid var(--line);
-  border-radius: var(--r-md);
+  border-radius: 8px;
   background: var(--panel);
   color: var(--text);
   text-align: left;
@@ -790,7 +743,7 @@ p {
   min-width: 38px;
   height: 38px;
   padding: 0 6px;
-  border-radius: var(--r-md);
+  border-radius: 8px;
   background: var(--accent);
   color: #06110b;
   font-size: 1.2rem;
@@ -878,7 +831,7 @@ p {
   margin-top: 12px;
   padding: 8px;
   border: 1px dashed var(--line);
-  border-radius: var(--r-md);
+  border-radius: 8px;
 }
 
 .pick-button {
@@ -940,7 +893,7 @@ p {
   min-height: 44px;
   padding: 9px 10px;
   background: var(--panel-strong);
-  border-radius: var(--r-md);
+  border-radius: 8px;
 }
 
 .squad-row span {
@@ -961,7 +914,7 @@ p {
   place-items: center;
   width: 52px;
   height: 52px;
-  border-radius: var(--r-md);
+  border-radius: 8px;
   background: var(--accent);
   color: #06110b;
 }
@@ -973,7 +926,7 @@ p {
   margin-top: 10px;
   padding: 7px 9px;
   border: 1px solid var(--line);
-  border-radius: var(--r-md);
+  border-radius: 8px;
   background: var(--panel-strong);
   color: var(--amber);
   font-size: 0.78rem;
@@ -988,7 +941,7 @@ p {
   min-width: 72px;
   min-height: 34px;
   padding: 0 10px;
-  border-radius: var(--r-md);
+  border-radius: 8px;
   background: var(--accent);
   color: #06110b;
   font-size: 0.82rem;
@@ -1007,7 +960,7 @@ p {
   gap: 7px;
   padding: 8px 11px;
   background: var(--panel-strong);
-  border-radius: var(--r-md);
+  border-radius: 8px;
   font-weight: 900;
 }
 
@@ -1019,7 +972,7 @@ p {
   margin-bottom: 16px;
   padding: 16px;
   background: var(--panel-strong);
-  border-radius: var(--r-md);
+  border-radius: 8px;
 }
 
 .scoreboard > div:last-child {
@@ -1054,7 +1007,7 @@ p {
   padding: 12px;
   background: #0b0d0c;
   border: 1px solid var(--line);
-  border-radius: var(--r-md);
+  border-radius: 8px;
 }
 
 :root[data-theme="light"] .commentary-log {
@@ -1067,7 +1020,7 @@ p {
   gap: 10px;
   padding: 9px;
   background: var(--panel);
-  border-radius: var(--r-md);
+  border-radius: 8px;
 }
 
 .commentary-line span {
@@ -1084,7 +1037,7 @@ p {
   margin-top: 12px;
   padding: 13px;
   border: 1px solid var(--danger);
-  border-radius: var(--r-md);
+  border-radius: 8px;
   background: color-mix(in srgb, var(--danger) 12%, var(--panel));
 }
 
@@ -1142,7 +1095,7 @@ p {
   min-height: 40px;
   padding: 8px 10px;
   background: var(--panel-strong);
-  border-radius: var(--r-md);
+  border-radius: 8px;
 }
 
 .table-row strong {
@@ -1175,7 +1128,7 @@ p {
 .speed-controls button {
   min-height: 42px;
   border: 1px solid var(--line);
-  border-radius: var(--r-md);
+  border-radius: 8px;
   background: var(--panel-strong);
   color: var(--text);
   font-weight: 900;
@@ -1209,7 +1162,7 @@ p {
   width: min(480px, 100%);
   padding: 18px;
   background: var(--panel);
-  border-radius: var(--r-md);
+  border-radius: 8px;
   box-shadow: var(--shadow);
 }
 
@@ -1224,7 +1177,7 @@ p {
   min-height: 42px;
   padding: 0 12px;
   border: 1px solid var(--line);
-  border-radius: var(--r-md);
+  border-radius: 8px;
   background: var(--panel-strong);
   color: var(--text);
 }
@@ -1287,7 +1240,7 @@ p {
   min-height: 54px;
   padding: 8px;
   border: 1px solid var(--line);
-  border-radius: var(--r-md);
+  border-radius: 8px;
   background: var(--panel-strong);
 }
 
@@ -1328,7 +1281,7 @@ p {
   min-height: 42px;
   padding: 0 12px;
   border: 1px solid var(--line);
-  border-radius: var(--r-md);
+  border-radius: 8px;
   background: var(--panel-strong);
   color: var(--text);
 }
@@ -1530,7 +1483,7 @@ p {
   align-items: center;
   padding: 10px 12px;
   background: var(--panel-strong);
-  border-radius: var(--r-md);
+  border-radius: 8px;
   margin-bottom: 6px;
 }
 
@@ -1556,7 +1509,7 @@ p {
   width: 100%;
   aspect-ratio: 2 / 3;
   background: linear-gradient(180deg, #1a4d2e 0%, #1e5c36 50%, #1a4d2e 100%);
-  border-radius: var(--r-md);
+  border-radius: 8px;
   overflow: hidden;
 }
 
@@ -1641,7 +1594,7 @@ p {
   gap: 12px;
   padding: 14px;
   background: var(--panel-strong);
-  border-radius: var(--r-md);
+  border-radius: 8px;
   margin-bottom: 14px;
 }
 
@@ -1693,7 +1646,7 @@ p {
 .season-event-card {
   padding: 12px;
   border: 1px solid var(--line);
-  border-radius: var(--r-md);
+  border-radius: 8px;
   background: var(--panel);
 }
 
@@ -1744,7 +1697,7 @@ p {
   padding: 9px 10px;
   background: var(--panel-strong);
   border: 1px solid transparent;
-  border-radius: var(--r-md);
+  border-radius: 8px;
 }
 
 .season-result-row span {
@@ -1793,7 +1746,7 @@ p {
 
 .season-stat-grid div {
   padding: 10px;
-  border-radius: var(--r-md);
+  border-radius: 8px;
   background: var(--panel-strong);
 }
 
@@ -1866,7 +1819,7 @@ p {
   min-height: 46px;
   padding: 0 20px;
   border: 1px solid var(--line);
-  border-radius: var(--r-md);
+  border-radius: 8px;
   background: var(--panel);
   color: var(--muted);
   font-weight: 800;
@@ -2009,7 +1962,7 @@ p {
   min-height: 44px;
   padding: 8px 12px;
   background: var(--panel-strong);
-  border-radius: var(--r-md);
+  border-radius: 8px;
   border: 1px solid transparent;
 }
 
@@ -2084,7 +2037,7 @@ p {
 .assistant-strip {
   margin: 0 0 18px;
   border: 1px solid var(--line);
-  border-radius: var(--r-md);
+  border-radius: 8px;
   background:
     linear-gradient(90deg, color-mix(in srgb, var(--accent) 10%, transparent), transparent 42%),
     var(--panel);
@@ -2437,11 +2390,11 @@ p {
 }
 
 .topbar {
-  padding: 14px 20px;
-  background: linear-gradient(120deg, #0a7a50, #0c9460 58%, #0fae74);
+  padding: 10px 16px;
+  background: linear-gradient(90deg, #2f4f8f, #4267b2);
   border: 0;
-  border-radius: var(--r-lg);
-  box-shadow: var(--shadow);
+  border-radius: 8px;
+  box-shadow: 0 10px 24px rgba(47, 79, 143, 0.18);
 }
 
 .topbar .eyebrow,
@@ -2452,7 +2405,7 @@ p {
 }
 
 .topbar .eyebrow {
-  color: color-mix(in srgb, var(--button-text) 78%, transparent);
+  color: rgba(255, 255, 255, 0.78);
 }
 
 .topbar h1 {
@@ -2464,7 +2417,7 @@ p {
   width: 44px;
   height: 44px;
   background: #ffffff;
-  color: var(--accent-strong);
+  color: var(--accent);
   box-shadow: none;
 }
 
@@ -2491,7 +2444,7 @@ p {
 .player-card,
 .segmented button,
 .sub-row button {
-  border-radius: var(--r-md);
+  border-radius: 8px;
 }
 
 .topbar .icon-button,
@@ -2505,7 +2458,7 @@ p {
 .topbar .icon-button:hover:not(:disabled),
 .topbar .profile-pill:hover:not(:disabled) {
   background: #ffffff;
-  color: var(--accent-strong);
+  color: var(--accent);
   border-color: #ffffff;
 }
 
@@ -2513,19 +2466,19 @@ p {
   min-height: 44px;
   background: var(--button);
   border-color: var(--button);
-  border-radius: var(--r-md);
+  border-radius: 8px;
   color: #ffffff;
   box-shadow: none;
 }
 
 .primary-button:hover:not(:disabled) {
-  box-shadow: 0 8px 20px color-mix(in srgb, var(--accent) 35%, transparent);
+  box-shadow: 0 8px 18px rgba(215, 25, 32, 0.18);
 }
 
 .secondary-button,
 .profile-pill,
 .icon-button {
-  background: var(--panel);
+  background: #ffffff;
   border-color: var(--line);
   color: var(--accent);
 }
@@ -2552,9 +2505,9 @@ p {
   gap: 0;
   margin: 12px 0;
   overflow: hidden;
-  background: var(--panel);
+  background: #ffffff;
   border: 1px solid var(--line);
-  border-radius: var(--r-md);
+  border-radius: 8px;
   box-shadow: var(--shadow);
 }
 
@@ -2590,7 +2543,7 @@ p {
 
 .tab-button {
   min-height: 40px;
-  background: var(--panel);
+  background: #ffffff;
   border-color: var(--line);
   color: var(--accent);
   box-shadow: none;
@@ -2638,10 +2591,10 @@ p {
 }
 
 .panel {
-  padding: 20px;
-  background: var(--panel);
+  padding: 18px;
+  background: #ffffff;
   border: 1px solid var(--line);
-  border-radius: var(--r-lg);
+  border-radius: 8px;
   box-shadow: var(--shadow);
 }
 
@@ -2684,7 +2637,7 @@ p {
 .injury-prompt {
   background: var(--panel-strong);
   border: 1px solid var(--line);
-  border-radius: var(--r-md);
+  border-radius: 8px;
   box-shadow: none;
 }
 
@@ -2697,7 +2650,7 @@ p {
 .formation-button,
 .player-card,
 .slot-option {
-  background: var(--panel);
+  background: #ffffff;
   border: 1px solid var(--line);
   color: var(--text);
   box-shadow: none;
@@ -2706,7 +2659,7 @@ p {
 .choice-card.active,
 .formation-button.active,
 .segmented .active {
-  background: var(--accent-soft);
+  background: #e8f2ff;
   border-color: var(--accent);
   color: var(--text);
 }
@@ -2732,12 +2685,12 @@ p {
 }
 
 .formation-glyph-pitch {
-  fill: var(--accent-soft);
+  fill: #e8f2ff;
   stroke: var(--line);
 }
 
 .formation-glyph-stroke {
-  stroke: var(--line-strong);
+  stroke: #a7b7c9;
 }
 
 .formation-glyph-dot,
@@ -2749,8 +2702,8 @@ p {
   gap: 8px;
   margin: 10px 0;
   padding: 12px;
-  background: var(--panel-soft);
-  border-radius: var(--r-md);
+  background: #f8fbff;
+  border-radius: 8px;
 }
 
 .manager-pick .spin-bank {
@@ -2793,8 +2746,8 @@ p {
 }
 
 .spin-bank {
-  background: var(--accent-soft);
-  border-color: var(--line-strong);
+  background: #e8f2ff;
+  border-color: #c9ddf5;
   color: var(--accent);
 }
 
@@ -2813,7 +2766,7 @@ p {
 }
 
 .progress-track {
-  background: var(--panel-strong);
+  background: #dfe8f2;
 }
 
 .progress-track span,
@@ -2830,7 +2783,7 @@ p {
 }
 
 .empty-state-card {
-  background: var(--panel);
+  background: #ffffff;
   border-color: var(--line);
 }
 
@@ -2839,7 +2792,7 @@ p {
 }
 
 .fm-card {
-  background: var(--panel);
+  background: #ffffff;
 }
 
 .card-pos,
@@ -2863,7 +2816,7 @@ p {
 }
 
 .scoreboard span {
-  color: color-mix(in srgb, var(--button-text) 78%, transparent);
+  color: rgba(255, 255, 255, 0.78);
 }
 
 .scoreboard strong,
@@ -2876,21 +2829,21 @@ p {
 }
 
 .timer {
-  background: var(--accent-soft);
+  background: #e8f2ff;
   color: var(--accent);
 }
 
 .commentary-log {
-  background: var(--panel-soft);
+  background: #f7fafd;
 }
 
 :root[data-theme="light"] .commentary-log {
-  background: var(--panel-soft);
+  background: #f7fafd;
 }
 
 .commentary-line {
-  background: var(--panel);
-  border: 1px solid var(--line);
+  background: #ffffff;
+  border: 1px solid #edf2f7;
 }
 
 .table-row,
@@ -2903,17 +2856,17 @@ p {
 .season-stat-grid div,
 .your-rank-card {
   background: var(--panel-strong);
-  border: 1px solid var(--line);
+  border: 1px solid #edf2f7;
 }
 
 .table-row {
-  border-radius: var(--r-md);
+  border-radius: 8px;
 }
 
 .lb-row.podium,
 .lb-row.is-you {
-  background: var(--accent-soft);
-  border-color: var(--line-strong);
+  background: #e8f2ff;
+  border-color: #c9ddf5;
 }
 
 .matchday {
@@ -2949,7 +2902,7 @@ p {
 .status-strip {
   gap: 8px;
   padding: 8px;
-  background: color-mix(in srgb, var(--panel) 72%, transparent);
+  background: rgba(255, 255, 255, 0.72);
   border: 0;
   box-shadow: none;
 }
@@ -2958,14 +2911,14 @@ p {
   min-height: 46px;
   padding: 7px 10px;
   border-right: 0;
-  border-radius: var(--r-md);
+  border-radius: 8px;
 }
 
 .main-tabs {
   width: fit-content;
   padding: 3px;
-  background: color-mix(in srgb, var(--panel) 78%, transparent);
-  border-radius: var(--r-md);
+  background: rgba(255, 255, 255, 0.78);
+  border-radius: 8px;
 }
 
 .tab-button {
@@ -2982,9 +2935,9 @@ p {
   gap: 22px;
   align-items: start;
   padding: 18px;
-  background: color-mix(in srgb, var(--panel) 82%, transparent);
-  border-radius: var(--r-md);
-  box-shadow: var(--shadow-lg);
+  background: rgba(255, 255, 255, 0.8);
+  border-radius: 8px;
+  box-shadow: 0 18px 38px rgba(13, 49, 91, 0.08);
 }
 
 .setup-grid > .panel {
@@ -2997,19 +2950,19 @@ p {
 .setup-grid .mode-grid {
   gap: 6px;
   padding: 4px;
-  background: var(--panel-strong);
-  border-radius: var(--r-md);
+  background: #f4f8fd;
+  border-radius: 8px;
 }
 
 .setup-grid .choice-card,
 .setup-grid .formation-button {
   border-color: transparent;
-  background: var(--panel-strong);
+  background: #f4f8fd;
 }
 
 .setup-grid .choice-card.active,
 .setup-grid .formation-button.active {
-  background: var(--panel);
+  background: #ffffff;
   border-color: transparent;
   box-shadow:
     inset 0 0 0 1px var(--accent),
@@ -3018,13 +2971,13 @@ p {
 
 .setup-grid .choice-card:hover:not(:disabled),
 .setup-grid .formation-button:hover:not(:disabled) {
-  background: var(--panel);
+  background: #ffffff;
 }
 
 .setup-grid .manager-pick,
 .setup-grid .progression-panel {
   border: 0;
-  background: var(--panel-strong);
+  background: #f4f8fd;
 }
 
 .setup-grid .manager-pick {
@@ -3034,7 +2987,7 @@ p {
 
 .setup-grid .spin-bank {
   border-color: transparent;
-  background: var(--accent-soft);
+  background: #e8f2ff;
 }
 
 .setup-grid .formation-grid {
@@ -3046,12 +2999,12 @@ p {
 }
 
 .setup-grid .formation-glyph-pitch {
-  fill: var(--accent-soft);
+  fill: #e8f2ff;
   stroke: transparent;
 }
 
 .setup-grid .formation-glyph-stroke {
-  stroke: var(--line-strong);
+  stroke: #bfd3ea;
 }
 
 .setup-grid .formation-panel {
@@ -3063,8 +3016,8 @@ p {
   gap: 12px;
   margin-top: 2px;
   padding: 12px;
-  background: var(--panel-strong);
-  border-radius: var(--r-md);
+  background: #f4f8fd;
+  border-radius: 8px;
 }
 
 .formation-preview-head,
@@ -3078,8 +3031,8 @@ p {
 .formation-preview-meta span {
   min-width: 0;
   padding: 10px 12px;
-  border-radius: var(--r-md);
-  background: var(--panel);
+  border-radius: 8px;
+  background: #ffffff;
 }
 
 .formation-preview-head span,
@@ -3101,10 +3054,10 @@ p {
   position: relative;
   min-height: 278px;
   overflow: hidden;
-  border-radius: var(--r-md);
+  border-radius: 8px;
   background:
     linear-gradient(90deg, rgba(255, 255, 255, 0.035) 50%, transparent 50%) 0 0 / 64px 100%,
-    linear-gradient(180deg, #1f8f57, #14663d);
+    linear-gradient(180deg, #254f85, #203f6f);
 }
 
 .formation-preview-pitch::before {
@@ -3147,7 +3100,7 @@ p {
   padding: 0 7px;
   border-radius: 999px;
   background: #ffffff;
-  color: #0c1a2b;
+  color: #2f4f8f;
   font-size: 0.66rem;
   font-weight: 950;
   line-height: 1;
@@ -3185,8 +3138,8 @@ p {
 .personal-best-grid > div,
 .period-rank-row,
 .recent-run-row {
-  background: var(--panel-strong);
-  border-radius: var(--r-md);
+  background: #f4f8fd;
+  border-radius: 8px;
 }
 
 .personal-hero > div {
@@ -3256,7 +3209,7 @@ p {
 
 .personal-best-grid > div {
   padding: 12px;
-  background: var(--panel);
+  background: #ffffff;
 }
 
 .personal-best-grid small,
@@ -3280,7 +3233,7 @@ p {
   align-items: center;
   gap: 10px;
   padding: 10px 12px;
-  background: var(--panel);
+  background: #ffffff;
 }
 
 .period-rank-row span {
@@ -3313,8 +3266,8 @@ p {
 .personal-empty {
   margin: 0;
   padding: 16px;
-  border-radius: var(--r-md);
-  background: var(--panel);
+  border-radius: 8px;
+  background: #ffffff;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -3517,126 +3470,4 @@ p {
   .recent-run-row small {
     text-align: left;
   }
-}
-
-
-/* ============================================================
-   FootyRush — modern finish layer (added in redesign)
-   ============================================================ */
-
-/* keyboard focus ring for accessibility */
-:where(a, button, input, select, textarea, [tabindex]):focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 2px;
-}
-
-/* pill-shaped controls */
-.primary-button,
-.secondary-button,
-.profile-pill,
-.icon-button,
-.lang-btn,
-.tab-button,
-.segmented button,
-.pick-button {
-  border-radius: var(--r-pill);
-}
-
-/* primary CTA: brand gradient + lift */
-.primary-button:not(.locked-button):not(:disabled) {
-  background: linear-gradient(135deg, var(--accent-bright), var(--accent-strong));
-  border-color: transparent;
-  color: var(--button-text);
-}
-.primary-button:not(.locked-button):hover:not(:disabled) {
-  transform: translateY(-1px);
-  box-shadow: 0 10px 24px color-mix(in srgb, var(--accent) 42%, transparent);
-}
-.secondary-button:hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
-  color: var(--accent);
-}
-
-/* card hover affordance */
-.choice-card,
-.fm-card,
-.player-card,
-.slot-option,
-.formation-button {
-  transition: transform .14s ease, border-color .14s ease, box-shadow .14s ease, background .14s ease;
-}
-.choice-card:hover:not(.active),
-.fm-card:hover,
-.formation-button:hover:not(.active):not(:disabled) {
-  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
-  box-shadow: var(--shadow-sm);
-}
-
-/* gentle transition when switching theme */
-body,
-.panel,
-.topbar,
-.status-strip div,
-.tab-button,
-.fm-card,
-.choice-card {
-  transition: background-color .25s ease, color .2s ease, border-color .25s ease;
-}
-
-/* themed scrollbars */
-* { scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
-*::-webkit-scrollbar { width: 10px; height: 10px; }
-*::-webkit-scrollbar-thumb {
-  background: var(--line-strong);
-  border-radius: 999px;
-  border: 2px solid transparent;
-  background-clip: padding-box;
-}
-*::-webkit-scrollbar-thumb:hover { background: var(--muted); }
-
-/* theme toggle button */
-.theme-toggle { position: relative; overflow: hidden; }
-.theme-toggle svg { transition: transform .35s cubic-bezier(.34,1.56,.64,1), opacity .2s ease; }
-
-
-/* on-accent text: readable in BOTH themes (white in light, dark in dark) */
-.tab-button.active,
-.scoreboard,
-.scoreboard strong,
-.score,
-.progression-level-chip,
-.rating-chip,
-.card-ovr,
-.you-tag,
-.lb-row.is-you .you-tag {
-  color: var(--button-text);
-}
-
-/* frosted tab bar */
-.main-tabs {
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  border: 1px solid var(--line);
-}
-
-/* layout polish: friendlier hierarchy & CTA */
-.status-strip strong {
-  font-size: 1.06rem;
-  font-weight: 800;
-}
-.status-strip span {
-  font-size: 0.72rem;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-.intro-panel > .primary-button,
-.intro-panel .primary-button.wide {
-  min-height: 50px;
-  font-size: 1.02rem;
-}
-.eyebrow {
-  text-transform: uppercase;
-}
-h2 {
-  letter-spacing: -0.01em;
 }

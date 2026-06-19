@@ -1,6 +1,6 @@
 "use client";
 
-import { Activity, BarChart3, BadgeInfo, ChevronRight, Gamepad2, Goal, HeartPulse, Lock, LogIn, Mail, Moon, Play, Shield, Shirt, Shuffle, Sparkles, Sun, Timer, Trophy, Users } from "lucide-react";
+import { Activity, BarChart3, BadgeInfo, ChevronRight, Gamepad2, Goal, HeartPulse, Lock, LogIn, Mail, Play, Shield, Shirt, Shuffle, Sparkles, Timer, Trophy, Users } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { en } from "@/lib/i18n/en";
 import { FORMATION_LIST, getStarterSlots } from "@/lib/game/formations";
@@ -129,7 +129,6 @@ const MANAGER_SPIN_LIMIT = 3;
 export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: string }) {
   const [view, setView] = useState<MainView>("play");
   const [phase, setPhase] = useState<Phase>("setup");
-  const [theme, setTheme] = useState<"light" | "dark">("dark");
   const [gameMode, setGameMode] = useState<GameMode>("minileague");
   const [formationId, setFormationId] = useState("4-3-3");
   const [picks, setPicks] = useState<DraftPick[]>([]);
@@ -283,11 +282,8 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
   }, []);
 
   useEffect(() => {
-    const storedTheme = window.localStorage.getItem("footyrush.theme");
-    const initialTheme: "light" | "dark" =
-      storedTheme === "dark" || storedTheme === "light" ? storedTheme : "dark";
-    document.documentElement.dataset.theme = initialTheme;
-    setTheme(initialTheme);
+    document.documentElement.dataset.theme = "light";
+    window.localStorage.setItem("footyrush.theme", "light");
 
     const storedProfile = window.localStorage.getItem(profileKey);
     if (storedProfile) {
@@ -1247,20 +1243,6 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
               </a>
             ))}
           </div>
-          <button
-            className="icon-button theme-toggle"
-            type="button"
-            onClick={() => {
-              const next = theme === "light" ? "dark" : "light";
-              document.documentElement.dataset.theme = next;
-              window.localStorage.setItem("footyrush.theme", next);
-              setTheme(next);
-            }}
-            aria-label={theme === "light" ? "Switch to dark mode" : "Switch to light mode"}
-            title={theme === "light" ? "Dark mode" : "Light mode"}
-          >
-            {theme === "light" ? <Moon size={18} /> : <Sun size={18} />}
-          </button>
           <button className="profile-pill" type="button" onClick={() => setShowAuthGate(true)}>
             <LogIn size={16} />
             <span>{profile?.displayName ?? "Sign in"}</span>
