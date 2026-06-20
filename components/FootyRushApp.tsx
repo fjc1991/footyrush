@@ -1,6 +1,6 @@
 "use client";
 
-import { Activity, BarChart3, BadgeInfo, ChevronRight, Gamepad2, Goal, HeartPulse, Lock, LogIn, Mail, Moon, Play, Shield, Shirt, Shuffle, Sparkles, Sun, Timer, Trophy, Users } from "lucide-react";
+import { Activity, BarChart3, BadgeInfo, ChevronRight, Globe, Goal, HeartPulse, Lock, LogIn, Mail, Moon, Play, Shield, Shirt, Shuffle, Sparkles, Sun, Timer, Trophy, Users } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { en } from "@/lib/i18n/en";
 import { FORMATION_LIST, getStarterSlots } from "@/lib/game/formations";
@@ -137,6 +137,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
   const [profile, setProfile] = useState<LocalProfile | null>(null);
   const [guestStatus, setGuestStatus] = useState<GuestStatus>({ allowed: true, played: false });
   const [showAuthGate, setShowAuthGate] = useState(false);
+  const [langMenuOpen, setLangMenuOpen] = useState(false);
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
   const [authMessage, setAuthMessage] = useState("");
@@ -281,6 +282,23 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     window.addEventListener("hashchange", applyHashView);
     return () => window.removeEventListener("hashchange", applyHashView);
   }, []);
+
+  useEffect(() => {
+    if (!langMenuOpen) return;
+    function handlePointer(event: MouseEvent) {
+      const target = event.target as HTMLElement | null;
+      if (target && !target.closest(".lang-menu")) setLangMenuOpen(false);
+    }
+    function handleKey(event: KeyboardEvent) {
+      if (event.key === "Escape") setLangMenuOpen(false);
+    }
+    document.addEventListener("mousedown", handlePointer);
+    document.addEventListener("keydown", handleKey);
+    return () => {
+      document.removeEventListener("mousedown", handlePointer);
+      document.removeEventListener("keydown", handleKey);
+    };
+  }, [langMenuOpen]);
 
   useEffect(() => {
     const storedTheme = window.localStorage.getItem("footyrush.theme");
@@ -1234,18 +1252,61 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
             <h1>{copy.tagline}</h1>
           </div>
         </div>
+        <nav className="banner-nav" aria-label="Primary">
+          <button
+            type="button"
+            className={`banner-tab${view === "play" ? " active" : ""}`}
+            onClick={() => switchView("play")}
+          >
+            {copy.tabPlay}
+          </button>
+          <button
+            type="button"
+            className={`banner-tab${view === "leaderboards" ? " active" : ""}`}
+            onClick={() => !isPlaying && !exhibitionPlaying && !seasonPlaying && switchView("leaderboards")}
+            disabled={isPlaying || exhibitionPlaying || seasonPlaying}
+            title={isPlaying || exhibitionPlaying || seasonPlaying ? copy.tabLockedHint : undefined}
+          >
+            {copy.tabLeaderboards}
+            {(isPlaying || exhibitionPlaying || seasonPlaying) && <span className="tab-lock">· {copy.tabLive}</span>}
+          </button>
+          <button
+            type="button"
+            className={`banner-tab${view === "personal" ? " active" : ""}`}
+            onClick={() => !isPlaying && !exhibitionPlaying && !seasonPlaying && switchView("personal")}
+            disabled={isPlaying || exhibitionPlaying || seasonPlaying}
+            title={isPlaying || exhibitionPlaying || seasonPlaying ? copy.tabLockedHint : undefined}
+          >
+            {copy.tabProgress}
+          </button>
+        </nav>
         <div className="topbar-actions">
-          <div className="lang-switcher">
-            {(["en", "es", "fr", "pt"] as const).map((lang) => (
-              <a
-                key={lang}
-                href={`/${lang}`}
-                className={`lang-btn${locale === lang ? " active" : ""}`}
-                aria-label={lang.toUpperCase()}
-              >
-                {lang.toUpperCase()}
-              </a>
-            ))}
+          <div className="lang-menu">
+            <button
+              type="button"
+              className="lang-menu-button"
+              onClick={() => setLangMenuOpen((open) => !open)}
+              aria-haspopup="menu"
+              aria-expanded={langMenuOpen}
+              aria-label="Language"
+            >
+              <Globe size={16} />
+              <span>{locale.toUpperCase()}</span>
+            </button>
+            {langMenuOpen && (
+              <div className="lang-menu-list" role="menu">
+                {(["en", "es", "fr", "pt"] as const).map((lang) => (
+                  <a
+                    key={lang}
+                    href={`/${lang}`}
+                    className={`lang-menu-item${locale === lang ? " active" : ""}`}
+                    role="menuitem"
+                  >
+                    {lang.toUpperCase()}
+                  </a>
+                ))}
+              </div>
+            )}
           </div>
           <button
             className="icon-button theme-toggle"
@@ -1268,58 +1329,28 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
         </div>
       </header>
 
-      <section className="status-strip" aria-label="Game status">
-        <div>
-          <span>Draft</span>
-          <strong>{draftStatus}</strong>
-        </div>
-        <div>
-          <span>League</span>
-          <strong>{leagueStatus}</strong>
-        </div>
-        <div>
-          <span>Score</span>
-          <strong>{selectedManager ? managerScore : "—"}</strong>
-        </div>
-        <div>
-          <span>Draft level</span>
-          <strong>{expertUnlocked ? "Expert" : "Assisted"}</strong>
-        </div>
-      </section>
+      {phase !== "setup" && (
+        <section className="status-strip" aria-label="Game status">
+          <div>
+            <span>Draft</span>
+            <strong>{draftStatus}</strong>
+          </div>
+          <div>
+            <span>League</span>
+            <strong>{leagueStatus}</strong>
+          </div>
+          <div>
+            <span>Score</span>
+            <strong>{selectedManager ? managerScore : "—"}</strong>
+          </div>
+          <div>
+            <span>Draft level</span>
+            <strong>{expertUnlocked ? "Expert" : "Assisted"}</strong>
+          </div>
+        </section>
+      )}
 
-      <nav className="main-tabs" aria-label="Primary">
-        <button
-          type="button"
-          className={`tab-button${view === "play" ? " active" : ""}`}
-          onClick={() => switchView("play")}
-        >
-          <Gamepad2 size={17} />
-          {copy.tabPlay}
-        </button>
-        <button
-          type="button"
-          className={`tab-button${view === "leaderboards" ? " active" : ""}`}
-          onClick={() => !isPlaying && !exhibitionPlaying && !seasonPlaying && switchView("leaderboards")}
-          disabled={isPlaying || exhibitionPlaying || seasonPlaying}
-          title={isPlaying || exhibitionPlaying || seasonPlaying ? copy.tabLockedHint : undefined}
-        >
-          <BarChart3 size={17} />
-          {copy.tabLeaderboards}
-          {(isPlaying || exhibitionPlaying || seasonPlaying) && <span className="tab-lock">· {copy.tabLive}</span>}
-        </button>
-        <button
-          type="button"
-          className={`tab-button${view === "personal" ? " active" : ""}`}
-          onClick={() => !isPlaying && !exhibitionPlaying && !seasonPlaying && switchView("personal")}
-          disabled={isPlaying || exhibitionPlaying || seasonPlaying}
-          title={isPlaying || exhibitionPlaying || seasonPlaying ? copy.tabLockedHint : undefined}
-        >
-          <Activity size={17} />
-          My progress
-        </button>
-      </nav>
-
-      {view === "play" && (
+      {view === "play" && phase !== "setup" && (
         <section className="assistant-strip" aria-label="Assistant tip">
           <ManagerAvatar mood={assistantMood} line={assistantLine} compact />
         </section>
@@ -1344,7 +1375,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
       )}
 
       {view === "play" && phase === "setup" && (
-        <section className="layout-grid setup-grid">
+        <section className="setup-solo">
           <div className="panel intro-panel">
             <p className="eyebrow">{copy.setupTitle}</p>
             <h2>Draft fast, then manage the damage.</h2>
@@ -1424,31 +1455,6 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
               <Play size={18} />
               {copy.startDraft}
             </button>
-            {selectedManager && (
-              <ProgressionPanel
-                score={managerScore}
-                completedLeagues={completedLeagues}
-                expertUnlocked={expertUnlocked}
-              />
-            )}
-          </div>
-
-          <div className="panel formation-panel">
-            <p className="eyebrow">Formation</p>
-            <div className="formation-grid">
-              {FORMATION_LIST.map((formation) => (
-                <button
-                  key={formation.id}
-                  type="button"
-                  className={formationId === formation.id ? "formation-button active" : "formation-button"}
-                  onClick={() => setFormationId(formation.id)}
-                >
-                  <FormationGlyph formationId={formation.id} />
-                  <span>{formation.name}</span>
-                </button>
-              ))}
-            </div>
-            <FormationSetupPreview formationId={formationId} />
           </div>
         </section>
       )}
@@ -1630,7 +1636,40 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
             )}
           </div>
 
-          <SquadPanel picks={picks} formationId={formationId} mode={draftMode} />
+          <div className="draft-side">
+            <div className="panel formation-panel">
+              <div className="formation-panel-head">
+                <p className="eyebrow">Formation</p>
+                {picks.length > 0 && <span className="fine-print">Locked for this squad</span>}
+              </div>
+              <div className="formation-grid">
+                {FORMATION_LIST.map((formation) => (
+                  <button
+                    key={formation.id}
+                    type="button"
+                    className={formationId === formation.id ? "formation-button active" : "formation-button"}
+                    onClick={() => {
+                      if (picks.length === 0) setFormationId(formation.id);
+                    }}
+                    disabled={picks.length > 0 && formationId !== formation.id}
+                    title={picks.length > 0 ? "Formation locks once you start assigning players" : undefined}
+                  >
+                    <FormationGlyph formationId={formation.id} />
+                    <span>{formation.name}</span>
+                  </button>
+                ))}
+              </div>
+              <FormationSetupPreview formationId={formationId} />
+            </div>
+            <SquadPanel picks={picks} formationId={formationId} mode={draftMode} />
+            {selectedManager && (
+              <ProgressionPanel
+                score={managerScore}
+                completedLeagues={completedLeagues}
+                expertUnlocked={expertUnlocked}
+              />
+            )}
+          </div>
         </section>
       )}
 

@@ -4249,3 +4249,137 @@ body {
     min-height: 44px;
   }
 }
+
+/* ── Homepage cleanup: banner nav, language menu, solo setup ─────── */
+
+.banner-nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.banner-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 38px;
+  padding: 0 14px;
+  border: 1px solid transparent;
+  border-radius: var(--r-pill);
+  background: transparent;
+  color: var(--muted);
+  font-weight: 800;
+  font-size: 0.92rem;
+  cursor: pointer;
+  transition: color 140ms ease, background 140ms ease, border-color 140ms ease;
+}
+
+.banner-tab:hover:not(:disabled) {
+  color: var(--text);
+}
+
+.banner-tab.active {
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 16%, var(--panel));
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+.banner-tab:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.lang-menu {
+  position: relative;
+}
+
+.lang-menu-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 42px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  background: var(--panel);
+  color: var(--text);
+  font-weight: 800;
+  font-size: 0.82rem;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+  transition: border-color 140ms ease, color 140ms ease;
+}
+
+.lang-menu-button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.lang-menu-list {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  min-width: 132px;
+  padding: 6px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-lg);
+}
+
+.lang-menu-item {
+  display: flex;
+  align-items: center;
+  padding: 8px 10px;
+  border-radius: var(--r-sm);
+  color: var(--muted);
+  text-decoration: none;
+  font-weight: 800;
+  font-size: 0.82rem;
+  letter-spacing: 0.04em;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.lang-menu-item:hover {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--text);
+}
+
+.lang-menu-item.active {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.setup-solo {
+  width: min(680px, 100%);
+  margin: 0 auto;
+}
+
+.draft-side {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
+}
+
+.formation-panel-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+@media (max-width: 900px) {
+  .topbar {
+    flex-wrap: wrap;
+  }
+
+  .banner-nav {
+    order: 3;
+    width: 100%;
+    justify-content: center;
+  }
+}

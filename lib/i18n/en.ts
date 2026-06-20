@@ -24,6 +24,7 @@ export const en = {
   dark: "Dark",
   tabPlay: "Play",
   tabLeaderboards: "Leaderboards",
+  tabProgress: "My progress",
   tabLive: "live",
   tabLockedHint: "Finish the match in progress to open the leaderboards.",
   yourRank: "Your rank",
