@@ -4354,8 +4354,16 @@ body {
 }
 
 .setup-solo {
-  width: min(680px, 100%);
+  width: min(720px, 100%);
   margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: calc(100vh - 200px);
+}
+
+.setup-solo .intro-panel {
+  min-height: 0;
 }
 
 .draft-side {
@@ -4382,4 +4390,277 @@ body {
     width: 100%;
     justify-content: center;
   }
+}
+
+/* ── Draft cleanup: compact candidate list + smaller status boxes ── */
+
+.candidate-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+  min-width: 0;
+}
+
+.fm-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 7px 12px;
+  border: 1px solid var(--line);
+  border-left-width: 3px;
+  border-radius: var(--r-md);
+  background: var(--panel-strong);
+  transition: border-color 140ms ease, transform 140ms ease, background 140ms ease;
+}
+
+.fm-row:hover {
+  border-color: var(--accent);
+  transform: translateX(2px);
+}
+
+.fm-row.perfect { border-left-color: var(--accent); }
+.fm-row.good { border-left-color: var(--amber); }
+.fm-row.okay { border-left-color: var(--muted); }
+
+.fm-row-ovr {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  min-width: 36px;
+  height: 36px;
+  padding: 0 6px;
+  border-radius: var(--r-sm);
+  background: var(--accent);
+  color: #06110b;
+  font-size: 1.05rem;
+  font-weight: 900;
+}
+
+.fm-row-ovr.hidden {
+  background: var(--panel);
+  color: var(--muted);
+  border: 1px dashed var(--line);
+}
+
+.fm-row-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.fm-row-name {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: nowrap;
+  gap: 8px;
+  overflow: hidden;
+}
+
+.fm-row-name strong {
+  font-size: 0.95rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fm-row-name .boost-badge {
+  flex: 0 0 auto;
+}
+
+.fm-row-sub {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.fm-row-sub .card-positions {
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 700;
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+.fm-row .role-targets {
+  min-height: 0;
+  font-size: 0.72rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.fm-row-stats {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 4px;
+  font-size: 0.68rem;
+}
+
+.fm-row-stats span {
+  padding: 2px 5px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 5px;
+  color: var(--muted);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.fm-row .fit-badge {
+  flex: 0 0 auto;
+}
+
+.fm-row .pick-button {
+  flex: 0 0 auto;
+  width: auto;
+  margin: 0;
+  min-height: 34px;
+  padding: 0 14px;
+  white-space: nowrap;
+}
+
+@media (max-width: 720px) {
+  .fm-row-stats {
+    display: none;
+  }
+}
+
+/* Smaller status boxes */
+.status-strip {
+  margin: 14px 0;
+}
+
+.status-strip div {
+  padding: 9px 13px;
+}
+
+.status-strip span {
+  font-size: 0.7rem;
+  letter-spacing: 0.03em;
+}
+
+.status-strip strong {
+  margin-top: 2px;
+  font-size: 0.98rem;
+}
+
+/* ── Draft grid: list | (pitch + formation) with manager score spanning below ── */
+
+.draft-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(420px, 1.05fr);
+  gap: 18px;
+  align-items: start;
+}
+
+/* Right side: pitch + formation (equal size) with manager score spanning below */
+.draft-right {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-areas:
+    "pitch formation"
+    "score score";
+  gap: 18px;
+  align-items: stretch;
+  min-width: 0;
+}
+
+.draft-right > .squad-panel { grid-area: pitch; min-width: 0; }
+.draft-right > .formation-panel { grid-area: formation; min-width: 0; }
+.draft-right > .progression-panel { grid-area: score; }
+
+.draft-right .formation-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.draft-right .formation-button {
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  padding: 9px 6px;
+  text-align: center;
+}
+
+.draft-right .formation-button span {
+  flex: none;
+  white-space: nowrap;
+}
+
+/* The list column is narrow — drop stat chips so names stay readable.
+   (Rating badge + fit label still convey quality.) Stats return when stacked. */
+.draft-grid .fm-row-stats {
+  display: none;
+}
+
+/* Collapse to a single column on smaller screens */
+@media (max-width: 1080px) {
+  .draft-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .draft-grid .fm-row-stats {
+    display: flex;
+  }
+
+  .draft-right {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "pitch"
+      "formation"
+      "score";
+  }
+
+  .draft-right .formation-grid {
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  }
+}
+
+/* Compact draft bar: round number + spin control together */
+.draft-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.draft-round-label {
+  margin: 0;
+}
+
+.draft-bar .draft-spin-controls {
+  flex-wrap: nowrap;
+}
+
+/* Compact draw ticket: TEAM · YEAR · club name on one line */
+.draw-ticket {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+  padding: 8px 12px;
+}
+
+.draw-ticket strong {
+  font-size: 1.05rem;
+}
+
+.draw-ticket small {
+  margin-left: 4px;
+  color: var(--amber);
+}
+
+.spin-result {
+  gap: 10px;
+}
+
+/* Status strip adapts to 2 cells (draft) or 4 (league/complete) */
+.status-strip {
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
 }

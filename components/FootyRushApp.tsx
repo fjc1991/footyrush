@@ -1,6 +1,6 @@
 "use client";
 
-import { Activity, BarChart3, BadgeInfo, ChevronRight, Globe, Goal, HeartPulse, Lock, LogIn, Mail, Moon, Play, Shield, Shirt, Shuffle, Sparkles, Sun, Timer, Trophy, Users } from "lucide-react";
+import { Activity, BarChart3, ChevronRight, Globe, Goal, HeartPulse, LogIn, Mail, Moon, Play, Shield, Shirt, Shuffle, Sparkles, Sun, Timer, Trophy, Users } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { en } from "@/lib/i18n/en";
 import { FORMATION_LIST, getStarterSlots } from "@/lib/game/formations";
@@ -1331,14 +1331,18 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
 
       {phase !== "setup" && (
         <section className="status-strip" aria-label="Game status">
-          <div>
-            <span>Draft</span>
-            <strong>{draftStatus}</strong>
-          </div>
-          <div>
-            <span>League</span>
-            <strong>{leagueStatus}</strong>
-          </div>
+          {phase !== "draft" && (
+            <div>
+              <span>Draft</span>
+              <strong>{draftStatus}</strong>
+            </div>
+          )}
+          {phase !== "draft" && (
+            <div>
+              <span>League</span>
+              <strong>{leagueStatus}</strong>
+            </div>
+          )}
           <div>
             <span>Score</span>
             <strong>{selectedManager ? managerScore : "—"}</strong>
@@ -1460,15 +1464,14 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
       )}
 
       {view === "play" && phase === "draft" && (
-        <section className="draft-layout">
+        <section className="draft-grid">
           <div className="panel draft-board">
-            <div className="panel-header">
-              <div>
-                <p className="eyebrow">
-                  {copy.draftRound} {Math.min(picks.length + 1, draftSlots.length)} / {draftSlots.length}
-                </p>
-                <h2>{draftComplete ? "Squad complete" : "Spin team/year, then assign a role"}</h2>
-              </div>
+            <div className="draft-bar">
+              <p className="eyebrow draft-round-label">
+                {draftComplete
+                  ? "Squad complete"
+                  : `${copy.draftRound} ${Math.min(picks.length + 1, draftSlots.length)} / ${draftSlots.length}`}
+              </p>
               {dataError ? (
                 <button className="secondary-button" type="button" onClick={loadData}>
                   <Shuffle size={17} />
@@ -1476,7 +1479,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                 </button>
               ) : (
                 <div className="draft-spin-controls">
-                  <span className="spin-bank">{draftReshufflesLeft} reshuffle{draftReshufflesLeft === 1 ? "" : "s"} left</span>
+                  <span className="spin-bank">{draftReshufflesLeft} left</span>
                   <button
                     className="secondary-button"
                     type="button"
@@ -1484,34 +1487,19 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                     disabled={draftComplete || spinning || !dataReady || (Boolean(spin) && draftReshufflesLeft <= 0)}
                   >
                     <Shuffle size={17} className={spinning ? "spin-icon" : ""} />
-                    {!dataReady ? "Loading..." : spinning ? "Drawing..." : spin ? "Re-spin draw" : copy.spin}
+                    {!dataReady ? "Loading..." : spinning ? "Drawing..." : spin ? "Re-spin" : copy.spin}
                   </button>
-                  {spin && draftReshufflesLeft <= 0 && (
-                    <button className="secondary-button locked-button" type="button" disabled>
-                      <Lock size={16} />
-                      Extra reshuffles later
-                    </button>
-                  )}
                 </div>
               )}
-            </div>
-
-            <div className="fit-explainer">
-              <BadgeInfo size={16} />
-              <span><strong>Perfect</strong> is a natural role.</span>
-              <span><strong>Good Fit</strong> is an adjacent role with a small penalty.</span>
-              <span><strong>Okay</strong> is an emergency fit.</span>
             </div>
 
             {spin ? (
               <div className="spin-result">
                 <div className="draw-ticket">
-                  <span>TEAM</span>
                   <strong>{spin.teamCode}</strong>
-                  <span>YEAR</span>
+                  <span>·</span>
                   <strong>{spin.year}</strong>
                   <small>{spin.teamName}</small>
-                  <small>Open roles: {openSlots.slice(0, 5).map((slot) => slot.label).join(", ")}{openSlots.length > 5 ? "..." : ""}</small>
                 </div>
                 {pendingCandidate && (
                   <div
@@ -1558,55 +1546,44 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                     </div>
                   </div>
                 )}
-                <div className="candidate-grid">
+                <div className="candidate-list">
                   {spin.candidates.map((candidate, index) => {
                     const fitLabel = fitLabelFor(candidate.fit);
                     const fitText = fitTextFor(candidate.fit);
                     const cardFitClass = draftMode === "classic" ? ` ${fitLabel}` : "";
                     const boostWillActivate = Boolean(candidate.boost && activeBoostCount < BOOST_LIMIT);
+                    const roleTargets = candidate.slotOptions.slice(0, 3).map((option) => option.slotLabel).join(" · ") + (candidate.slotOptions.length > 3 ? " · +" : "");
                     return (
-                      <div className={`player-card fm-card${cardFitClass}`} key={candidate.player.i}>
-                        <div className="fm-card-top">
-                          <span className="card-pos">{candidate.slotOptions.length} role{candidate.slotOptions.length === 1 ? "" : "s"}</span>
-                          {draftMode === "classic" ? (
-                            <span className="card-ovr">{Math.round(candidate.effectiveRating)}</span>
-                          ) : (
-                            <span className="card-ovr hidden">?</span>
-                          )}
-                        </div>
-                        <span className="player-shirt">
-                          <Shirt size={42} strokeWidth={1.7} />
-                          <span>{candidate.player.num}</span>
-                        </span>
-                        <strong>{candidate.player.n}</strong>
-                        <span className="card-positions">{candidate.player.p.join(" / ")}</span>
-                        <span className="role-targets">
-                          {candidate.slotOptions.slice(0, 3).map((option) => option.slotLabel).join(" · ")}
-                          {candidate.slotOptions.length > 3 ? " · +" : ""}
-                        </span>
-                        {candidate.boost && (
-                          <span className={`boost-badge${boostWillActivate ? "" : " inactive"}`}>
-                            <Sparkles size={13} />
-                            {candidate.boost.label}{boostWillActivate ? "" : " (inactive)"}
-                          </span>
-                        )}
+                      <div className={`fm-row${cardFitClass}`} key={candidate.player.i}>
                         {draftMode === "classic" ? (
-                          <>
-                            <span className={`fit-badge ${fitLabel}`}>{fitText}</span>
-                            <div className="ovr-bar-wrap">
-                              <div className="ovr-bar-fill" style={{ width: `${Math.round(candidate.effectiveRating)}%` }} />
-                            </div>
-                            <div className="stat-row">
-                              <span>PAC {candidate.player.pac}</span>
-                              <span>SHO {candidate.player.sho}</span>
-                              <span>PAS {candidate.player.pas}</span>
-                              <span>DEF {candidate.player.def}</span>
-                            </div>
-                          </>
+                          <span className="fm-row-ovr">{Math.round(candidate.effectiveRating)}</span>
                         ) : (
-                          <div className="hidden-stats">Stats hidden</div>
+                          <span className="fm-row-ovr hidden">?</span>
                         )}
-                        <span className="team-chip">{spin.teamCode} &apos;{String(spin.year).slice(2)}</span>
+                        <div className="fm-row-main">
+                          <div className="fm-row-name">
+                            <strong>{candidate.player.n}</strong>
+                            {candidate.boost && (
+                              <span className={`boost-badge${boostWillActivate ? "" : " inactive"}`}>
+                                <Sparkles size={12} />
+                                {candidate.boost.label}{boostWillActivate ? "" : " (inactive)"}
+                              </span>
+                            )}
+                          </div>
+                          <div className="fm-row-sub">
+                            <span className="card-positions">{candidate.player.p.join(" / ")}</span>
+                            <span className="role-targets">→ {roleTargets}</span>
+                          </div>
+                        </div>
+                        {draftMode === "classic" && (
+                          <div className="fm-row-stats">
+                            <span>PAC {candidate.player.pac}</span>
+                            <span>SHO {candidate.player.sho}</span>
+                            <span>PAS {candidate.player.pas}</span>
+                            <span>DEF {candidate.player.def}</span>
+                          </div>
+                        )}
+                        {draftMode === "classic" && <span className={`fit-badge ${fitLabel}`}>{fitText}</span>}
                         <button className="primary-button pick-button" type="button" onClick={() => choosePlayer(index)}>
                           {candidate.slotOptions.length === 1 ? `Add to ${candidate.slotOptions[0].slotLabel}` : "Pick role"}
                           <ChevronRight size={16} />
@@ -1636,11 +1613,13 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
             )}
           </div>
 
-          <div className="draft-side">
+          <div className="draft-right">
+            <SquadPanel picks={picks} formationId={formationId} mode={draftMode} />
+
             <div className="panel formation-panel">
               <div className="formation-panel-head">
                 <p className="eyebrow">Formation</p>
-                {picks.length > 0 && <span className="fine-print">Locked for this squad</span>}
+                {picks.length > 0 && <span className="fine-print">Locked</span>}
               </div>
               <div className="formation-grid">
                 {FORMATION_LIST.map((formation) => (
@@ -1659,9 +1638,8 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                   </button>
                 ))}
               </div>
-              <FormationSetupPreview formationId={formationId} />
             </div>
-            <SquadPanel picks={picks} formationId={formationId} mode={draftMode} />
+
             {selectedManager && (
               <ProgressionPanel
                 score={managerScore}
@@ -2415,72 +2393,6 @@ function FormationGlyph({ formationId }: { formationId: string }) {
         })
       )}
     </svg>
-  );
-}
-
-function FormationSetupPreview({ formationId }: { formationId: string }) {
-  const slots = getStarterSlots(formationId);
-  const draftSlotCount = getDraftSlots(formationId).length;
-  const benchCount = Math.max(0, draftSlotCount - slots.length);
-  const lineOrder = ["attack", "midfield", "defense", "keeper"];
-  const lineLabels: Record<string, string> = {
-    attack: "Attack",
-    midfield: "Midfield",
-    defense: "Defense",
-    keeper: "Keeper"
-  };
-  const lineYPct: Record<string, number> = { attack: 18, midfield: 42, defense: 66, keeper: 87 };
-  const byLine: Record<string, FormationSlot[]> = {};
-
-  slots.forEach((slot) => {
-    if (!byLine[slot.line]) byLine[slot.line] = [];
-    byLine[slot.line].push(slot);
-  });
-
-  return (
-    <div className="formation-preview" aria-label={`${formationId} formation preview`}>
-      <div className="formation-preview-head">
-        <div>
-          <span>Selected shape</span>
-          <strong>{formationId}</strong>
-        </div>
-        <div>
-          <span>Draft plan</span>
-          <strong>{slots.length} XI + {benchCount} bench</strong>
-        </div>
-      </div>
-
-      <div className="formation-preview-pitch" aria-hidden="true">
-        <span className="formation-preview-line halfway" />
-        <span className="formation-preview-circle" />
-        {lineOrder.flatMap((line) => {
-          const lineSlots = byLine[line] ?? [];
-          const yPct = lineYPct[line] ?? 50;
-          return lineSlots.map((slot, index) => {
-            const count = lineSlots.length;
-            const xPct = count === 1 ? 50 : 18 + (index / (count - 1)) * 64;
-            return (
-              <span
-                className="formation-preview-dot"
-                key={slot.id}
-                style={{ left: `${xPct}%`, top: `${yPct}%` }}
-              >
-                {slot.target}
-              </span>
-            );
-          });
-        })}
-      </div>
-
-      <div className="formation-preview-meta">
-        {lineOrder.map((line) => (
-          <span key={line}>
-            <strong>{byLine[line]?.length ?? 0}</strong>
-            {lineLabels[line]}
-          </span>
-        ))}
-      </div>
-    </div>
   );
 }
 
