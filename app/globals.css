@@ -1811,6 +1811,120 @@ p {
   font-size: 1.12rem;
 }
 
+.season-dashboard {
+  display: grid;
+  gap: clamp(12px, 1.7vw, 22px);
+}
+
+.season-dashboard-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(360px, 0.95fr);
+  gap: clamp(12px, 1.7vw, 22px);
+  align-items: start;
+}
+
+.season-pitch-panel {
+  overflow: hidden;
+}
+
+.season-pitch-panel .pitch-container {
+  aspect-ratio: 16 / 5;
+  min-height: 250px;
+  max-height: 340px;
+}
+
+.season-pitch-panel .bench-row {
+  max-height: 74px;
+  overflow: auto;
+}
+
+.season-control-panel {
+  min-width: 0;
+}
+
+.season-stage-chip {
+  min-width: auto;
+  text-transform: uppercase;
+}
+
+.season-side-stack {
+  min-width: 0;
+}
+
+.scrollable-table-panel .table {
+  max-height: min(54dvh, 620px);
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.scrollable-table-panel .table-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--panel);
+}
+
+.season-last-result {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--panel);
+}
+
+.season-last-result span,
+.season-last-result small {
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.season-last-result strong {
+  color: var(--amber);
+  font-size: 1.2rem;
+}
+
+.season-last-result small {
+  min-width: 0;
+  overflow: hidden;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.season-sub-card {
+  display: grid;
+  gap: 10px;
+}
+
+.season-absence-list {
+  display: grid;
+  gap: 10px;
+}
+
+.season-absence-row {
+  display: grid;
+  grid-template-columns: minmax(170px, 0.42fr) minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--panel-strong);
+}
+
+.season-absence-row > div:first-child span {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
 .manager-quote {
   padding: 10px 12px;
   border-left: 3px solid var(--amber);
@@ -3325,9 +3439,19 @@ p {
   .layout-grid,
   .draft-layout,
   .league-layout,
+  .season-dashboard-grid,
   .setup-grid,
   .complete-grid,
   .personal-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .season-pitch-panel .pitch-container {
+    aspect-ratio: 4 / 3;
+    max-height: none;
+  }
+
+  .season-absence-row {
     grid-template-columns: 1fr;
   }
 

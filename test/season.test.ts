@@ -5,12 +5,18 @@ import { autoDraftManager } from "@/lib/game/draft";
 import {
   TEAM_TALK_EXPECTED_GOALS_BONUS,
   applySeasonFixtureInjuries,
+  applySeasonFixtureSuspensions,
   availableSeasonBench,
   buildDoubleRoundRobin,
+  canUseSeasonTeamTalk,
   createInvincibleSeason,
   createSeasonPregame,
+  decrementSeasonAbsences,
   decrementSeasonInjuries,
-  managerForSeasonMatch
+  markSeasonTeamTalkUsed,
+  managerForSeasonMatch,
+  remainingSeasonTeamTalks,
+  seasonMissingRequiredSubstitutions
 } from "@/lib/game/season";
 import { computeStandings, simulateFixture } from "@/lib/game/simulation";
 import type { FixtureResult, ManagerSquad, RawFootballData } from "@/lib/game/types";
@@ -94,7 +100,70 @@ describe("Be Invincible season", () => {
       seed: "injury-duration"
     });
     expect(applied.injuryGamesByPlayerId[starter.player.i]).toBeGreaterThanOrEqual(1);
-    expect(applied.injuryGamesByPlayerId[starter.player.i]).toBeLessThanOrEqual(5);
+    expect(applied.injuryGamesByPlayerId[starter.player.i]).toBeLessThanOrEqual(10);
+  });
+
+  it("applies fixed three-game red-card suspensions and returns players automatically", () => {
+    const base = human("suspension-human");
+    const starter = base.picks[0];
+    const result = simulateFixture({
+      fixture: { id: "red-fx", round: 1, homeId: "human", awayId: "away" },
+      home: base,
+      away: autoDraftManager({ id: "away", displayName: "Away", formationId: "4-4-2", seed: "red-away" }),
+      seed: "red-result"
+    });
+    const applied = applySeasonFixtureSuspensions({
+      suspensionGamesByPlayerId: {},
+      result: { ...result, homeRedCards: [starter.player.i], awayRedCards: [] }
+    });
+
+    expect(applied.suspensionGamesByPlayerId[starter.player.i]).toBe(3);
+    expect(decrementSeasonAbsences(applied.suspensionGamesByPlayerId)[starter.player.i]).toBe(2);
+    expect(decrementSeasonAbsences(decrementSeasonAbsences(decrementSeasonAbsences(applied.suspensionGamesByPlayerId)))[starter.player.i]).toBeUndefined();
+  });
+
+  it("blocks the next game until unavailable starters have substitutes", () => {
+    const base = human("blocked-sub-human");
+    const starter = base.picks.find((pick) => pick.target !== "SUB")!;
+    const sub = base.picks.find((pick) => pick.target === "SUB")!;
+    const missing = seasonMissingRequiredSubstitutions({
+      human: base,
+      injuryGamesByPlayerId: { [starter.player.i]: 4 },
+      suspensionGamesByPlayerId: {}
+    });
+    const resolved = seasonMissingRequiredSubstitutions({
+      human: { ...base, substitutions: { [starter.player.i]: sub.player.i } },
+      injuryGamesByPlayerId: { [starter.player.i]: 4 },
+      suspensionGamesByPlayerId: {}
+    });
+
+    expect(missing.map((pick) => pick.player.i)).toContain(starter.player.i);
+    expect(resolved).toHaveLength(0);
+  });
+
+  it("limits team talks to one per half of the season", () => {
+    const base = human("talks-human");
+    const season = createInvincibleSeason({
+      humanPicks: base.picks,
+      humanName: "Tester",
+      formationId: base.formationId,
+      mode: "classic",
+      completedLeagues: 0,
+      mmr: 200,
+      managerRating: 55,
+      attemptId: "attempt-talks",
+      seed: "season-talks"
+    });
+
+    expect(remainingSeasonTeamTalks(season)).toBe(2);
+    expect(canUseSeasonTeamTalk(season)).toBe(true);
+    const firstUsed = { ...season, teamTalksUsedByHalf: markSeasonTeamTalkUsed(season) };
+    expect(canUseSeasonTeamTalk(firstUsed)).toBe(false);
+    expect(remainingSeasonTeamTalks(firstUsed)).toBe(1);
+    const secondHalf = { ...firstUsed, currentMatchday: 19 };
+    expect(canUseSeasonTeamTalk(secondHalf)).toBe(true);
+    const allUsed = { ...secondHalf, teamTalksUsedByHalf: markSeasonTeamTalkUsed(secondHalf) };
+    expect(remainingSeasonTeamTalks(allUsed)).toBe(0);
   });
 
   it("supports one-match out-of-form substitutions without permanently changing the manager", () => {

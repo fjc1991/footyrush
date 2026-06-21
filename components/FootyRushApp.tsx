@@ -14,14 +14,20 @@ import {
   OUT_OF_FORM_EXPECTED_GOALS_PENALTY,
   TEAM_TALK_EXPECTED_GOALS_BONUS,
   applySeasonFixtureInjuries,
+  applySeasonFixtureSuspensions,
   availableSeasonBench,
-  compactSeasonEvents,
+  canUseSeasonTeamTalk,
   createInvincibleSeason,
   createSeasonPregame,
   currentHumanFixture as getCurrentSeasonHumanFixture,
-  decrementSeasonInjuries,
+  decrementSeasonAbsences,
+  markSeasonTeamTalkUsed,
   managerForSeasonMatch,
+  remainingSeasonTeamTalks,
+  seasonMissingRequiredSubstitutions,
   seasonUnavailablePlayerIds,
+  seasonUnavailableStarters,
+  teamTalkHalfForMatchday,
   type InvincibleSeason,
   type SeasonPregameDecision
 } from "@/lib/game/season";
@@ -183,17 +189,12 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
   const [exhibitionPlaying, setExhibitionPlaying] = useState(false);
   const [season, setSeason] = useState<InvincibleSeason | null>(null);
   const [seasonDecision, setSeasonDecision] = useState<SeasonPregameDecision | null>(null);
-  const [seasonCurrentResult, setSeasonCurrentResult] = useState<FixtureResult | null>(null);
-  const [seasonLiveSecond, setSeasonLiveSecond] = useState(0);
-  const [seasonPlaying, setSeasonPlaying] = useState(false);
-  const [seasonReadyToRecord, setSeasonReadyToRecord] = useState(false);
   const [seasonOutOfFormChoice, setSeasonOutOfFormChoice] = useState<"keep" | "bench" | null>(null);
   const [seasonOutOfFormSubId, setSeasonOutOfFormSubId] = useState<number | null>(null);
   const [seasonTeamTalkActive, setSeasonTeamTalkActive] = useState(false);
   const [seasonAttemptMessage, setSeasonAttemptMessage] = useState("");
   const leagueCommentaryRef = useRef<HTMLDivElement | null>(null);
   const exhibitionCommentaryRef = useRef<HTMLDivElement | null>(null);
-  const seasonCommentaryRef = useRef<HTMLDivElement | null>(null);
 
   const draftSlots = useMemo(() => getDraftSlots(formationId), [formationId]);
   const openSlots = useMemo(() => getOpenDraftSlots(formationId, picks), [formationId, picks]);
@@ -209,7 +210,11 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
       season
         ? season.managers.map((manager) =>
             manager.id === "human"
-              ? { ...manager, injuredPlayerIds: seasonUnavailablePlayerIds(season.injuryGamesByPlayerId) }
+              ? {
+                  ...manager,
+                  injuredPlayerIds: seasonUnavailablePlayerIds(season.injuryGamesByPlayerId),
+                  suspendedPlayerIds: seasonUnavailablePlayerIds({}, season.suspensionGamesByPlayerId)
+                }
               : manager
           )
         : [],
@@ -217,6 +222,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
   );
   const seasonStandings = useMemo(() => (season ? computeStandings(season.managers, season.results) : []), [season]);
   const seasonManagerById = useMemo(() => new Map(seasonDisplayManagers.map((manager) => [manager.id, manager])), [seasonDisplayManagers]);
+  const seasonHumanManager = useMemo(() => seasonDisplayManagers.find((manager) => manager.id === "human"), [seasonDisplayManagers]);
   const currentSeasonFixture = season ? getCurrentSeasonHumanFixture(season) : null;
   const visibleEvents = useMemo(
     () => currentResult?.events.filter((event) => event.second <= liveSecond) ?? [],
@@ -231,13 +237,6 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
   );
   const exhibitionHomeGoals = exhibitionEvents.filter((event) => event.code === "goal" && event.teamId === "human").length;
   const exhibitionAwayGoals = exhibitionEvents.filter((event) => event.code === "goal" && event.teamId === exhibition?.away.id).length;
-  const seasonVisibleEvents = useMemo(
-    () => seasonCurrentResult?.events.filter((event) => event.second <= seasonLiveSecond) ?? [],
-    [seasonCurrentResult, seasonLiveSecond]
-  );
-  const seasonCommentaryEvents = useMemo(() => compactSeasonEvents(seasonVisibleEvents), [seasonVisibleEvents]);
-  const seasonHomeGoals = seasonVisibleEvents.filter((event) => event.code === "goal" && event.teamId === currentSeasonFixture?.homeId).length;
-  const seasonAwayGoals = seasonVisibleEvents.filter((event) => event.code === "goal" && event.teamId === currentSeasonFixture?.awayId).length;
   const leaderboard = useMemo(
     () => aggregateLeaderboard([...demoLeaderboardRecords(), ...leaderboardRecords], leaderboardPeriod),
     [leaderboardPeriod, leaderboardRecords]
@@ -262,9 +261,31 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
   const seasonOutOfFormSubs = useMemo(() => {
     const human = seasonDisplayManagers.find((manager) => manager.id === "human");
     return human && seasonDecision?.outOfForm
-      ? availableSeasonBench(human, season?.injuryGamesByPlayerId ?? {}, [seasonDecision.outOfForm.playerId])
+      ? availableSeasonBench(human, season?.injuryGamesByPlayerId ?? {}, [seasonDecision.outOfForm.playerId], season?.suspensionGamesByPlayerId ?? {})
       : [];
   }, [season, seasonDecision, seasonDisplayManagers]);
+  const seasonUnavailableStartersList = useMemo(
+    () =>
+      season && seasonHumanManager
+        ? seasonUnavailableStarters({
+            human: seasonHumanManager,
+            injuryGamesByPlayerId: season.injuryGamesByPlayerId,
+            suspensionGamesByPlayerId: season.suspensionGamesByPlayerId
+          })
+        : [],
+    [season, seasonHumanManager]
+  );
+  const seasonMissingSubstitutions = useMemo(
+    () =>
+      season && seasonHumanManager
+        ? seasonMissingRequiredSubstitutions({
+            human: seasonHumanManager,
+            injuryGamesByPlayerId: season.injuryGamesByPlayerId,
+            suspensionGamesByPlayerId: season.suspensionGamesByPlayerId
+          })
+        : [],
+    [season, seasonHumanManager]
+  );
   const pendingCandidate = spin?.candidates.find((candidate) => candidate.player.i === slotPickerCandidateId) ?? null;
   const latestHumanInjury = [...visibleEvents]
     .reverse()
@@ -432,25 +453,6 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
   }, [exhibitionPlaying, matchSpeed]);
 
   useEffect(() => {
-    if (!seasonPlaying) {
-      return;
-    }
-    const timer = window.setInterval(() => {
-      setSeasonLiveSecond((second) => {
-        if (second >= 90) {
-          window.clearInterval(timer);
-          setSeasonPlaying(false);
-          setSeasonReadyToRecord(true);
-          return 90;
-        }
-        return second + 1;
-      });
-    }, 650 / matchSpeed);
-
-    return () => window.clearInterval(timer);
-  }, [seasonPlaying, matchSpeed]);
-
-  useEffect(() => {
     if (leagueCommentaryRef.current) {
       leagueCommentaryRef.current.scrollTop = leagueCommentaryRef.current.scrollHeight;
     }
@@ -461,12 +463,6 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
       exhibitionCommentaryRef.current.scrollTop = exhibitionCommentaryRef.current.scrollHeight;
     }
   }, [exhibitionEvents.length]);
-
-  useEffect(() => {
-    if (seasonCommentaryRef.current) {
-      seasonCommentaryRef.current.scrollTop = seasonCommentaryRef.current.scrollHeight;
-    }
-  }, [seasonCommentaryEvents.length]);
 
   useEffect(() => {
     const goalCount = visibleEvents.filter((e) => e.code === "goal").length;
@@ -536,10 +532,6 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     setExhibitionPlaying(false);
     setSeason(null);
     setSeasonDecision(null);
-    setSeasonCurrentResult(null);
-    setSeasonLiveSecond(0);
-    setSeasonPlaying(false);
-    setSeasonReadyToRecord(false);
     setSeasonOutOfFormChoice(null);
     setSeasonOutOfFormSubId(null);
     setSeasonTeamTalkActive(false);
@@ -710,10 +702,6 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
       const preparedSeason = prepareSeasonMatch(nextSeason);
       setSeason(preparedSeason);
       setCurrentResult(null);
-      setSeasonCurrentResult(null);
-      setSeasonLiveSecond(0);
-      setSeasonPlaying(false);
-      setSeasonReadyToRecord(false);
       setPhase("season");
       return;
     }
@@ -766,7 +754,10 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
   }
 
   function canKickOffSeasonMatch(): boolean {
-    if (!season || !currentSeasonFixture || seasonCurrentResult || seasonPlaying) {
+    if (!season || !currentSeasonFixture) {
+      return false;
+    }
+    if (seasonMissingSubstitutions.length > 0) {
       return false;
     }
     if (seasonDecision?.outOfForm && !seasonOutOfFormChoice) {
@@ -778,7 +769,22 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     return true;
   }
 
-  function startSeasonMatch() {
+  function handleSeasonSubSelection(unavailablePlayerId: number, subPlayerId: number) {
+    if (!season) {
+      return;
+    }
+    const nextManagers = season.managers.map((manager) =>
+      manager.id === "human"
+        ? {
+            ...manager,
+            substitutions: { ...manager.substitutions, [unavailablePlayerId]: subPlayerId }
+          }
+        : manager
+    );
+    setSeason({ ...season, managers: nextManagers });
+  }
+
+  async function playSeasonMatchAndAdvance() {
     if (!season || !currentSeasonFixture || !canKickOffSeasonMatch()) {
       return;
     }
@@ -792,6 +798,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     const matchHuman = managerForSeasonMatch({
       human,
       injuryGamesByPlayerId: season.injuryGamesByPlayerId,
+      suspensionGamesByPlayerId: season.suspensionGamesByPlayerId,
       outOfFormPlayerId: seasonOutOfFormChoice === "bench" ? seasonDecision?.outOfForm?.playerId : undefined,
       outOfFormSubstituteId: seasonOutOfFormChoice === "bench" ? seasonOutOfFormSubId ?? undefined : undefined
     });
@@ -808,17 +815,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
       homeExpectedGoalsModifier: currentSeasonFixture.homeId === "human" ? humanModifier : 0,
       awayExpectedGoalsModifier: currentSeasonFixture.awayId === "human" ? humanModifier : 0
     });
-    setSeasonCurrentResult(result);
-    setSeasonLiveSecond(0);
-    setSeasonPlaying(true);
-    setSeasonReadyToRecord(false);
-    setLastFlashedGoalCount(0);
-  }
-
-  function finishSeasonNow() {
-    setSeasonLiveSecond(90);
-    setSeasonPlaying(false);
-    setSeasonReadyToRecord(true);
+    await recordSeasonMatchAndAdvance(result);
   }
 
   async function completeInvincibleAttempt(completedSeason: InvincibleSeason, completedStandings: ReturnType<typeof computeStandings>) {
@@ -844,14 +841,14 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     return (await response.json()) as { officialAward: boolean; production: boolean };
   }
 
-  async function recordSeasonMatchAndAdvance() {
-    if (!season || !seasonCurrentResult) {
+  async function recordSeasonMatchAndAdvance(humanResult: FixtureResult) {
+    if (!season) {
       return;
     }
 
     const currentRound = season.rounds[season.currentMatchday] ?? [];
-    const nextResults = [...season.results, seasonCurrentResult];
-    const otherFixtures = currentRound.filter((fixture) => fixture.id !== seasonCurrentResult.fixtureId);
+    const nextResults = [...season.results, humanResult];
+    const otherFixtures = currentRound.filter((fixture) => fixture.id !== humanResult.fixtureId);
     otherFixtures.forEach((fixture) => {
       const home = season.managers.find((manager) => manager.id === fixture.homeId);
       const away = season.managers.find((manager) => manager.id === fixture.awayId);
@@ -869,23 +866,27 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     });
 
     const postMatchInjuries = applySeasonFixtureInjuries({
-      injuryGamesByPlayerId: decrementSeasonInjuries(season.injuryGamesByPlayerId),
-      result: seasonCurrentResult,
+      injuryGamesByPlayerId: decrementSeasonAbsences(season.injuryGamesByPlayerId),
+      result: humanResult,
       seed: `${season.id}:post-injury:${season.currentMatchday}`
     });
+    const postMatchSuspensions = applySeasonFixtureSuspensions({
+      suspensionGamesByPlayerId: decrementSeasonAbsences(season.suspensionGamesByPlayerId),
+      result: humanResult
+    });
     const nextMatchday = season.currentMatchday + 1;
+    const nextTeamTalksUsedByHalf = seasonTeamTalkActive ? markSeasonTeamTalkUsed(season) : season.teamTalksUsedByHalf;
     let nextSeason: InvincibleSeason = {
       ...season,
       results: nextResults,
       currentMatchday: nextMatchday,
       injuryGamesByPlayerId: postMatchInjuries.injuryGamesByPlayerId,
-      boostsRemaining: seasonTeamTalkActive ? Math.max(0, season.boostsRemaining - 1) : season.boostsRemaining,
+      suspensionGamesByPlayerId: postMatchSuspensions.suspensionGamesByPlayerId,
+      teamTalksUsedByHalf: nextTeamTalksUsedByHalf,
+      boostsRemaining: remainingSeasonTeamTalks({ teamTalksUsedByHalf: nextTeamTalksUsedByHalf }),
       boostsUsed: seasonTeamTalkActive ? season.boostsUsed + 1 : season.boostsUsed
     };
 
-    setSeasonCurrentResult(null);
-    setSeasonLiveSecond(0);
-    setSeasonReadyToRecord(false);
     setSeasonOutOfFormChoice(null);
     setSeasonOutOfFormSubId(null);
     setSeasonTeamTalkActive(false);
@@ -1256,19 +1257,19 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
           <button
             type="button"
             className={`banner-tab${view === "leaderboards" ? " active" : ""}`}
-            onClick={() => !isPlaying && !exhibitionPlaying && !seasonPlaying && switchView("leaderboards")}
-            disabled={isPlaying || exhibitionPlaying || seasonPlaying}
-            title={isPlaying || exhibitionPlaying || seasonPlaying ? copy.tabLockedHint : undefined}
+            onClick={() => !isPlaying && !exhibitionPlaying && switchView("leaderboards")}
+            disabled={isPlaying || exhibitionPlaying}
+            title={isPlaying || exhibitionPlaying ? copy.tabLockedHint : undefined}
           >
             {copy.tabLeaderboards}
-            {(isPlaying || exhibitionPlaying || seasonPlaying) && <span className="tab-lock">· {copy.tabLive}</span>}
+            {(isPlaying || exhibitionPlaying) && <span className="tab-lock">· {copy.tabLive}</span>}
           </button>
           <button
             type="button"
             className={`banner-tab${view === "personal" ? " active" : ""}`}
-            onClick={() => !isPlaying && !exhibitionPlaying && !seasonPlaying && switchView("personal")}
-            disabled={isPlaying || exhibitionPlaying || seasonPlaying}
-            title={isPlaying || exhibitionPlaying || seasonPlaying ? copy.tabLockedHint : undefined}
+            onClick={() => !isPlaying && !exhibitionPlaying && switchView("personal")}
+            disabled={isPlaying || exhibitionPlaying}
+            title={isPlaying || exhibitionPlaying ? copy.tabLockedHint : undefined}
           >
             {copy.tabProgress}
           </button>
@@ -1846,17 +1847,33 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
       )}
 
       {view === "play" && phase === "season" && season && (
-        <section className="league-layout matchday season-layout">
-          <div className="panel match-panel">
+        <section className="season-dashboard">
+          {seasonHumanManager && (
+            <div className="panel season-pitch-panel">
+              <div className="panel-header">
+                <div>
+                  <p className="eyebrow">Your XI · Be Invincible</p>
+                  <h2>{seasonHumanManager.formationId} matchday shape</h2>
+                </div>
+                <strong className="rating-chip">{Math.round(calculateSquadStrength(seasonHumanManager).overall)}</strong>
+              </div>
+              <FormationPitch
+                picks={seasonHumanManager.picks}
+                formationId={seasonHumanManager.formationId}
+                injuredPlayerIds={seasonUnavailablePlayerIds(season.injuryGamesByPlayerId)}
+                suspendedPlayerIds={seasonUnavailablePlayerIds({}, season.suspensionGamesByPlayerId)}
+              />
+            </div>
+          )}
+
+          <div className="season-dashboard-grid">
+            <div className="panel match-panel season-control-panel">
             <div className="panel-header">
               <div>
                 <p className="eyebrow">Be Invincible · {season.skillBand}</p>
                 <h2>Match {season.currentMatchday + 1} of 38</h2>
               </div>
-              <div className="timer">
-                <Timer size={18} />
-                {seasonLiveSecond}&apos;
-              </div>
+              <div className="timer season-stage-chip">Stage {season.currentMatchday + 1}</div>
             </div>
 
             {seasonAttemptMessage && <p className="fine-print">{seasonAttemptMessage}</p>}
@@ -1865,26 +1882,30 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
               <MatchHeader
                 home={seasonManagerById.get(currentSeasonFixture.homeId)}
                 away={seasonManagerById.get(currentSeasonFixture.awayId)}
-                started={Boolean(seasonCurrentResult)}
-                homeGoals={seasonHomeGoals}
-                awayGoals={seasonAwayGoals}
+                started={false}
+                homeGoals={0}
+                awayGoals={0}
               />
             )}
 
-            {!seasonCurrentResult && currentSeasonFixture && (
+            {currentSeasonFixture && seasonHumanManager && (
               <SeasonPreMatchPanel
                 fixtureId={currentSeasonFixture.id}
                 opponent={currentSeasonFixture.homeId === "human"
                   ? seasonManagerById.get(currentSeasonFixture.awayId)
                   : seasonManagerById.get(currentSeasonFixture.homeId)}
+                human={seasonHumanManager}
                 humanStanding={seasonHumanStanding}
                 decision={seasonDecision}
-                boostRemaining={season.boostsRemaining}
+                season={season}
                 teamTalkActive={seasonTeamTalkActive}
                 outOfFormChoice={seasonOutOfFormChoice}
                 outOfFormSubId={seasonOutOfFormSubId}
                 availableSubs={seasonOutOfFormSubs}
-                onUseTeamTalk={() => season.boostsRemaining > 0 && setSeasonTeamTalkActive(true)}
+                unavailableStarters={seasonUnavailableStartersList}
+                missingSubstitutions={seasonMissingSubstitutions}
+                onChooseSub={handleSeasonSubSelection}
+                onUseTeamTalk={() => canUseSeasonTeamTalk(season) && setSeasonTeamTalkActive(true)}
                 onSkipTeamTalk={() => setSeasonTeamTalkActive(false)}
                 onKeepOutOfForm={() => {
                   setSeasonOutOfFormChoice("keep");
@@ -1894,61 +1915,19 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                   setSeasonOutOfFormChoice("bench");
                   setSeasonOutOfFormSubId(subId);
                 }}
-                onStart={startSeasonMatch}
+                onStart={playSeasonMatchAndAdvance}
                 canStart={canKickOffSeasonMatch()}
               />
             )}
 
-            {seasonCurrentResult && (
-              <>
-                <div className="commentary-log" aria-live="polite" ref={seasonCommentaryRef}>
-                  {seasonCommentaryEvents.map((event) => (
-                    <div
-                      className={`commentary-line${event.code === "goal" ? " goal-flash" : event.code === "red_card" ? " red-flash" : ""}`}
-                      key={event.id}
-                    >
-                      <span>{event.second}&apos;</span>
-                      <p>
-                        {event.code === "goal" && <Goal className="goal-icon" size={18} aria-label="Goal" />}
-                        {renderCommentary(event, locale)}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-
-                <div className="match-actions">
-                  <div className="speed-controls" aria-label="Match speed">
-                    {([1, 2, 4] as const).map((speed) => (
-                      <button
-                        key={speed}
-                        type="button"
-                        className={matchSpeed === speed ? "active" : ""}
-                        onClick={() => setMatchSpeed(speed)}
-                      >
-                        {speed}x
-                      </button>
-                    ))}
-                  </div>
-                  {seasonPlaying ? (
-                    <button className="secondary-button" type="button" onClick={finishSeasonNow}>
-                      Finish now
-                    </button>
-                  ) : (
-                    <button className="primary-button" type="button" onClick={recordSeasonMatchAndAdvance} disabled={!seasonReadyToRecord && seasonLiveSecond < 90}>
-                      Next match
-                    </button>
-                  )}
-                </div>
-              </>
-            )}
-
             <SeasonResultsList season={season} managers={season.managers} />
-          </div>
+            </div>
 
-          <div className="side-stack">
-            <StandingsPanel standings={seasonStandings} eyebrow="Be Invincible" title="Season table" />
-            <SeasonStatusPanel season={season} />
-            <InjuryPanel managers={seasonDisplayManagers} />
+            <div className="side-stack season-side-stack">
+              <StandingsPanel standings={seasonStandings} eyebrow="Be Invincible" title="Season table" scrollable />
+              <SeasonStatusPanel season={season} />
+              <InjuryPanel managers={seasonDisplayManagers} />
+            </div>
           </div>
         </section>
       )}
@@ -2494,14 +2473,16 @@ function managerSourceLabel(manager?: ManagerSquad): string {
 function StandingsPanel({
   standings,
   eyebrow = "Historical league",
-  title = "Standings"
+  title = "Standings",
+  scrollable = false
 }: {
   standings: ReturnType<typeof computeStandings>;
   eyebrow?: string;
   title?: string;
+  scrollable?: boolean;
 }) {
   return (
-    <div className="panel table-panel">
+    <div className={`panel table-panel${scrollable ? " scrollable-table-panel" : ""}`}>
       <div className="panel-header">
         <div>
           <p className="eyebrow">{eyebrow}</p>
@@ -2645,15 +2626,19 @@ function PreMatchPanel({
 
 function SeasonPreMatchPanel({
   opponent,
+  human,
   humanStanding,
   fixtureId,
   decision,
-  boostRemaining,
+  season,
   teamTalkActive,
   outOfFormChoice,
   outOfFormSubId,
   availableSubs,
+  unavailableStarters,
+  missingSubstitutions,
   canStart,
+  onChooseSub,
   onUseTeamTalk,
   onSkipTeamTalk,
   onKeepOutOfForm,
@@ -2661,15 +2646,19 @@ function SeasonPreMatchPanel({
   onStart
 }: {
   opponent?: ManagerSquad;
+  human: ManagerSquad;
   humanStanding?: ReturnType<typeof computeStandings>[number];
   fixtureId: string;
   decision: SeasonPregameDecision | null;
-  boostRemaining: number;
+  season: InvincibleSeason;
   teamTalkActive: boolean;
   outOfFormChoice: "keep" | "bench" | null;
   outOfFormSubId: number | null;
   availableSubs: DraftPick[];
+  unavailableStarters: DraftPick[];
+  missingSubstitutions: DraftPick[];
   canStart: boolean;
+  onChooseSub: (unavailablePlayerId: number, subPlayerId: number) => void;
   onUseTeamTalk: () => void;
   onSkipTeamTalk: () => void;
   onKeepOutOfForm: () => void;
@@ -2678,8 +2667,52 @@ function SeasonPreMatchPanel({
 }) {
   const oppStrength = opponent ? calculateSquadStrength(opponent) : null;
   const quote = managerQuotes[hashStr(fixtureId) % managerQuotes.length];
+  const talkHalf = teamTalkHalfForMatchday(season.currentMatchday);
+  const teamTalkAvailable = canUseSeasonTeamTalk(season);
+  const usedSubIds = new Set(
+    unavailableStarters
+      .map((starter) => human.substitutions[starter.player.i])
+      .filter((playerId): playerId is number => playerId !== undefined)
+  );
+  const unavailableIds = new Set(seasonUnavailablePlayerIds(season.injuryGamesByPlayerId, season.suspensionGamesByPlayerId));
+  const absenceLabel = (playerId: number) => {
+    const injuryGames = season.injuryGamesByPlayerId[playerId] ?? 0;
+    const suspensionGames = season.suspensionGamesByPlayerId[playerId] ?? 0;
+    if (injuryGames > 0) return `Injured · ${injuryGames} match${injuryGames === 1 ? "" : "es"} out`;
+    if (suspensionGames > 0) return `Red card · ${suspensionGames} match${suspensionGames === 1 ? "" : "es"} out`;
+    return "Unavailable";
+  };
+  const availableReplacementOptions = (starter: DraftPick) => {
+    const selectedForStarter = human.substitutions[starter.player.i];
+    return human.picks.filter(
+      (pick) =>
+        pick.target === "SUB" &&
+        !unavailableIds.has(pick.player.i) &&
+        (!usedSubIds.has(pick.player.i) || pick.player.i === selectedForStarter)
+    );
+  };
+  const latestHumanResult = season.results
+    .filter((result) => result.homeId === "human" || result.awayId === "human")
+    .slice(-1)[0];
+  const latestSummary = latestHumanResult
+    ? {
+        opponentId: latestHumanResult.homeId === "human" ? latestHumanResult.awayId : latestHumanResult.homeId,
+        humanGoals: latestHumanResult.homeId === "human" ? latestHumanResult.homeGoals : latestHumanResult.awayGoals,
+        opponentGoals: latestHumanResult.homeId === "human" ? latestHumanResult.awayGoals : latestHumanResult.homeGoals
+      }
+    : null;
   return (
     <div className="prematch-panel season-pregame">
+      {latestSummary && (
+        <div className="season-last-result">
+          <span>Last result</span>
+          <strong>
+            {latestSummary.humanGoals} – {latestSummary.opponentGoals}
+          </strong>
+          <small>{season.managers.find((manager) => manager.id === latestSummary.opponentId)?.displayName ?? latestSummary.opponentId}</small>
+        </div>
+      )}
+
       <div className="prematch-header">
         <div className="prematch-team">
           <span className="you-label">You</span>
@@ -2698,7 +2731,7 @@ function SeasonPreMatchPanel({
           </div>
         )}
         <div className="prematch-stat">
-          <span>Boosts </span>{boostRemaining}
+          <span>Talks </span>{remainingSeasonTeamTalks(season)}/2
         </div>
         <div className="prematch-stat">
           <span>Pts </span>{humanStanding?.points ?? 0}
@@ -2709,6 +2742,46 @@ function SeasonPreMatchPanel({
         <div className="season-event-card danger">
           <strong>Training injury</strong>
           <p>{decision.trainingInjury.playerName} is out for {decision.trainingInjury.games} game{decision.trainingInjury.games === 1 ? "" : "s"}.</p>
+        </div>
+      )}
+
+      {unavailableStarters.length > 0 && (
+        <div className="season-event-card danger season-sub-card">
+          <strong>Selection required</strong>
+          <p>Choose replacements before the next game. Injured and suspended players return automatically when their match counter reaches zero.</p>
+          <div className="season-absence-list">
+            {unavailableStarters.map((starter) => {
+              const selectedSubId = human.substitutions[starter.player.i];
+              const options = availableReplacementOptions(starter);
+              return (
+                <div className="season-absence-row" key={starter.player.i}>
+                  <div>
+                    <strong>{starter.player.n}</strong>
+                    <span>{absenceLabel(starter.player.i)}</span>
+                  </div>
+                  <div className="sub-row">
+                    {options.length === 0 ? (
+                      <p className="fine-print">No available substitutes.</p>
+                    ) : (
+                      options.map((pick) => (
+                        <button
+                          key={pick.player.i}
+                          className={`sub-option${selectedSubId === pick.player.i ? " assistant-pick" : ""}`}
+                          type="button"
+                          onClick={() => onChooseSub(starter.player.i, pick.player.i)}
+                        >
+                          <span className="sub-option-num">{pick.player.num}</span>
+                          <span className="sub-option-name">{pick.player.n.split(/[\s.]+/).filter(Boolean).slice(-1)[0]}</span>
+                          <span className="sub-option-pos">{pick.benchRole ?? pick.player.p[0]}</span>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          {missingSubstitutions.length > 0 && <p className="fine-print">Pick {missingSubstitutions.length} more replacement{missingSubstitutions.length === 1 ? "" : "s"} to unlock Next game.</p>}
         </div>
       )}
 
@@ -2740,9 +2813,15 @@ function SeasonPreMatchPanel({
 
       <div className={`season-event-card${teamTalkActive ? " active" : ""}`}>
         <strong>Team talk</strong>
-        <p>{teamTalkActive ? "One-match boost active. It helps, but it will not force a win." : "Use one of three modest boosts before a difficult match."}</p>
+        <p>
+          {teamTalkActive
+            ? "One-match boost active. It helps, but it will not force a win."
+            : teamTalkAvailable
+              ? `Available for the ${talkHalf === "first" ? "first" : "second"} half of the season. You get one team talk per half.`
+              : `The ${talkHalf === "first" ? "first" : "second"}-half team talk has already been used.`}
+        </p>
         <div className="match-actions inline-actions">
-          <button className="secondary-button" type="button" onClick={onUseTeamTalk} disabled={teamTalkActive || boostRemaining <= 0}>
+          <button className="secondary-button" type="button" onClick={onUseTeamTalk} disabled={teamTalkActive || !teamTalkAvailable}>
             <Sparkles size={16} />
             Use team talk
           </button>
@@ -2756,8 +2835,8 @@ function SeasonPreMatchPanel({
 
       <ManagerAvatar mood="thinking" line={quote} />
       <button className="primary-button wide" type="button" onClick={onStart} disabled={!canStart}>
-        <Activity size={18} />
-        Kick off
+        <Play size={18} />
+        Next game
       </button>
     </div>
   );
@@ -2803,7 +2882,8 @@ function SeasonResultsList({ season, managers }: { season: InvincibleSeason; man
 function SeasonStatusPanel({ season }: { season: InvincibleSeason }) {
   const standings = computeStandings(season.managers, season.results);
   const human = standings.find((standing) => standing.managerId === "human");
-  const injuries = Object.entries(season.injuryGamesByPlayerId);
+  const injuries = Object.entries(season.injuryGamesByPlayerId).filter(([, games]) => games > 0);
+  const suspensions = Object.entries(season.suspensionGamesByPlayerId).filter(([, games]) => games > 0);
   return (
     <div className="panel season-status-panel">
       <p className="eyebrow">Season status</p>
@@ -2818,11 +2898,11 @@ function SeasonStatusPanel({ season }: { season: InvincibleSeason }) {
         </div>
         <div>
           <span>Team talks</span>
-          <strong>{season.boostsRemaining}/3</strong>
+          <strong>{remainingSeasonTeamTalks(season)}/2</strong>
         </div>
         <div>
-          <span>Injuries</span>
-          <strong>{injuries.length}</strong>
+          <span>Absences</span>
+          <strong>{injuries.length + suspensions.length}</strong>
         </div>
       </div>
       <p className="fine-print">Official Invincible eligibility is hidden until the season ends.</p>
