@@ -1835,8 +1835,8 @@ p {
 
 .season-pitch-panel .pitch-container {
   aspect-ratio: 2 / 3;
-  min-height: 280px;
-  max-height: min(38dvh, 430px);
+  min-height: 0;
+  max-height: 330px;
 }
 
 .season-pitch-panel .bench-row {
@@ -1846,6 +1846,7 @@ p {
 
 .season-control-panel {
   min-width: 0;
+  padding: 16px;
 }
 
 .season-control-panel .scoreboard {
@@ -1867,7 +1868,7 @@ p {
 }
 
 .scrollable-table-panel .table {
-  max-height: min(34dvh, 390px);
+  max-height: min(25dvh, 310px);
   overflow-y: auto;
   padding-right: 4px;
 }
@@ -1916,7 +1917,7 @@ p {
   grid-template-columns: minmax(0, 1fr) minmax(190px, auto);
   gap: 12px;
   align-items: center;
-  padding: 12px;
+  padding: 10px 12px;
   border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--line));
   border-radius: var(--r-md);
   background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 18%, var(--panel)), var(--panel));
@@ -1943,7 +1944,7 @@ p {
 }
 
 .season-next-button {
-  min-height: 58px;
+  min-height: 50px;
   justify-content: center;
   font-size: 1rem;
 }

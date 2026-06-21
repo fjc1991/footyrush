@@ -1925,8 +1925,12 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                 </div>
               )}
               <SeasonStatusPanel season={season} />
-              <SeasonResultsList season={season} managers={season.managers} />
-              <InjuryPanel managers={seasonDisplayManagers} />
+              {season.results.some((result) => result.homeId === "human" || result.awayId === "human") && (
+                <SeasonResultsList season={season} managers={season.managers} />
+              )}
+              {seasonDisplayManagers.some((manager) => manager.injuredPlayerIds.length > 0 || manager.suspendedPlayerIds.length > 0) && (
+                <InjuryPanel managers={seasonDisplayManagers} />
+              )}
             </div>
           </div>
         </section>
@@ -2722,17 +2726,6 @@ function SeasonPreMatchPanel({
         </div>
       )}
 
-      <div className="prematch-header">
-        <div className="prematch-team">
-          <span className="you-label">You</span>
-          <strong>{humanStanding ? `${humanStanding.wins}-${humanStanding.draws}-${humanStanding.losses}` : "0-0-0"}</strong>
-        </div>
-        <span className="prematch-vs">v</span>
-        <div className="prematch-team">
-          <span>{opponent?.displayName ?? "Opponent"}</span>
-          <strong>{opponent?.formationId ?? ""}</strong>
-        </div>
-      </div>
       <div className="prematch-stats">
         {oppStrength && (
           <div className="prematch-stat">
