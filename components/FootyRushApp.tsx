@@ -1848,84 +1848,84 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
 
       {view === "play" && phase === "season" && season && (
         <section className="season-dashboard">
-          {seasonHumanManager && (
-            <div className="panel season-pitch-panel">
-              <div className="panel-header">
-                <div>
-                  <p className="eyebrow">Your XI · Be Invincible</p>
-                  <h2>{seasonHumanManager.formationId} matchday shape</h2>
-                </div>
-                <strong className="rating-chip">{Math.round(calculateSquadStrength(seasonHumanManager).overall)}</strong>
-              </div>
-              <FormationPitch
-                picks={seasonHumanManager.picks}
-                formationId={seasonHumanManager.formationId}
-                injuredPlayerIds={seasonUnavailablePlayerIds(season.injuryGamesByPlayerId)}
-                suspendedPlayerIds={seasonUnavailablePlayerIds({}, season.suspensionGamesByPlayerId)}
-              />
-            </div>
-          )}
-
           <div className="season-dashboard-grid">
-            <div className="panel match-panel season-control-panel">
-            <div className="panel-header">
-              <div>
-                <p className="eyebrow">Be Invincible · {season.skillBand}</p>
-                <h2>Match {season.currentMatchday + 1} of 38</h2>
+            <div className="season-main-stack">
+              <div className="panel match-panel season-control-panel">
+                <div className="panel-header">
+                  <div>
+                    <p className="eyebrow">Be Invincible · {season.skillBand}</p>
+                    <h2>Match {season.currentMatchday + 1} of 38</h2>
+                  </div>
+                  <div className="timer season-stage-chip">Stage {season.currentMatchday + 1}</div>
+                </div>
+
+                {seasonAttemptMessage && <p className="fine-print compact-note">{seasonAttemptMessage}</p>}
+
+                {currentSeasonFixture && (
+                  <MatchHeader
+                    home={seasonManagerById.get(currentSeasonFixture.homeId)}
+                    away={seasonManagerById.get(currentSeasonFixture.awayId)}
+                    started={false}
+                    homeGoals={0}
+                    awayGoals={0}
+                  />
+                )}
+
+                {currentSeasonFixture && seasonHumanManager && (
+                  <SeasonPreMatchPanel
+                    opponent={currentSeasonFixture.homeId === "human"
+                      ? seasonManagerById.get(currentSeasonFixture.awayId)
+                      : seasonManagerById.get(currentSeasonFixture.homeId)}
+                    human={seasonHumanManager}
+                    humanStanding={seasonHumanStanding}
+                    decision={seasonDecision}
+                    season={season}
+                    teamTalkActive={seasonTeamTalkActive}
+                    outOfFormChoice={seasonOutOfFormChoice}
+                    outOfFormSubId={seasonOutOfFormSubId}
+                    availableSubs={seasonOutOfFormSubs}
+                    unavailableStarters={seasonUnavailableStartersList}
+                    missingSubstitutions={seasonMissingSubstitutions}
+                    onChooseSub={handleSeasonSubSelection}
+                    onUseTeamTalk={() => canUseSeasonTeamTalk(season) && setSeasonTeamTalkActive(true)}
+                    onSkipTeamTalk={() => setSeasonTeamTalkActive(false)}
+                    onKeepOutOfForm={() => {
+                      setSeasonOutOfFormChoice("keep");
+                      setSeasonOutOfFormSubId(null);
+                    }}
+                    onBenchOutOfForm={(subId) => {
+                      setSeasonOutOfFormChoice("bench");
+                      setSeasonOutOfFormSubId(subId);
+                    }}
+                    onStart={playSeasonMatchAndAdvance}
+                    canStart={canKickOffSeasonMatch()}
+                  />
+                )}
               </div>
-              <div className="timer season-stage-chip">Stage {season.currentMatchday + 1}</div>
-            </div>
 
-            {seasonAttemptMessage && <p className="fine-print">{seasonAttemptMessage}</p>}
-
-            {currentSeasonFixture && (
-              <MatchHeader
-                home={seasonManagerById.get(currentSeasonFixture.homeId)}
-                away={seasonManagerById.get(currentSeasonFixture.awayId)}
-                started={false}
-                homeGoals={0}
-                awayGoals={0}
-              />
-            )}
-
-            {currentSeasonFixture && seasonHumanManager && (
-              <SeasonPreMatchPanel
-                fixtureId={currentSeasonFixture.id}
-                opponent={currentSeasonFixture.homeId === "human"
-                  ? seasonManagerById.get(currentSeasonFixture.awayId)
-                  : seasonManagerById.get(currentSeasonFixture.homeId)}
-                human={seasonHumanManager}
-                humanStanding={seasonHumanStanding}
-                decision={seasonDecision}
-                season={season}
-                teamTalkActive={seasonTeamTalkActive}
-                outOfFormChoice={seasonOutOfFormChoice}
-                outOfFormSubId={seasonOutOfFormSubId}
-                availableSubs={seasonOutOfFormSubs}
-                unavailableStarters={seasonUnavailableStartersList}
-                missingSubstitutions={seasonMissingSubstitutions}
-                onChooseSub={handleSeasonSubSelection}
-                onUseTeamTalk={() => canUseSeasonTeamTalk(season) && setSeasonTeamTalkActive(true)}
-                onSkipTeamTalk={() => setSeasonTeamTalkActive(false)}
-                onKeepOutOfForm={() => {
-                  setSeasonOutOfFormChoice("keep");
-                  setSeasonOutOfFormSubId(null);
-                }}
-                onBenchOutOfForm={(subId) => {
-                  setSeasonOutOfFormChoice("bench");
-                  setSeasonOutOfFormSubId(subId);
-                }}
-                onStart={playSeasonMatchAndAdvance}
-                canStart={canKickOffSeasonMatch()}
-              />
-            )}
-
-            <SeasonResultsList season={season} managers={season.managers} />
+              <StandingsPanel standings={seasonStandings} eyebrow="Be Invincible" title="Season table" scrollable />
             </div>
 
             <div className="side-stack season-side-stack">
-              <StandingsPanel standings={seasonStandings} eyebrow="Be Invincible" title="Season table" scrollable />
+              {seasonHumanManager && (
+                <div className="panel season-pitch-panel">
+                  <div className="panel-header">
+                    <div>
+                      <p className="eyebrow">Your XI</p>
+                      <h2>{seasonHumanManager.formationId}</h2>
+                    </div>
+                    <strong className="rating-chip">{Math.round(calculateSquadStrength(seasonHumanManager).overall)}</strong>
+                  </div>
+                  <FormationPitch
+                    picks={seasonHumanManager.picks}
+                    formationId={seasonHumanManager.formationId}
+                    injuredPlayerIds={seasonUnavailablePlayerIds(season.injuryGamesByPlayerId)}
+                    suspendedPlayerIds={seasonUnavailablePlayerIds({}, season.suspensionGamesByPlayerId)}
+                  />
+                </div>
+              )}
               <SeasonStatusPanel season={season} />
+              <SeasonResultsList season={season} managers={season.managers} />
               <InjuryPanel managers={seasonDisplayManagers} />
             </div>
           </div>
@@ -2628,7 +2628,6 @@ function SeasonPreMatchPanel({
   opponent,
   human,
   humanStanding,
-  fixtureId,
   decision,
   season,
   teamTalkActive,
@@ -2648,7 +2647,6 @@ function SeasonPreMatchPanel({
   opponent?: ManagerSquad;
   human: ManagerSquad;
   humanStanding?: ReturnType<typeof computeStandings>[number];
-  fixtureId: string;
   decision: SeasonPregameDecision | null;
   season: InvincibleSeason;
   teamTalkActive: boolean;
@@ -2666,7 +2664,6 @@ function SeasonPreMatchPanel({
   onStart: () => void;
 }) {
   const oppStrength = opponent ? calculateSquadStrength(opponent) : null;
-  const quote = managerQuotes[hashStr(fixtureId) % managerQuotes.length];
   const talkHalf = teamTalkHalfForMatchday(season.currentMatchday);
   const teamTalkAvailable = canUseSeasonTeamTalk(season);
   const usedSubIds = new Set(
@@ -2703,6 +2700,18 @@ function SeasonPreMatchPanel({
     : null;
   return (
     <div className="prematch-panel season-pregame">
+      <div className="season-primary-action">
+        <div>
+          <span>Next up</span>
+          <strong>{opponent?.displayName ?? "Opponent"}</strong>
+          <small>{missingSubstitutions.length > 0 ? "Choose replacements to continue" : "Ready for the next fixture"}</small>
+        </div>
+        <button className="primary-button season-next-button" type="button" onClick={onStart} disabled={!canStart}>
+          <Play size={18} />
+          Next game
+        </button>
+      </div>
+
       {latestSummary && (
         <div className="season-last-result">
           <span>Last result</span>
@@ -2832,12 +2841,6 @@ function SeasonPreMatchPanel({
           )}
         </div>
       </div>
-
-      <ManagerAvatar mood="thinking" line={quote} />
-      <button className="primary-button wide" type="button" onClick={onStart} disabled={!canStart}>
-        <Play size={18} />
-        Next game
-      </button>
     </div>
   );
 }
