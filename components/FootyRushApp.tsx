@@ -126,6 +126,17 @@ const TESTING_MODE = process.env.NEXT_PUBLIC_TESTING_MODE === "true";
 const DRAFT_RESHUFFLE_LIMIT = 5;
 const MANAGER_SPIN_LIMIT = 3;
 
+function clearLocalRunState() {
+  window.localStorage.removeItem(recordsKey);
+  window.localStorage.removeItem(managerScoreKey);
+  window.localStorage.removeItem(completedLeaguesKey);
+  window.localStorage.removeItem(expertUnlockedKey);
+  window.localStorage.removeItem(localGuestKey);
+  window.localStorage.removeItem(managerKey);
+  window.localStorage.removeItem(managerSpinsKey);
+  window.localStorage.removeItem(snapshotsKey);
+}
+
 export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: string }) {
   const [view, setView] = useState<MainView>("play");
   const [phase, setPhase] = useState<Phase>("setup");
@@ -308,6 +319,13 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     setTheme(initialTheme);
 
     const storedProfile = window.localStorage.getItem(profileKey);
+    const resetAnonymousVisit =
+      !storedProfile &&
+      (TESTING_MODE || window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
+    if (resetAnonymousVisit) {
+      clearLocalRunState();
+    }
+
     if (storedProfile) {
       setProfile(JSON.parse(storedProfile) as LocalProfile);
     }
@@ -339,13 +357,17 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     setCompletedLeagues(Number(window.localStorage.getItem(completedLeaguesKey) ?? 0));
     setExpertUnlockedEarned(window.localStorage.getItem(expertUnlockedKey) === "true" || isExpertUnlocked(storedManagerScore));
 
-    fetch("/api/guest-plays")
-      .then((response) => response.json())
-      .then((status: GuestStatus) => {
-        const localPlayed = window.localStorage.getItem(localGuestKey) === "true";
-        setGuestStatus(localPlayed ? { allowed: false, played: true } : status);
-      })
-      .catch(() => undefined);
+    if (resetAnonymousVisit) {
+      setGuestStatus({ allowed: true, played: false });
+    } else {
+      fetch("/api/guest-plays")
+        .then((response) => response.json())
+        .then((status: GuestStatus) => {
+          const localPlayed = window.localStorage.getItem(localGuestKey) === "true";
+          setGuestStatus(localPlayed ? { allowed: false, played: true } : status);
+        })
+        .catch(() => undefined);
+    }
 
     const supabase = getSupabaseBrowserClient();
     if (!supabase) {
@@ -365,16 +387,11 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
         email,
         demo: false
       });
-      // The admin testing account always starts from zero.
-      if (admin) {
-        resetToNewUser();
-      }
     };
 
     supabase.auth.getSession().then(({ data }) => applySession(data.session));
     const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => applySession(session));
     return () => authListener.subscription.unsubscribe();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -501,30 +518,6 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
       window.localStorage.setItem(managerScoreKey, String(rating));
       setManagerSpinning(false);
     }, 820);
-  }
-
-  // Wipe all local progress back to a brand-new-user state. Used by the admin testing
-  // account, which resets on every load so the new-user experience can be replayed endlessly.
-  function resetToNewUser() {
-    window.localStorage.removeItem(recordsKey);
-    window.localStorage.removeItem(managerScoreKey);
-    window.localStorage.removeItem(completedLeaguesKey);
-    window.localStorage.removeItem(expertUnlockedKey);
-    window.localStorage.removeItem(localGuestKey);
-    window.localStorage.removeItem(managerKey);
-    window.localStorage.removeItem(managerSpinsKey);
-    window.localStorage.removeItem(snapshotsKey);
-    setLeaderboardRecords([]);
-    setManagerScore(STARTING_MANAGER_SCORE);
-    setSelectedManager(null);
-    setManagerSpinsLeft(MANAGER_SPIN_LIMIT);
-    setManagerSpinning(false);
-    setCompletedLeagues(0);
-    setExpertUnlockedEarned(false);
-    setExpertUnlockedThisRun(false);
-    setLastScoreDelta(null);
-    setGuestStatus({ allowed: true, played: false });
-    resetDraft("setup");
   }
 
   function resetDraft(nextPhase: Phase = "setup") {
@@ -1134,7 +1127,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
       setAuthMessage(error.message);
       return;
     }
-    // onAuthStateChange applies the profile (and admin reset). Clear the password field.
+    // onAuthStateChange applies the profile. Clear the password field.
     setAuthPassword("");
     setAuthMessage("");
   }
@@ -2172,7 +2165,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                 <p>
                   Signed in as <strong>{profile.displayName}</strong>
                   {profile.email ? ` (${profile.email})` : ""}.
-                  {isAdmin ? " Admin testing mode — your progress resets to a brand-new user on every load." : ""}
+                  {isAdmin ? " Admin testing mode — signed-in progress is preserved for returning-user checks." : ""}
                 </p>
                 <button className="primary-button wide" type="button" onClick={signOut}>
                   <LogIn size={18} />
