@@ -1330,7 +1330,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
       </header>
 
       {phase !== "setup" && (
-        <section className="status-strip" aria-label="Game status">
+        <section className={`status-strip${phase === "draft" ? " draft-status-strip" : ""}`} aria-label="Game status">
           {phase !== "draft" && (
             <div>
               <span>Draft</span>

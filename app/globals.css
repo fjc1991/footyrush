@@ -4532,58 +4532,75 @@ body {
 
 /* Smaller status boxes */
 .status-strip {
-  margin: 14px 0;
+  gap: 6px;
+  margin: 10px 0 14px;
+  padding: 6px;
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--panel) 72%, transparent);
 }
 
 .status-strip div {
-  padding: 9px 13px;
+  min-height: 40px;
+  padding: 7px 12px;
+  border-radius: var(--r-sm);
+  box-shadow: none;
 }
 
 .status-strip span {
-  font-size: 0.7rem;
+  font-size: 0.66rem;
   letter-spacing: 0.03em;
 }
 
 .status-strip strong {
-  margin-top: 2px;
-  font-size: 0.98rem;
+  margin-top: 1px;
+  font-size: 0.96rem;
+  line-height: 1.1;
 }
 
-/* ── Draft grid: list | (pitch + formation) with manager score spanning below ── */
+/* ── Draft grid: board | (pitch + formation), manager score spans full width ── */
 
 .draft-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.6fr) minmax(420px, 1.05fr);
-  gap: 18px;
+  grid-template-columns: minmax(0, 1.45fr) minmax(420px, 1fr);
+  grid-template-areas: "board side";
+  gap: 14px;
   align-items: start;
 }
 
-/* Right side: pitch + formation (equal size) with manager score spanning below */
+.draft-grid > .draft-board {
+  grid-area: board;
+}
+
+.draft-grid > .draft-right {
+  grid-area: side;
+}
+
 .draft-right {
   display: grid;
   grid-template-columns: 1fr 1fr;
   grid-template-areas:
     "pitch formation"
     "score score";
-  gap: 18px;
-  align-items: stretch;
+  gap: 14px;
+  align-items: start;
   min-width: 0;
 }
 
 .draft-right > .squad-panel { grid-area: pitch; min-width: 0; }
 .draft-right > .formation-panel { grid-area: formation; min-width: 0; }
-.draft-right > .progression-panel { grid-area: score; }
+.draft-right > .progression-panel { grid-area: score; min-width: 0; }
 
 .draft-right .formation-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
+  gap: 7px;
 }
 
 .draft-right .formation-button {
   flex-direction: column;
   align-items: center;
-  gap: 5px;
-  padding: 9px 6px;
+  gap: 4px;
+  min-height: 70px;
+  padding: 7px 6px;
   text-align: center;
 }
 
@@ -4602,6 +4619,9 @@ body {
 @media (max-width: 1080px) {
   .draft-grid {
     grid-template-columns: 1fr;
+    grid-template-areas:
+      "board"
+      "side";
   }
 
   .draft-grid .fm-row-stats {
@@ -4627,7 +4647,7 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
 }
 
 .draft-round-label {
@@ -4663,4 +4683,104 @@ body {
 /* Status strip adapts to 2 cells (draft) or 4 (league/complete) */
 .status-strip {
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
+.draft-status-strip {
+  display: flex;
+  gap: 10px;
+  margin: 8px 0 14px;
+  padding: 0;
+  background: transparent;
+}
+
+.draft-status-strip div,
+.draft-status-strip div:last-child {
+  flex: 1 1 0;
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  border-radius: var(--r-md);
+}
+
+.draft-status-strip span,
+.draft-status-strip strong {
+  margin: 0;
+  line-height: 1;
+}
+
+.draft-status-strip strong {
+  font-size: 1rem;
+}
+
+/* Draft-first viewport fit */
+.draft-board {
+  display: flex;
+  flex-direction: column;
+  min-height: 468px;
+  padding: 16px;
+}
+
+.draft-board .empty-state {
+  flex: 1 1 auto;
+  min-height: 220px;
+}
+
+.draft-board .empty-state-card {
+  gap: 10px;
+  width: min(360px, 100%);
+  padding: 26px 24px;
+}
+
+.draft-board .empty-state-icon {
+  width: 46px;
+  height: 46px;
+}
+
+.draft-right .panel {
+  padding: 16px;
+}
+
+.draft-right .panel-header {
+  margin-bottom: 10px;
+}
+
+.draft-right .pitch-container {
+  max-height: 330px;
+  min-height: 0;
+}
+
+.draft-right .formation-glyph {
+  width: 22px;
+  height: 34px;
+}
+
+.draft-right > .progression-panel {
+  display: grid;
+  grid-template-columns: auto minmax(120px, 1fr);
+  gap: 8px 12px;
+  align-items: center;
+  margin: 0;
+  padding: 12px 14px;
+}
+
+.draft-right > .progression-panel .progression-head,
+.draft-right > .progression-panel .progress-track,
+.draft-right > .progression-panel .progression-meta,
+.draft-right > .progression-panel > p {
+  margin: 0;
+}
+
+.draft-right > .progression-panel .progress-track {
+  min-width: 0;
+}
+
+.draft-right > .progression-panel .progression-meta {
+  grid-column: 1 / -1;
+}
+
+.draft-right > .progression-panel > p {
+  display: none;
 }
