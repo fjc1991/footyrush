@@ -1379,88 +1379,150 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
       )}
 
       {view === "play" && phase === "setup" && (
-        <section className="setup-solo">
-          <div className="panel intro-panel">
-            <p className="eyebrow">{copy.setupTitle}</p>
-            <h2>Draft fast, then manage the damage.</h2>
-            <p>{copy.setupCopy}</p>
+        <>
+          <section className="setup-home">
+            <div className="setup-left">
+              <div className="setup-feature-grid" aria-label="Setup flow">
+                <div>
+                  <span>01</span>
+                  <strong>Pick manager</strong>
+                  <small>Set your starting score and match edge.</small>
+                </div>
+                <div>
+                  <span>02</span>
+                  <strong>Choose the run</strong>
+                  <small>Mini league or full invincible season.</small>
+                </div>
+                <div>
+                  <span>03</span>
+                  <strong>Draft the XI</strong>
+                  <small>Build around your manager, then chase the table.</small>
+                </div>
+              </div>
 
-            <div className="mode-grid" aria-label="Game mode">
-              <button
-                type="button"
-                className={`choice-card${gameMode === "minileague" ? " active" : ""}`}
-                onClick={() => setGameMode("minileague")}
-              >
-                <span className="eyebrow">Mini league</span>
-                <strong>Five-match rush</strong>
-                <small>Draft once, climb a compact historical table.</small>
-              </button>
-              <button
-                type="button"
-                className={`choice-card${gameMode === "be_invincible" ? " active" : ""}`}
-                onClick={() => setGameMode("be_invincible")}
-              >
-                <span className="eyebrow">Be Invincible</span>
-                <strong>38-game season</strong>
-                <small>Stay unbeaten through injuries, form dips and tight fixtures.</small>
-              </button>
-            </div>
-
-            <div className="manager-pick">
-              {managerSpinning ? (
-                <>
-                  <p className="eyebrow">Manager wheel</p>
-                  <div className="manager-wheel" aria-live="polite">
-                    <span>Guardiola</span>
-                    <span>Klopp</span>
-                    <span>Arteta</span>
-                    <span>Tuchel</span>
-                  </div>
-                  <p className="manager-pick-prompt">Revealing your appointment...</p>
-                </>
-              ) : selectedManager ? (
-                <>
-                  <div className="manager-pick-head">
-                    <div>
-                      <p className="eyebrow">Your manager</p>
-                      <strong className="manager-pick-name">{selectedManager.manager}</strong>
-                      <span className="manager-pick-club">
-                        {selectedManager.teamName} {selectedManager.year} · finished {ordinal(selectedManager.position)}
-                      </span>
+              <div className="manager-pick">
+                {managerSpinning ? (
+                  <>
+                    <p className="eyebrow">Choose manager</p>
+                    <div className="manager-wheel" aria-live="polite">
+                      <span>Guardiola</span>
+                      <span>Klopp</span>
+                      <span>Arteta</span>
+                      <span>Tuchel</span>
                     </div>
-                    <span className="manager-pick-rating">{selectedManager.rating}</span>
-                  </div>
-                  <div className="manager-pick-actions">
-                    <span className="spin-bank">{managerSpinsLeft} manager spin{managerSpinsLeft === 1 ? "" : "s"} left</span>
+                    <p className="manager-pick-prompt">Revealing your appointment...</p>
+                  </>
+                ) : selectedManager ? (
+                  <>
+                    <div className="manager-panel-head">
+                      <div>
+                        <p className="eyebrow">Choose manager</p>
+                      </div>
+                      <span>Stage 01</span>
+                    </div>
+                    <div className="manager-pick-head">
+                      <div>
+                        <strong className="manager-pick-name">{selectedManager.manager}</strong>
+                        <span className="manager-pick-club">
+                          {selectedManager.teamName} {selectedManager.year} · finished {ordinal(selectedManager.position)}
+                        </span>
+                      </div>
+                      <span className="manager-pick-rating">{selectedManager.rating}</span>
+                    </div>
+                    <div className="manager-impact">
+                      <div>
+                        <strong>Starting score</strong>
+                      <span>Higher finish gives a stronger manager score.</span>
+                    </div>
+                    <div>
+                        <strong>Match edge</strong>
+                        <span>Better managers add a small simulation boost.</span>
+                      </div>
+                    </div>
+                    <div className="manager-pick-actions">
+                      <span className="spin-bank">{managerSpinsLeft} manager spin{managerSpinsLeft === 1 ? "" : "s"} left</span>
                     <button className="secondary-button" type="button" onClick={shuffleManager} disabled={managerSpinsLeft <= 0 || managerSpinning}>
-                      <Shuffle size={16} />
-                      Re-shuffle manager
-                    </button>
+                        <Shuffle size={16} />
+                        Re-shuffle manager
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="manager-panel-head">
+                      <p className="eyebrow">Choose manager</p>
+                      <span>Stage 01</span>
+                    </div>
+                    <div className="manager-impact">
+                      <div>
+                        <strong>Starting score</strong>
+                      <span>Your manager sets the score you defend.</span>
+                    </div>
+                    <div>
+                      <strong>Match edge</strong>
+                      <span>Strong appointments help tight fixtures.</span>
+                    </div>
                   </div>
-                </>
-              ) : (
-                <>
-                  <p className="eyebrow">Appoint your manager</p>
-                  <p className="manager-pick-prompt">
-                    Shuffle to draw a real manager. Their league finish sets your starting score and a slight match-day edge.
-                  </p>
                   <div className="manager-pick-actions">
                     <span className="spin-bank">{managerSpinsLeft} manager spins available</span>
                     <button className="primary-button" type="button" onClick={shuffleManager} disabled={managerSpinsLeft <= 0 || managerSpinning}>
-                      <Shuffle size={16} />
-                      Shuffle manager
-                    </button>
-                  </div>
-                </>
-              )}
+                        <Shuffle size={16} />
+                        Shuffle manager
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
             </div>
 
-            <button className="primary-button" type="button" onClick={startDraft} disabled={!selectedManager || managerSpinning}>
-              <Play size={18} />
-              {copy.startDraft}
-            </button>
-          </div>
-        </section>
+            <div className="setup-stack">
+              <div className="setup-control">
+                <div className="setup-section-head">
+                  <p className="eyebrow">Game mode</p>
+                  <span>Stage 02</span>
+                </div>
+                <div className="mode-grid" aria-label="Game mode">
+                  <button
+                    type="button"
+                    className={`choice-card${gameMode === "minileague" ? " active" : ""}`}
+                    onClick={() => setGameMode("minileague")}
+                  >
+                    <span className="eyebrow">Mini league</span>
+                    <strong>Five-match rush</strong>
+                    <small>Draft once, climb a compact historical table.</small>
+                  </button>
+                  <button
+                    type="button"
+                    className={`choice-card${gameMode === "be_invincible" ? " active" : ""}`}
+                    onClick={() => setGameMode("be_invincible")}
+                  >
+                    <span className="eyebrow">Be Invincible</span>
+                    <strong>38-game season</strong>
+                    <small>Stay unbeaten through injuries, form dips and tight fixtures.</small>
+                  </button>
+                </div>
+              </div>
+
+              <button className="primary-button" type="button" onClick={startDraft} disabled={!selectedManager || managerSpinning}>
+                <Play size={18} />
+                {copy.startDraft}
+              </button>
+            </div>
+          </section>
+
+          <footer className="site-footer">
+            <div>
+              <strong>FootyRush</strong>
+              <span>© 2026 FootyRush. All rights reserved.</span>
+            </div>
+            <nav aria-label="Footer">
+              <a href="mailto:hello@footyrush.app">Contact</a>
+              <a href="mailto:support@footyrush.app">Support</a>
+              <button type="button">Privacy</button>
+              <button type="button">Terms</button>
+            </nav>
+          </footer>
+        </>
       )}
 
       {view === "play" && phase === "draft" && (
