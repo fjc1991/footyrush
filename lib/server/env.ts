@@ -60,7 +60,13 @@ export function getServerEnv(): ServerEnv {
     return cached;
   }
 
-  const parsed = rawSchema.safeParse(process.env);
+  // Treat empty-string env vars as unset. Hosting dashboards and .env files
+  // commonly hold empty placeholders; without this an empty value would fail
+  // .url()/.min(1) validation and 500 every route that reads the env.
+  const rawEnv = Object.fromEntries(
+    Object.entries(process.env).filter(([, value]) => value !== undefined && value !== "")
+  );
+  const parsed = rawSchema.safeParse(rawEnv);
   if (!parsed.success) {
     throw new Error(`Invalid environment configuration:\n${parsed.error.issues.map((i) => `  - ${i.path.join(".")}: ${i.message}`).join("\n")}`);
   }

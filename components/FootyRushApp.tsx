@@ -112,6 +112,10 @@ function fitTextFor(fit: number): string {
 interface GuestStatus {
   allowed: boolean;
   played: boolean;
+  /** Free plays left today (when known). */
+  remaining?: number;
+  /** Daily free-play limit reported by the server. */
+  limit?: number;
 }
 
 interface LeagueState {
@@ -422,12 +426,11 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     if (resetAnonymousVisit) {
       setGuestStatus({ allowed: true, played: false });
     } else {
+      // The server (Supabase table keyed by hashed IP) is the source of truth for
+      // the daily count, so trust its response rather than a local boolean.
       fetch("/api/guest-plays")
         .then((response) => response.json())
-        .then((status: GuestStatus) => {
-          const localPlayed = window.localStorage.getItem(localGuestKey) === "true";
-          setGuestStatus(localPlayed ? { allowed: false, played: true } : status);
-        })
+        .then((status: GuestStatus) => setGuestStatus(status))
         .catch(() => undefined);
     }
 
@@ -996,14 +999,22 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     setRoundSummaryData(null);
   }
 
-  // Record a guest's free play (both modes) so the next attempt hits the auth
-  // gate. No-op for signed-in users and in testing mode.
+  // Record a guest's free play (both modes) and sync the day's remaining count
+  // from the server, so the gate fires once the daily limit is reached. No-op for
+  // signed-in users and in testing mode.
   function recordGuestPlayIfNeeded() {
-    if (!profile && !TESTING_MODE) {
-      window.localStorage.setItem(localGuestKey, "true");
-      fetch("/api/guest-plays", { method: "POST" }).catch(() => undefined);
-      setGuestStatus({ allowed: false, played: true });
+    if (profile || TESTING_MODE) {
+      return;
     }
+    void (async () => {
+      try {
+        const response = await fetch("/api/guest-plays", { method: "POST" });
+        const status = (await response.json()) as GuestStatus;
+        setGuestStatus({ allowed: status.allowed, played: status.played, remaining: status.remaining, limit: status.limit });
+      } catch {
+        // Best-effort: leave the current status if the request fails.
+      }
+    })();
   }
 
   function completeLeague(completedLeague: LeagueState) {
@@ -2217,6 +2228,11 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
               </>
             ) : (
               <>
+                {guestStatus.played ? (
+                  <p className="muted">
+                    You&apos;ve used your {guestStatus.limit ?? 3} free plays for today. Sign in for unlimited play — or come back tomorrow.
+                  </p>
+                ) : null}
                 <p>{copy.signInCopy}</p>
                 <form className="auth-stack" onSubmit={signInWithPassword}>
                   <input

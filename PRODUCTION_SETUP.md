@@ -14,6 +14,8 @@ the last deploy:
   row on signup, reading `manager_id` / `display_name` from the signup metadata.
 - `0005_guest_play_increment.sql` — **new.** Atomic, capped `increment_guest_play`
   RPC (closes a guest-gate race and prevents over-recording past the limit).
+- `0006_guest_plays_daily.sql` — **new.** Adds `play_day` and makes guest plays a
+  per-day allowance (3 free plays/day, resets at UTC midnight).
 
 ```bash
 # via Supabase CLI (or paste into the SQL editor in order)
