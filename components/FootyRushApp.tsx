@@ -25,7 +25,7 @@ import {
   type InvincibleSeason,
   type SeasonPregameDecision
 } from "@/lib/game/season";
-import { aggregateLeaderboard, demoLeaderboardRecords, recordsFromLeague } from "@/lib/game/leaderboard";
+import { aggregateLeaderboard, recordsFromLeague } from "@/lib/game/leaderboard";
 import {
   EXPERT_SCORE_THRESHOLD,
   MIN_MANAGER_SCORE,
@@ -43,6 +43,7 @@ import {
   simulateFixture
 } from "@/lib/game/simulation";
 import { getSupabaseBrowserClient, hasSupabaseConfig } from "@/lib/supabase/client";
+import { managerIdValidationMessage, normalizeManagerId } from "@/lib/user/manager-id";
 import type { Session } from "@supabase/supabase-js";
 import type {
   DraftMode,
@@ -62,6 +63,7 @@ type GameMode = "minileague" | "be_invincible";
 
 interface LocalProfile {
   id: string;
+  managerId?: string;
   displayName: string;
   email?: string;
   demo: boolean;
@@ -118,8 +120,9 @@ const managerKey = "footyrush.manager";
 const managerSpinsKey = "footyrush.managerSpinsLeft";
 const snapshotsKey = "footyrush.communitySnapshots";
 const scoreModelKey = "footyrush.scoreModel";
+const registeredManagerIdsKey = "footyrush.registeredManagerIds";
 // Bump when the manager-score model changes so returning testers reset cleanly.
-const SCORE_MODEL = "v3-zero-to-1000";
+const SCORE_MODEL = "v4-registered-fresh-start";
 const completedLeaguesKey = "footyrush.completedLeagues";
 const expertUnlockedKey = "footyrush.expertUnlocked";
 const TESTING_MODE = process.env.NEXT_PUBLIC_TESTING_MODE === "true";
@@ -137,12 +140,15 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
   const [profile, setProfile] = useState<LocalProfile | null>(null);
   const [guestStatus, setGuestStatus] = useState<GuestStatus>({ allowed: true, played: false });
   const [showAuthGate, setShowAuthGate] = useState(false);
+  const [authMode, setAuthMode] = useState<"signin" | "register">("signin");
   const [authEmail, setAuthEmail] = useState("");
+  const [authManagerId, setAuthManagerId] = useState("");
   const [authPassword, setAuthPassword] = useState("");
   const [authMessage, setAuthMessage] = useState("");
   const [isAdmin, setIsAdmin] = useState(false);
   const [leaderboardPeriod, setLeaderboardPeriod] = useState<Period>("daily");
   const [leaderboardRecords, setLeaderboardRecords] = useState<LeaderboardRecord[]>([]);
+  const [savedLeagueId, setSavedLeagueId] = useState<string | null>(null);
   const [league, setLeague] = useState<LeagueState | null>(null);
   const [currentResult, setCurrentResult] = useState<FixtureResult | null>(null);
   const [liveSecond, setLiveSecond] = useState(0);
@@ -227,7 +233,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
   const seasonHomeGoals = seasonVisibleEvents.filter((event) => event.code === "goal" && event.teamId === currentSeasonFixture?.homeId).length;
   const seasonAwayGoals = seasonVisibleEvents.filter((event) => event.code === "goal" && event.teamId === currentSeasonFixture?.awayId).length;
   const leaderboard = useMemo(
-    () => aggregateLeaderboard([...demoLeaderboardRecords(), ...leaderboardRecords], leaderboardPeriod),
+    () => aggregateLeaderboard(leaderboardRecords, leaderboardPeriod),
     [leaderboardPeriod, leaderboardRecords]
   );
   const expertUnlocked = hasExpertAccess(managerScore, expertUnlockedEarned);
@@ -289,6 +295,20 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     document.documentElement.dataset.theme = initialTheme;
     setTheme(initialTheme);
 
+    if (window.localStorage.getItem(scoreModelKey) !== SCORE_MODEL) {
+      window.localStorage.removeItem(profileKey);
+      window.localStorage.removeItem(recordsKey);
+      window.localStorage.removeItem(managerScoreKey);
+      window.localStorage.removeItem(completedLeaguesKey);
+      window.localStorage.removeItem(expertUnlockedKey);
+      window.localStorage.removeItem(localGuestKey);
+      window.localStorage.removeItem(managerKey);
+      window.localStorage.removeItem(managerSpinsKey);
+      window.localStorage.removeItem(snapshotsKey);
+      window.localStorage.removeItem(registeredManagerIdsKey);
+      window.localStorage.setItem(scoreModelKey, SCORE_MODEL);
+    }
+
     const storedProfile = window.localStorage.getItem(profileKey);
     if (storedProfile) {
       setProfile(JSON.parse(storedProfile) as LocalProfile);
@@ -297,16 +317,6 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     const storedRecords = window.localStorage.getItem(recordsKey);
     if (storedRecords) {
       setLeaderboardRecords(JSON.parse(storedRecords) as LeaderboardRecord[]);
-    }
-
-    // One-time reset when the score model changes, so returning testers re-appoint a manager
-    // and start from 0 on the current model instead of carrying stale scores from an old scale.
-    if (window.localStorage.getItem(scoreModelKey) !== SCORE_MODEL) {
-      window.localStorage.removeItem(managerKey);
-      window.localStorage.removeItem(managerScoreKey);
-      window.localStorage.removeItem(managerSpinsKey);
-      window.localStorage.removeItem(expertUnlockedKey);
-      window.localStorage.setItem(scoreModelKey, SCORE_MODEL);
     }
 
     const storedManager = window.localStorage.getItem(managerKey);
@@ -340,23 +350,32 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
       }
       const email = session.user.email ?? "";
       const admin = session.user.app_metadata?.role === "admin";
+      const metadataManagerId = normalizeManagerId(String(session.user.user_metadata?.manager_id ?? ""));
+      const managerId = admin ? "admin" : metadataManagerId || normalizeManagerId(email.split("@")[0] ?? "manager");
       setIsAdmin(admin);
-      persistProfile({
+      const nextProfile: LocalProfile = {
         id: session.user.id,
-        displayName: admin ? "Admin (tester)" : email.split("@")[0] || "Manager",
+        managerId,
+        displayName: admin ? "Admin (tester)" : managerId,
         email,
         demo: false
-      });
-      // The admin testing account always starts from zero.
-      if (admin) {
-        resetToNewUser();
+      };
+      if (nextProfile.managerId) {
+        try {
+          const registered = JSON.parse(window.localStorage.getItem(registeredManagerIdsKey) ?? "{}") as Record<string, string>;
+          registered[nextProfile.managerId] = nextProfile.id;
+          window.localStorage.setItem(registeredManagerIdsKey, JSON.stringify(registered));
+        } catch {
+          window.localStorage.setItem(registeredManagerIdsKey, JSON.stringify({ [nextProfile.managerId]: nextProfile.id }));
+        }
       }
+      setProfile(nextProfile);
+      window.localStorage.setItem(profileKey, JSON.stringify(nextProfile));
     };
 
     supabase.auth.getSession().then(({ data }) => applySession(data.session));
     const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => applySession(session));
     return () => authListener.subscription.unsubscribe();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -443,10 +462,121 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     }
   }, [visibleEvents, lastFlashedGoalCount]);
 
+  function readRegisteredManagerIds(): Record<string, string> {
+    try {
+      return JSON.parse(window.localStorage.getItem(registeredManagerIdsKey) ?? "{}") as Record<string, string>;
+    } catch {
+      return {};
+    }
+  }
+
+  function isManagerIdTaken(managerId: string, profileId?: string): boolean {
+    const registered = readRegisteredManagerIds();
+    return Boolean(registered[managerId] && registered[managerId] !== profileId);
+  }
+
+  function reserveManagerId(nextProfile: LocalProfile) {
+    if (!nextProfile.managerId) {
+      return;
+    }
+    const registered = readRegisteredManagerIds();
+    registered[nextProfile.managerId] = nextProfile.id;
+    window.localStorage.setItem(registeredManagerIdsKey, JSON.stringify(registered));
+  }
+
+  function syncProfileToSupabase(nextProfile: LocalProfile, progress?: { managerScore: number; completedLeagues: number }) {
+    if (nextProfile.demo) {
+      return;
+    }
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase) {
+      return;
+    }
+    supabase
+      .from("profiles")
+      .upsert({
+        id: nextProfile.id,
+        manager_id: nextProfile.managerId,
+        display_name: nextProfile.displayName,
+        email: nextProfile.email ?? null,
+        locale,
+        mmr: progress?.managerScore ?? managerScore,
+        completed_leagues: progress?.completedLeagues ?? completedLeagues
+      })
+      .then(({ error }) => {
+        if (error) {
+          setAuthMessage(error.message);
+        }
+      });
+  }
+
   function persistProfile(nextProfile: LocalProfile) {
+    reserveManagerId(nextProfile);
     setProfile(nextProfile);
     window.localStorage.setItem(profileKey, JSON.stringify(nextProfile));
+    syncProfileToSupabase(nextProfile);
     setShowAuthGate(false);
+    if (phase === "complete" && league && savedLeagueId !== league.id) {
+      saveLeagueProgress(league, nextProfile);
+    }
+  }
+
+  function openAuth(mode: "signin" | "register" = "signin") {
+    setAuthMode(mode);
+    setAuthMessage("");
+    setShowAuthGate(true);
+  }
+
+  function saveLeagueProgress(completedLeague: LeagueState, profileForSave: LocalProfile) {
+    const finalStandings = computeStandings(completedLeague.managers, completedLeague.results);
+    const completedAt = new Date().toISOString();
+    const newRecords = recordsFromLeague({
+      managers: completedLeague.managers,
+      standings: finalStandings,
+      completedAt
+    }).map((record) => ({
+      ...record,
+      id: `${profileForSave.id}-${completedAt}`,
+      userId: profileForSave.id,
+      displayName: profileForSave.displayName
+    }));
+
+    if (newRecords.length === 0) {
+      return;
+    }
+
+    setLeaderboardRecords((currentRecords) => {
+      const mergedRecords = [...currentRecords, ...newRecords];
+      window.localStorage.setItem(recordsKey, JSON.stringify(mergedRecords));
+      return mergedRecords;
+    });
+
+    const currentCompletedLeagues = Number(window.localStorage.getItem(completedLeaguesKey) ?? completedLeagues);
+    const nextCompletedLeagues = currentCompletedLeagues + 1;
+    let scoreForSync = Number(window.localStorage.getItem(managerScoreKey) ?? managerScore);
+    window.localStorage.setItem(completedLeaguesKey, String(nextCompletedLeagues));
+    setCompletedLeagues(nextCompletedLeagues);
+
+    const human = finalStandings.find((standing) => standing.managerId === "human");
+    if (human) {
+      const currentScore = scoreForSync;
+      const wonTitle = finalStandings[0]?.managerId === "human";
+      const delta = scoreDeltaForStanding(human, wonTitle);
+      const nextScore = Math.max(MIN_MANAGER_SCORE, currentScore + delta);
+      const wasExpert = hasExpertAccess(currentScore, expertUnlockedEarned);
+      const nextExpert = hasExpertAccess(nextScore, wasExpert);
+      scoreForSync = nextScore;
+      setManagerScore(nextScore);
+      setLastScoreDelta(delta);
+      setExpertUnlockedEarned(nextExpert);
+      setExpertUnlockedThisRun(!wasExpert && nextExpert);
+      window.localStorage.setItem(managerScoreKey, String(nextScore));
+      window.localStorage.setItem(expertUnlockedKey, String(nextExpert));
+    }
+
+    saveCommunitySnapshot(completedLeague, profileForSave);
+    syncProfileToSupabase(profileForSave, { managerScore: scoreForSync, completedLeagues: nextCompletedLeagues });
+    setSavedLeagueId(completedLeague.id);
   }
 
   // Appoint a random real manager from the pool. Their finish-derived rating becomes the
@@ -485,34 +615,11 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     }, 820);
   }
 
-  // Wipe all local progress back to a brand-new-user state. Used by the admin testing
-  // account, which resets on every load so the new-user experience can be replayed endlessly.
-  function resetToNewUser() {
-    window.localStorage.removeItem(recordsKey);
-    window.localStorage.removeItem(managerScoreKey);
-    window.localStorage.removeItem(completedLeaguesKey);
-    window.localStorage.removeItem(expertUnlockedKey);
-    window.localStorage.removeItem(localGuestKey);
-    window.localStorage.removeItem(managerKey);
-    window.localStorage.removeItem(managerSpinsKey);
-    window.localStorage.removeItem(snapshotsKey);
-    setLeaderboardRecords([]);
-    setManagerScore(STARTING_MANAGER_SCORE);
-    setSelectedManager(null);
-    setManagerSpinsLeft(MANAGER_SPIN_LIMIT);
-    setManagerSpinning(false);
-    setCompletedLeagues(0);
-    setExpertUnlockedEarned(false);
-    setExpertUnlockedThisRun(false);
-    setLastScoreDelta(null);
-    setGuestStatus({ allowed: true, played: false });
-    resetDraft("setup");
-  }
-
   function resetDraft(nextPhase: Phase = "setup") {
     setPicks([]);
     setSpin(null);
     setLeague(null);
+    setSavedLeagueId(null);
     setCurrentResult(null);
     setLiveSecond(0);
     setIsPlaying(false);
@@ -561,7 +668,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     setSpin(null);
     setSlotPickerCandidateId(null);
     setSpinning(true);
-    const seed = `${Date.now()}:${picks.length}:${formationId}`;
+    const seed = `spin:${formationId}:${picks.map((pick) => pick.player.i).join("-")}:${draftReshufflesLeft}`;
     window.setTimeout(() => {
       setSpin(spinForOpenSlots(openSlots, usedPlayerIds, seed));
       setSpinning(false);
@@ -579,7 +686,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     setSlotPickerCandidateId(null);
     setSpinning(true);
     const nextUsedPlayerIds = new Set(nextPicks.map((pick) => pick.player.i));
-    const seed = `${Date.now()}:${nextPicks.length}:${formationId}`;
+    const seed = `queue:${formationId}:${nextPicks.map((pick) => pick.player.i).join("-")}`;
     window.setTimeout(() => {
       setSpin(spinForOpenSlots(nextOpenSlots, nextUsedPlayerIds, seed));
       setSpinning(false);
@@ -635,6 +742,9 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
   }
 
   async function createInvincibleAttempt(): Promise<string> {
+    if (!profile) {
+      throw new Error("Register to create an official Invincible attempt.");
+    }
     const response = await fetch("/api/invincible-attempts", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -673,17 +783,17 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
       return;
     }
     if (!canEnterLeague()) {
-      setShowAuthGate(true);
+      openAuth("register");
       return;
     }
 
     if (gameMode === "be_invincible") {
-      let attemptId = `local-${Date.now()}`;
+      let attemptId = `local-${profile?.id ?? "guest"}-${picks.map((pick) => pick.player.i).join("-")}`;
       setSeasonAttemptMessage("");
       try {
         attemptId = await createInvincibleAttempt();
       } catch {
-        setSeasonAttemptMessage("Local Invincible attempt fallback is active. Official awards require the server gate.");
+        setSeasonAttemptMessage("Guest Invincible runs stay local. Register before starting a season to qualify for official awards.");
       }
       const nextSeason = createInvincibleSeason({
         humanPicks: picks,
@@ -694,7 +804,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
         mmr: managerScore,
         managerRating: selectedManager?.rating ?? managerScore,
         attemptId,
-        seed: `${Date.now()}:${profile?.id ?? "guest"}:invincible`
+        seed: `invincible:${profile?.id ?? "guest"}:${formationId}:${picks.map((pick) => pick.player.i).join("-")}`
       });
       const preparedSeason = prepareSeasonMatch(nextSeason);
       setSeason(preparedSeason);
@@ -715,7 +825,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
       completedLeagues,
       mmr: managerScore,
       managerRating: selectedManager?.rating ?? managerScore,
-      seed: `${Date.now()}:${profile?.id ?? "guest"}`
+      seed: `minileague:${profile?.id ?? "guest"}:${formationId}:${picks.map((pick) => pick.player.i).join("-")}`
     });
 
     setLeague({ ...nextLeague, currentRound: 0, results: [] });
@@ -943,34 +1053,13 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
   }
 
   function completeLeague(completedLeague: LeagueState) {
-    const finalStandings = computeStandings(completedLeague.managers, completedLeague.results);
-    const completedAt = new Date().toISOString();
-    const newRecords = recordsFromLeague({
-      managers: completedLeague.managers,
-      standings: finalStandings,
-      completedAt
-    });
-    const mergedRecords = [...leaderboardRecords, ...newRecords];
-    setLeaderboardRecords(mergedRecords);
-    window.localStorage.setItem(recordsKey, JSON.stringify(mergedRecords));
-    const nextCompletedLeagues = completedLeagues + 1;
-    setCompletedLeagues(nextCompletedLeagues);
-    window.localStorage.setItem(completedLeaguesKey, String(nextCompletedLeagues));
-
-    const human = finalStandings.find((standing) => standing.managerId === "human");
-    if (human) {
-      const currentScore = Number(window.localStorage.getItem(managerScoreKey) ?? managerScore);
-      const wonTitle = finalStandings[0]?.managerId === "human";
-      const delta = scoreDeltaForStanding(human, wonTitle);
-      const nextScore = Math.max(MIN_MANAGER_SCORE, currentScore + delta);
-      const wasExpert = hasExpertAccess(currentScore, expertUnlockedEarned);
-      const nextExpert = hasExpertAccess(nextScore, wasExpert);
-      setManagerScore(nextScore);
-      setLastScoreDelta(delta);
-      setExpertUnlockedEarned(nextExpert);
-      setExpertUnlockedThisRun(!wasExpert && nextExpert);
-      window.localStorage.setItem(managerScoreKey, String(nextScore));
-      window.localStorage.setItem(expertUnlockedKey, String(nextExpert));
+    const saveProfile = profile ?? (TESTING_MODE ? { id: "testing-profile", managerId: "testing", displayName: "Testing Manager", demo: true } : null);
+    if (saveProfile) {
+      saveLeagueProgress(completedLeague, saveProfile);
+    } else {
+      setLastScoreDelta(null);
+      setExpertUnlockedThisRun(false);
+      setSavedLeagueId(null);
     }
 
     if (!profile && !TESTING_MODE) {
@@ -979,7 +1068,6 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
       setGuestStatus({ allowed: false, played: true });
     }
 
-    saveCommunitySnapshot(completedLeague);
     setPhase("complete");
   }
 
@@ -992,15 +1080,15 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     }
   }
 
-  function saveCommunitySnapshot(completedLeague: LeagueState) {
+  function saveCommunitySnapshot(completedLeague: LeagueState, profileForSave: LocalProfile) {
     const human = completedLeague.managers.find((manager) => manager.id === "human");
     if (!human) {
       return;
     }
     const snapshot: ManagerSquad = {
       ...human,
-      id: `snapshot-${Date.now()}`,
-      displayName: `${profile?.displayName ?? "Guest Manager"} XI`,
+      id: `snapshot-${profileForSave.id}-${completedLeague.id}`,
+      displayName: `${profileForSave.displayName} XI`,
       kind: "reserve",
       source: "snapshot",
       injuredPlayerIds: [],
@@ -1064,7 +1152,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
       suspendedPlayerIds: [],
       substitutions: {}
     };
-    const fixture = { id: `exhibition-${Date.now()}`, round: 1, homeId: "human", awayId: away.id };
+    const fixture = { id: `exhibition-${league.id}-${opponent.id}`, round: 1, homeId: "human", awayId: away.id };
     const result = simulateFixture({
       fixture,
       home,
@@ -1121,24 +1209,87 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     setAuthMessage("");
   }
 
-  async function signUpWithPassword() {
+  async function signUpWithPassword(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
     setAuthMessage("");
-    const supabase = getSupabaseBrowserClient();
-    if (!supabase) {
-      setAuthMessage("Sign-up is unavailable until Supabase is configured.");
+    const email = authEmail.trim();
+    const managerId = normalizeManagerId(authManagerId);
+    const managerIdError = managerIdValidationMessage(managerId);
+    if (managerIdError) {
+      setAuthMessage(managerIdError);
       return;
     }
-    const email = authEmail.trim();
+    if (isManagerIdTaken(managerId)) {
+      setAuthMessage("That manager ID is already taken. Choose another one.");
+      return;
+    }
     if (!email || authPassword.length < 6) {
       setAuthMessage("Enter an email and a password of at least 6 characters.");
       return;
     }
-    const { data, error } = await supabase.auth.signUp({ email, password: authPassword });
+
+    const registrationResponse = await fetch("/api/registration", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, managerId })
+    });
+    const registrationResult = (await registrationResponse.json()) as { ok?: boolean; email?: string; managerId?: string; reason?: string };
+    if (!registrationResponse.ok || !registrationResult.ok || !registrationResult.email || !registrationResult.managerId) {
+      setAuthMessage(registrationResult.reason ?? "Registration could not be validated.");
+      return;
+    }
+    if (isManagerIdTaken(registrationResult.managerId)) {
+      setAuthMessage("That manager ID is already taken on this device. Choose another one.");
+      return;
+    }
+
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase) {
+      persistProfile({
+        id: `local-${registrationResult.managerId}`,
+        managerId: registrationResult.managerId,
+        displayName: registrationResult.managerId,
+        email: registrationResult.email,
+        demo: true
+      });
+      setAuthEmail("");
+      setAuthManagerId("");
+      setAuthPassword("");
+      return;
+    }
+
+    const { data, error } = await supabase.auth.signUp({
+      email: registrationResult.email,
+      password: authPassword,
+      options: {
+        data: {
+          manager_id: registrationResult.managerId,
+          display_name: registrationResult.managerId
+        }
+      }
+    });
     if (error) {
       setAuthMessage(error.message);
       return;
     }
+    reserveManagerId({
+      id: data.user?.id ?? `pending-${registrationResult.managerId}`,
+      managerId: registrationResult.managerId,
+      displayName: registrationResult.managerId,
+      email: registrationResult.email,
+      demo: false
+    });
+    if (data.session?.user) {
+      persistProfile({
+        id: data.session.user.id,
+        managerId: registrationResult.managerId,
+        displayName: registrationResult.managerId,
+        email: registrationResult.email,
+        demo: false
+      });
+    }
     setAuthPassword("");
+    setAuthManagerId("");
     setAuthMessage(data.session ? "Account created. You're signed in." : "Account created. Check your email to confirm, then sign in.");
   }
 
@@ -1149,6 +1300,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     setIsAdmin(false);
     window.localStorage.removeItem(profileKey);
     setAuthEmail("");
+    setAuthManagerId("");
     setAuthPassword("");
     setAuthMessage("");
     setShowAuthGate(false);
@@ -1178,18 +1330,13 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
       return;
     }
 
-    persistProfile({
-      id: `demo-${result.email}`,
-      displayName: result.email.split("@")[0] || "Manager",
-      email: result.email,
-      demo: true
-    });
-    setAuthMessage("Demo profile saved locally.");
+    setAuthMode("register");
+    setAuthMessage("Use Create account to choose a unique manager ID for this prototype.");
   }
 
   function startAnotherRun() {
     if (!TESTING_MODE && !profile && guestStatus.played) {
-      setShowAuthGate(true);
+      openAuth("register");
       return;
     }
     resetDraft("setup");
@@ -1215,7 +1362,9 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
             ? `This draw is ${spin.teamName} ${spin.year}. Pick any player, then assign their role.`
             : `Open roles: ${openSlots.slice(0, 4).map((slot) => slot.label).join(", ")}${openSlots.length > 4 ? "..." : ""}. Spin a club-season when ready.`
         : phase === "league"
-          ? "These are historical opponents. Your season result goes to the real-player leaderboard."
+          ? profile
+            ? "These are historical opponents. Your signed-in result can save to your profile and leaderboard."
+            : "These are historical opponents. Guest results are temporary until you create a manager ID."
           : phase === "season"
             ? "Thirty-eight matches. Stay unbeaten, manage the knocks, and use team talks carefully."
           : phase === "exhibition"
@@ -1261,10 +1410,17 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
           >
             {theme === "light" ? <Moon size={18} /> : <Sun size={18} />}
           </button>
-          <button className="profile-pill" type="button" onClick={() => setShowAuthGate(true)}>
-            <LogIn size={16} />
-            <span>{profile?.displayName ?? "Sign in"}</span>
-          </button>
+          {profile ? (
+            <button className="profile-pill" type="button" onClick={() => openAuth("signin")}>
+              <LogIn size={16} />
+              <span>{profile.displayName}</span>
+            </button>
+          ) : (
+            <a className="profile-pill" href={`/${locale}/register`}>
+              <LogIn size={16} />
+              <span>Register</span>
+            </a>
+          )}
         </div>
       </header>
 
@@ -1336,10 +1492,12 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
 
       {view === "personal" && (
         <PersonalProgressScreen
+          profile={profile}
           records={leaderboardRecords}
           managerScore={managerScore}
           completedLeagues={completedLeagues}
           expertUnlocked={expertUnlocked}
+          onRegister={() => openAuth("register")}
         />
       )}
 
@@ -1886,18 +2044,24 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
           <div className="panel intro-panel">
             <p className="eyebrow">League complete</p>
             <h2>{humanStanding ? `${humanStanding.points} points from five games` : "Final whistle"}</h2>
-            <p>Your cumulative leaderboard score has been recorded for daily, weekly and monthly tables.</p>
+            <p>
+              {profile || TESTING_MODE || savedLeagueId === league.id
+                ? "Your result has been saved to your manager profile and is eligible for the leaderboard."
+                : "Guest results are not saved. Create a manager ID to put this run on your profile and save future progress."}
+            </p>
             <div className={`score-change-card${expertUnlockedThisRun ? " unlocked" : ""}`}>
               <div>
-                <span>Manager score</span>
-                <strong>{managerScore}</strong>
+                <span>{profile || TESTING_MODE || savedLeagueId === league.id ? "Manager score" : "Guest score"}</span>
+                <strong>{profile || TESTING_MODE || savedLeagueId === league.id ? managerScore : "Not saved"}</strong>
               </div>
               <div>
                 <span>This league</span>
-                <strong>{lastScoreDelta === null ? "0" : `${lastScoreDelta >= 0 ? "+" : ""}${lastScoreDelta}`}</strong>
+                <strong>{lastScoreDelta === null ? "—" : `${lastScoreDelta >= 0 ? "+" : ""}${lastScoreDelta}`}</strong>
               </div>
               <p>
-                {expertUnlockedThisRun
+                {!profile && !TESTING_MODE && savedLeagueId !== league.id
+                  ? "Create a manager ID to attach this result to your profile."
+                  : expertUnlockedThisRun
                   ? "Expert mode unlocked. Your next draft will hide ratings until the squad is complete."
                   : expertUnlocked
                     ? "Expert mode is active for your next draft."
@@ -1909,11 +2073,17 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                 <Shuffle size={18} />
                 Build another squad
               </button>
+              {!profile && !TESTING_MODE && (
+                <button className="primary-button" type="button" onClick={() => openAuth("register")}>
+                  <LogIn size={18} />
+                  Create manager ID
+                </button>
+              )}
               <button className="secondary-button" type="button" onClick={startExhibition} disabled={!dataReady}>
                 <Users size={18} />
                 Community exhibition
               </button>
-              <button className="secondary-button" type="button" onClick={() => setView("leaderboards")}>
+              <button className="secondary-button" type="button" onClick={() => switchView("leaderboards")}>
                 <BarChart3 size={18} />
                 View leaderboards
               </button>
@@ -1961,7 +2131,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                 <Shuffle size={18} />
                 Build another squad
               </button>
-              <button className="secondary-button" type="button" onClick={() => setView("leaderboards")}>
+              <button className="secondary-button" type="button" onClick={() => switchView("leaderboards")}>
                 <BarChart3 size={18} />
                 View leaderboards
               </button>
@@ -2093,7 +2263,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                 <p>
                   Signed in as <strong>{profile.displayName}</strong>
                   {profile.email ? ` (${profile.email})` : ""}.
-                  {isAdmin ? " Admin testing mode — your progress resets to a brand-new user on every load." : ""}
+                  {isAdmin ? " Admin mode is active; progress now saves from the fresh zero state." : ""}
                 </p>
                 <button className="primary-button wide" type="button" onClick={signOut}>
                   <LogIn size={18} />
@@ -2102,8 +2272,21 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
               </>
             ) : (
               <>
-                <p>{copy.signInCopy}</p>
-                <form className="auth-stack" onSubmit={signInWithPassword}>
+                <p>
+                  {authMode === "register"
+                    ? "Create a manager ID to save results, appear on leaderboards, and build personal progress."
+                    : copy.signInCopy}
+                </p>
+                <form className="auth-stack" onSubmit={authMode === "register" ? signUpWithPassword : signInWithPassword}>
+                  {authMode === "register" && (
+                    <input
+                      value={authManagerId}
+                      onChange={(event) => setAuthManagerId(normalizeManagerId(event.target.value))}
+                      placeholder="unique_manager_id"
+                      autoComplete="username"
+                      aria-label="Unique manager ID"
+                    />
+                  )}
                   <input
                     value={authEmail}
                     onChange={(event) => setAuthEmail(event.target.value)}
@@ -2116,27 +2299,35 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                     onChange={(event) => setAuthPassword(event.target.value)}
                     placeholder="Password"
                     type="password"
-                    autoComplete="current-password"
+                    autoComplete={authMode === "register" ? "new-password" : "current-password"}
                   />
                   <button className="primary-button wide" type="submit">
                     <LogIn size={18} />
-                    Sign in
+                    {authMode === "register" ? "Create manager ID" : "Sign in"}
                   </button>
-                  <button className="secondary-button wide" type="button" onClick={signUpWithPassword}>
-                    Create account
-                  </button>
+                  {authMode === "register" ? (
+                    <button className="secondary-button wide" type="button" onClick={() => setAuthMode("signin")}>
+                      Already registered? Sign in
+                    </button>
+                  ) : (
+                    <button className="secondary-button wide" type="button" onClick={() => setAuthMode("register")}>
+                      Create account
+                    </button>
+                  )}
                 </form>
                 <p className="auth-divider">or</p>
                 <button className="secondary-button wide" type="button" onClick={signInWithGoogle}>
                   <LogIn size={16} />
                   {copy.google}
                 </button>
-                <form className="email-form" onSubmit={signInWithEmail}>
-                  <button className="secondary-button wide" type="submit">
-                    <Mail size={16} />
-                    {copy.email}
-                  </button>
-                </form>
+                {authMode === "signin" && (
+                  <form className="email-form" onSubmit={signInWithEmail}>
+                    <button className="secondary-button wide" type="submit">
+                      <Mail size={16} />
+                      {copy.email}
+                    </button>
+                  </form>
+                )}
               </>
             )}
             {!hasSupabaseConfig() && <p className="fine-print">Local demo mode is active until Supabase env vars are added.</p>}
@@ -2923,16 +3114,45 @@ function LeaderboardsScreen({
 const PERSONAL_PERIODS: Period[] = ["daily", "weekly", "monthly"];
 
 function PersonalProgressScreen({
+  profile,
   records,
   managerScore,
   completedLeagues,
-  expertUnlocked
+  expertUnlocked,
+  onRegister
 }: {
+  profile: LocalProfile | null;
   records: LeaderboardRecord[];
   managerScore: number;
   completedLeagues: number;
   expertUnlocked: boolean;
+  onRegister: () => void;
 }) {
+  if (!profile) {
+    return (
+      <section className="personal-screen">
+        <div className="panel personal-panel">
+          <div className="panel-header">
+            <div>
+              <p className="eyebrow">Personal progress</p>
+              <h2>Create a manager ID to save history</h2>
+            </div>
+            <Activity size={22} />
+          </div>
+          <div className="personal-empty">
+            <p>
+              Guest runs stay temporary. Register to save mini-league results, appear on the leaderboard, and track best-of-all-time stats.
+            </p>
+            <button className="primary-button" type="button" onClick={onRegister}>
+              <LogIn size={18} />
+              Create manager ID
+            </button>
+          </div>
+        </div>
+      </section>
+    );
+  }
+
   const personalRecords = records.filter((record) => record.kind === "human");
   const totalPoints = personalRecords.reduce((sum, record) => sum + record.matchPoints, 0);
   const totalGoalDifference = personalRecords.reduce((sum, record) => sum + record.goalDifference, 0);
@@ -2947,7 +3167,7 @@ function PersonalProgressScreen({
     .slice(0, 5);
   const periodRanks = PERSONAL_PERIODS.map((period) => ({
     period,
-    entry: aggregateLeaderboard([...demoLeaderboardRecords(), ...personalRecords], period).find((entry) => entry.kind === "human")
+    entry: aggregateLeaderboard(personalRecords, period).find((entry) => entry.kind === "human")
   }));
 
   return (

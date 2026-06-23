@@ -111,19 +111,3 @@ export function recordsFromLeague(params: {
     }));
 }
 
-export function demoLeaderboardRecords(now = new Date()): LeaderboardRecord[] {
-  const names = ["Canal End FC", "Northbank 98", "Set Piece Union", "Old Boot Room", "Mersey Arcade"];
-  return names.map((name, index) => ({
-    id: `demo-${index}`,
-    userId: `demo-${index}`,
-    displayName: name,
-    kind: "reserve",
-    periodAt: new Date(now.getTime() - index * 2 * 60 * 60 * 1000).toISOString(),
-    matchPoints: 11 - index,
-    goalDifference: 7 - index,
-    goalsFor: 12 - index,
-    leagueTitles: index === 0 ? 1 : 0,
-    opponentStrength: 980 + index * 18,
-    completedAt: new Date(now.getTime() - index * 2 * 60 * 60 * 1000).toISOString()
-  }));
-}

@@ -296,6 +296,10 @@ p {
   font-weight: 800;
 }
 
+a.profile-pill {
+  text-decoration: none;
+}
+
 .profile-pill,
 .secondary-button {
   background: var(--panel-strong);
@@ -4247,5 +4251,168 @@ body {
   .intro-panel > .primary-button,
   .intro-panel .primary-button.wide {
     min-height: 44px;
+  }
+}
+
+/* ============================================================
+   Registration page
+   ============================================================ */
+.registration-shell {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: clamp(18px, 4vw, 44px);
+  background:
+    radial-gradient(720px 420px at 12% 0%, color-mix(in srgb, var(--brand-blue) 18%, transparent), transparent 62%),
+    radial-gradient(620px 340px at 90% 10%, color-mix(in srgb, var(--brand-teal) 14%, transparent), transparent 64%),
+    var(--bg-tint),
+    var(--bg);
+}
+
+.registration-card {
+  width: min(720px, 100%);
+  padding: clamp(18px, 3vw, 30px);
+  border: 1px solid color-mix(in srgb, var(--brand-blue) 18%, var(--line));
+  border-radius: var(--r-xl);
+  background:
+    linear-gradient(145deg, color-mix(in srgb, var(--panel) 94%, transparent), color-mix(in srgb, var(--panel-strong) 92%, transparent));
+  box-shadow: var(--shadow-lg);
+}
+
+.registration-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.registration-back:hover {
+  color: var(--brand-blue);
+}
+
+.registration-hero {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+  margin: 22px 0;
+}
+
+.registration-icon {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  border-radius: var(--r-lg);
+  background: linear-gradient(135deg, var(--brand-blue), var(--brand-blue-deep));
+  color: #ffffff;
+}
+
+.registration-hero h1 {
+  margin: 0 0 8px;
+  font-family: var(--display-font);
+  font-size: clamp(2rem, 6vw, 3.8rem);
+  line-height: 0.95;
+}
+
+.registration-hero p {
+  margin-bottom: 0;
+}
+
+.registration-form {
+  display: grid;
+  gap: 14px;
+}
+
+.registration-form label {
+  display: grid;
+  gap: 7px;
+  color: var(--text);
+  font-weight: 900;
+}
+
+.registration-form label > span {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.registration-form input {
+  width: 100%;
+  min-height: 48px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--panel);
+  color: var(--text);
+  font-weight: 800;
+}
+
+.registration-form input:focus {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.registration-id-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+}
+
+.registration-message {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  margin-top: 12px;
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.registration-message.available {
+  color: var(--accent);
+}
+
+.registration-message.unavailable {
+  color: var(--danger);
+}
+
+.registration-benefits {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 20px;
+}
+
+.registration-benefits > div {
+  display: grid;
+  gap: 5px;
+  padding: 14px;
+  border-radius: var(--r-lg);
+  background: color-mix(in srgb, var(--brand-blue) 8%, var(--panel));
+}
+
+.registration-benefits svg {
+  color: var(--brand-blue);
+}
+
+.registration-benefits span {
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+@media (max-width: 560px) {
+  .registration-hero,
+  .registration-benefits,
+  .registration-id-row {
+    grid-template-columns: 1fr;
+  }
+
+  .registration-icon {
+    width: 48px;
+    height: 48px;
   }
 }
