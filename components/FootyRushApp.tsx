@@ -2554,14 +2554,20 @@ function StandingsPanel({
           <span>GD</span>
           <span>Pts</span>
         </div>
-        {standings.map((standing) => (
-          <div className="table-row" key={standing.managerId}>
-            <strong>{standing.displayName}</strong>
-            <span>{standing.played}</span>
-            <span>{standing.goalDifference}</span>
-            <span>{standing.points}</span>
-          </div>
-        ))}
+        {standings.map((standing) => {
+          const isYou = standing.managerId === "human";
+          return (
+            <div className={`table-row${isYou ? " is-you" : ""}`} key={standing.managerId}>
+              <strong>
+                <span className="table-name">{standing.displayName}</span>
+                {isYou ? <span className="you-tag">YOU</span> : null}
+              </strong>
+              <span>{standing.played}</span>
+              <span>{standing.goalDifference}</span>
+              <span>{standing.points}</span>
+            </div>
+          );
+        })}
       </div>
     </div>
   );

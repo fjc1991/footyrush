@@ -272,8 +272,11 @@ function determineCasualties(manager: ManagerSquad, rng: () => number): Map<numb
   const active = getActiveStarters(manager);
 
   if (rng() <= 0.18) {
+    // Goalkeepers never pick up in-match injuries (only red cards can sideline a GK).
     const eligible = active.flatMap((entry, index) =>
-      entry.pick && !out.includes(entry.pick.player.i) ? [{ entry: { ...entry, pick: entry.pick }, slot: slots[index] }] : []
+      entry.pick && !out.includes(entry.pick.player.i) && !entry.pick.player.p.includes("GK")
+        ? [{ entry: { ...entry, pick: entry.pick }, slot: slots[index] }]
+        : []
     );
     if (eligible.length > 0) {
       const { entry, slot } = pickOne(eligible, rng);

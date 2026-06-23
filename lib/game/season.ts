@@ -222,9 +222,11 @@ export function createSeasonPregame(params: {
     .map((slot) => params.human.picks.find((pick) => pick.slotId === slot.id))
     .filter((pick): pick is DraftPick => pick !== undefined && !unavailableBefore.has(pick.player.i));
 
+  // Goalkeepers never pick up training injuries (only red cards can sideline a GK).
+  const injuryCandidates = starters.filter((pick) => !pick.player.p.includes("GK"));
   const trainingInjuryChance = params.trainingInjuryChance ?? 0.13;
-  if (starters.length > 0 && rng() < trainingInjuryChance) {
-    const pick = pickOne(starters, rng);
+  if (injuryCandidates.length > 0 && rng() < trainingInjuryChance) {
+    const pick = pickOne(injuryCandidates, rng);
     const games = 1 + Math.floor(rng() * 10);
     injuryGamesByPlayerId[pick.player.i] = Math.max(injuryGamesByPlayerId[pick.player.i] ?? 0, games);
     decision.trainingInjury = {
