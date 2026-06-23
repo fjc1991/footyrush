@@ -936,6 +936,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
       const finalStandings = computeStandings(nextSeason.managers, nextSeason.results);
       const completion = await completeInvincibleAttempt(nextSeason, finalStandings);
       nextSeason = { ...nextSeason, officialAward: completion.officialAward, awardProduction: completion.production };
+      recordGuestPlayIfNeeded();
       setSeason(nextSeason);
       setSeasonDecision(null);
       setPhase("invincible_complete");
@@ -995,6 +996,16 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     setRoundSummaryData(null);
   }
 
+  // Record a guest's free play (both modes) so the next attempt hits the auth
+  // gate. No-op for signed-in users and in testing mode.
+  function recordGuestPlayIfNeeded() {
+    if (!profile && !TESTING_MODE) {
+      window.localStorage.setItem(localGuestKey, "true");
+      fetch("/api/guest-plays", { method: "POST" }).catch(() => undefined);
+      setGuestStatus({ allowed: false, played: true });
+    }
+  }
+
   function completeLeague(completedLeague: LeagueState) {
     const finalStandings = computeStandings(completedLeague.managers, completedLeague.results);
     const completedAt = new Date().toISOString();
@@ -1038,11 +1049,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
       window.localStorage.setItem(expertUnlockedKey, String(nextExpert));
     }
 
-    if (!profile && !TESTING_MODE) {
-      window.localStorage.setItem(localGuestKey, "true");
-      fetch("/api/guest-plays", { method: "POST" }).catch(() => undefined);
-      setGuestStatus({ allowed: false, played: true });
-    }
+    recordGuestPlayIfNeeded();
 
     saveCommunitySnapshot(completedLeague);
     setPhase("complete");
