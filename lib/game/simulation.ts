@@ -343,7 +343,12 @@ function chooseScorerAt(manager: ManagerSquad, second: number, offMap: Map<numbe
   const onPitch = picksOnPitchAt(manager, second, offMap);
   const availablePicks = onPitch.length > 0 ? onPitch : manager.picks.filter((pick) => !unavailable(manager).includes(pick.player.i));
   const picks = availablePicks.length > 0 ? availablePicks : manager.picks;
+  const outfieldPicks = picks.filter((pick) => !pick.player.p.includes("GK"));
+  const scorerPicks = outfieldPicks.length > 0 ? outfieldPicks : picks;
   const weighted = picks.flatMap((pick) => {
+    if (!scorerPicks.includes(pick)) {
+      return [];
+    }
     const attackingPosition = pick.player.p.some((position) => ["ST", "CF", "LW", "RW", "CAM"].includes(position));
     const boostWeight =
       pick.boostActive && (pick.boost?.id === "poacher" || pick.boost?.id === "talisman")
@@ -357,7 +362,7 @@ function chooseScorerAt(manager: ManagerSquad, second: number, offMap: Map<numbe
   if (weighted.length > 0) {
     return pickOne(weighted, rng);
   }
-  return pickOne(picks, rng).player;
+  return pickOne(scorerPicks, rng).player;
 }
 
 function chooseEventPlayerAt(manager: ManagerSquad, second: number, offMap: Map<number, Casualty>, rng: () => number): Player {

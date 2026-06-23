@@ -24,6 +24,7 @@ export const fr = {
   dark: "Sombre",
   tabPlay: "Jouer",
   tabLeaderboards: "Classements",
+  tabProgress: "Ma progression",
   tabLive: "en direct",
   tabLockedHint: "Termine le match en cours pour ouvrir les classements.",
   yourRank: "Ton rang",

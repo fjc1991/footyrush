@@ -132,6 +132,21 @@ describe("match simulation", () => {
     expect(foundAwayBeforeHome).toBe(true);
   });
 
+  it("does not choose goalkeepers as scorers when outfield players are available", () => {
+    const { home, away, fixture } = makeManagers();
+    const pickByPlayerId = new Map([...home.picks, ...away.picks].map((pick) => [pick.player.i, pick]));
+
+    for (let i = 0; i < 800; i += 1) {
+      const result = simulateFixture({ fixture, home, away, seed: `no-gk-goals-${i}` });
+      result.events
+        .filter((event) => event.code === "goal")
+        .forEach((event) => {
+          const pick = event.playerId ? pickByPlayerId.get(event.playerId) : undefined;
+          expect(pick?.player.p.includes("GK")).toBe(false);
+        });
+    }
+  });
+
   it("creates five rounds for six managers", () => {
     const managers = Array.from({ length: 6 }, (_, index) =>
       autoDraftManager({ id: `m-${index}`, displayName: `M ${index}`, formationId: "4-3-3", seed: `m-${index}` })

@@ -296,10 +296,6 @@ p {
   font-weight: 800;
 }
 
-a.profile-pill {
-  text-decoration: none;
-}
-
 .profile-pill,
 .secondary-button {
   background: var(--panel-strong);
@@ -1813,6 +1809,173 @@ a.profile-pill {
   display: block;
   margin-top: 3px;
   font-size: 1.12rem;
+}
+
+.season-dashboard {
+  display: grid;
+  gap: clamp(10px, 1.2vw, 16px);
+}
+
+.season-dashboard-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(300px, 0.65fr);
+  gap: clamp(12px, 1.4vw, 18px);
+  align-items: start;
+}
+
+.season-main-stack {
+  display: grid;
+  gap: clamp(12px, 1.4vw, 18px);
+  min-width: 0;
+}
+
+.season-pitch-panel {
+  overflow: hidden;
+}
+
+.season-pitch-panel .pitch-container {
+  aspect-ratio: 2 / 3;
+  min-height: 0;
+  max-height: 330px;
+}
+
+.season-pitch-panel .bench-row {
+  max-height: 68px;
+  overflow: auto;
+}
+
+.season-control-panel {
+  min-width: 0;
+  padding: 16px;
+}
+
+.season-control-panel .scoreboard {
+  margin-bottom: 10px;
+}
+
+.season-control-panel .prematch-panel {
+  margin-bottom: 0;
+}
+
+.season-stage-chip {
+  min-width: auto;
+  text-transform: uppercase;
+}
+
+.season-side-stack {
+  min-width: 0;
+  gap: 12px;
+}
+
+.scrollable-table-panel .table {
+  max-height: min(25dvh, 310px);
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.scrollable-table-panel .table-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--panel);
+}
+
+.season-last-result {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--panel);
+}
+
+.season-last-result span,
+.season-last-result small {
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.season-last-result strong {
+  color: var(--amber);
+  font-size: 1.2rem;
+}
+
+.season-last-result small {
+  min-width: 0;
+  overflow: hidden;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.season-primary-action {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(190px, auto);
+  gap: 12px;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--line));
+  border-radius: var(--r-md);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 18%, var(--panel)), var(--panel));
+}
+
+.season-primary-action span,
+.season-primary-action small {
+  display: block;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.season-primary-action strong {
+  display: block;
+  min-width: 0;
+  margin: 3px 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 1.25rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.season-next-button {
+  min-height: 50px;
+  justify-content: center;
+  font-size: 1rem;
+}
+
+.season-sub-card {
+  display: grid;
+  gap: 10px;
+}
+
+.season-absence-list {
+  display: grid;
+  gap: 10px;
+}
+
+.season-absence-row {
+  display: grid;
+  grid-template-columns: minmax(170px, 0.42fr) minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--panel-strong);
+}
+
+.season-absence-row > div:first-child span {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
 }
 
 .manager-quote {
@@ -3329,9 +3492,23 @@ p {
   .layout-grid,
   .draft-layout,
   .league-layout,
+  .season-dashboard-grid,
   .setup-grid,
   .complete-grid,
   .personal-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .season-pitch-panel .pitch-container {
+    aspect-ratio: 2 / 3;
+    max-height: 440px;
+  }
+
+  .season-primary-action {
+    grid-template-columns: 1fr;
+  }
+
+  .season-absence-row {
     grid-template-columns: 1fr;
   }
 
@@ -4254,165 +4431,849 @@ body {
   }
 }
 
-/* ============================================================
-   Registration page
-   ============================================================ */
-.registration-shell {
-  min-height: 100dvh;
-  display: grid;
-  place-items: center;
-  padding: clamp(18px, 4vw, 44px);
-  background:
-    radial-gradient(720px 420px at 12% 0%, color-mix(in srgb, var(--brand-blue) 18%, transparent), transparent 62%),
-    radial-gradient(620px 340px at 90% 10%, color-mix(in srgb, var(--brand-teal) 14%, transparent), transparent 64%),
-    var(--bg-tint),
-    var(--bg);
+/* ── Homepage cleanup: banner nav, language menu, solo setup ─────── */
+
+.banner-nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
-.registration-card {
-  width: min(720px, 100%);
-  padding: clamp(18px, 3vw, 30px);
-  border: 1px solid color-mix(in srgb, var(--brand-blue) 18%, var(--line));
-  border-radius: var(--r-xl);
-  background:
-    linear-gradient(145deg, color-mix(in srgb, var(--panel) 94%, transparent), color-mix(in srgb, var(--panel-strong) 92%, transparent));
-  box-shadow: var(--shadow-lg);
-}
-
-.registration-back {
+.banner-tab {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
+  min-height: 38px;
+  padding: 0 14px;
+  border: 1px solid transparent;
+  border-radius: var(--r-pill);
+  background: transparent;
   color: var(--muted);
   font-weight: 800;
-  text-decoration: none;
+  font-size: 0.92rem;
+  cursor: pointer;
+  transition: color 140ms ease, background 140ms ease, border-color 140ms ease;
 }
 
-.registration-back:hover {
-  color: var(--brand-blue);
-}
-
-.registration-hero {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 16px;
-  align-items: start;
-  margin: 22px 0;
-}
-
-.registration-icon {
-  display: grid;
-  place-items: center;
-  width: 56px;
-  height: 56px;
-  border-radius: var(--r-lg);
-  background: linear-gradient(135deg, var(--brand-blue), var(--brand-blue-deep));
-  color: #ffffff;
-}
-
-.registration-hero h1 {
-  margin: 0 0 8px;
-  font-family: var(--display-font);
-  font-size: clamp(2rem, 6vw, 3.8rem);
-  line-height: 0.95;
-}
-
-.registration-hero p {
-  margin-bottom: 0;
-}
-
-.registration-form {
-  display: grid;
-  gap: 14px;
-}
-
-.registration-form label {
-  display: grid;
-  gap: 7px;
+.banner-tab:hover:not(:disabled) {
   color: var(--text);
-  font-weight: 900;
 }
 
-.registration-form label > span {
-  font-size: 0.78rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--muted);
+.banner-tab.active {
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 16%, var(--panel));
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
 }
 
-.registration-form input {
-  width: 100%;
-  min-height: 48px;
-  padding: 0 14px;
+.banner-tab:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.lang-menu {
+  position: relative;
+}
+
+.lang-menu-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 42px;
+  padding: 0 12px;
   border: 1px solid var(--line);
-  border-radius: var(--r-md);
+  border-radius: var(--r-pill);
   background: var(--panel);
   color: var(--text);
   font-weight: 800;
+  font-size: 0.82rem;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+  transition: border-color 140ms ease, color 140ms ease;
 }
 
-.registration-form input:focus {
-  outline: 2px solid var(--ring);
-  outline-offset: 2px;
+.lang-menu-button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
-.registration-id-row {
+.lang-menu-list {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  min-width: 132px;
+  padding: 6px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-lg);
+}
+
+.lang-menu-item {
+  display: flex;
+  align-items: center;
+  padding: 8px 10px;
+  border-radius: var(--r-sm);
+  color: var(--muted);
+  text-decoration: none;
+  font-weight: 800;
+  font-size: 0.82rem;
+  letter-spacing: 0.04em;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.lang-menu-item:hover {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--text);
+}
+
+.lang-menu-item.active {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.setup-solo {
+  width: min(720px, 100%);
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: calc(100vh - 200px);
+}
+
+.setup-solo .intro-panel {
+  min-height: 0;
+}
+
+.draft-side {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
+}
+
+.formation-panel-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+/* ── Setup homepage: seamless full-width composition ───────────── */
+
+.topbar {
+  width: 100%;
+  margin-right: 0;
+  margin-left: 0;
+}
+
+.setup-home {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(390px, 1fr);
+  gap: clamp(18px, 2.6vw, 32px);
+  align-items: start;
+  min-height: 0;
+  padding: clamp(18px, 3dvh, 32px) 0 0;
+}
+
+.setup-left {
+  min-width: 0;
+  display: grid;
+  gap: 14px;
+  align-content: start;
+}
+
+.setup-hero {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  gap: clamp(14px, 2dvh, 22px);
+}
+
+.setup-hero h2 {
+  max-width: 760px;
+  margin: 0;
+  font-size: clamp(2.2rem, 5vw, 5rem);
+  line-height: 0.95;
+  letter-spacing: 0;
+}
+
+.setup-lede {
+  max-width: 640px;
+  margin: 0;
+  font-size: clamp(1rem, 1.45vw, 1.2rem);
+  line-height: 1.45;
+}
+
+.setup-feature-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  max-width: none;
+  margin: 0;
+}
+
+.setup-feature-grid div {
+  min-width: 0;
+  min-height: 122px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--panel) 58%, transparent);
+}
+
+.setup-feature-grid span,
+.setup-section-head span {
+  color: var(--accent);
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.setup-feature-grid strong,
+.setup-feature-grid small {
+  display: block;
+}
+
+.setup-feature-grid strong {
+  margin-top: 8px;
+  color: var(--text);
+  font-size: 0.95rem;
+}
+
+.setup-feature-grid small {
+  margin-top: 5px;
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.setup-stack {
+  min-width: 0;
+  display: grid;
+  gap: 12px;
+  align-self: start;
+  align-content: start;
+}
+
+.setup-control,
+.setup-home .manager-pick {
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--accent) 8%, transparent), transparent 52%),
+    color-mix(in srgb, var(--panel) 88%, transparent);
+  box-shadow: var(--shadow-sm);
+}
+
+.setup-control {
+  min-height: 351px;
+  padding: 16px;
+}
+
+.setup-section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.setup-section-head .eyebrow,
+.setup-home .manager-pick-head .eyebrow {
+  margin: 0;
+}
+
+.setup-home .mode-grid {
+  grid-template-columns: 1fr;
+  gap: 8px;
+  margin: 0;
+}
+
+.setup-home .choice-card {
+  min-height: 106px;
+  padding: 16px;
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--panel-strong) 80%, transparent);
+}
+
+.setup-home .choice-card.active {
+  background: color-mix(in srgb, var(--accent) 13%, var(--panel));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 68%, transparent);
+}
+
+.setup-home .manager-pick {
+  margin: 0;
+  min-height: 276px;
+  padding: 16px;
+  justify-content: space-between;
+}
+
+.manager-panel-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.manager-panel-head .eyebrow {
+  margin: 0;
+}
+
+.manager-panel-head span {
+  color: var(--accent);
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.setup-home .manager-pick-head {
+  align-items: flex-start;
+}
+
+.setup-home .manager-pick-rating {
+  font-size: clamp(1.9rem, 4vw, 2.5rem);
+  font-weight: 900;
+}
+
+.manager-impact {
+  display: grid;
+  gap: 8px;
+}
+
+.manager-impact div {
+  display: grid;
+  gap: 2px;
+  padding: 9px 10px;
+  border: 1px solid color-mix(in srgb, var(--line) 74%, transparent);
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--panel-strong) 62%, transparent);
+}
+
+.manager-impact strong {
+  color: var(--text);
+  font-size: 0.78rem;
+}
+
+.manager-impact span {
+  color: var(--muted);
+  font-size: 0.74rem;
+  line-height: 1.25;
+}
+
+.setup-home .manager-pick-actions {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 10px;
 }
 
-.registration-message {
+.setup-home .manager-pick-actions .secondary-button,
+.setup-home .manager-pick-actions .primary-button {
+  min-width: max-content;
+}
+
+.setup-home .spin-bank {
+  min-height: 42px;
+  justify-content: center;
+}
+
+.setup-stack > .primary-button {
+  min-height: 60px;
+  border-radius: var(--r-lg);
+  font-size: 1.02rem;
+}
+
+.site-footer {
   display: flex;
   align-items: center;
-  gap: 8px;
-  min-height: 36px;
-  margin-top: 12px;
+  justify-content: space-between;
+  gap: 18px;
+  margin-top: clamp(24px, 6dvh, 64px);
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--accent) 8%, transparent), transparent 48%),
+    color-mix(in srgb, var(--panel) 78%, transparent);
   color: var(--muted);
+}
+
+.site-footer div,
+.site-footer nav {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+
+.site-footer strong {
+  color: var(--text);
+  font-size: 0.95rem;
+}
+
+.site-footer span,
+.site-footer a,
+.site-footer button {
+  color: var(--muted);
+  font-size: 0.82rem;
   font-weight: 800;
 }
 
-.registration-message.available {
+.site-footer a,
+.site-footer button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-decoration: none;
+}
+
+.site-footer a:hover,
+.site-footer button:hover {
   color: var(--accent);
 }
 
-.registration-message.unavailable {
-  color: var(--danger);
-}
+@media (max-width: 980px) {
+  .setup-home {
+    grid-template-columns: 1fr;
+    min-height: 0;
+    padding-top: 18px;
+  }
 
-.registration-benefits {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-  margin-top: 20px;
-}
+  .setup-hero h2,
+  .setup-lede,
+  .setup-feature-grid {
+    max-width: none;
+  }
 
-.registration-benefits > div {
-  display: grid;
-  gap: 5px;
-  padding: 14px;
-  border-radius: var(--r-lg);
-  background: color-mix(in srgb, var(--brand-blue) 8%, var(--panel));
-}
-
-.registration-benefits svg {
-  color: var(--brand-blue);
-}
-
-.registration-benefits span {
-  color: var(--muted);
-  font-size: 0.92rem;
-}
-
-@media (max-width: 560px) {
-  .registration-hero,
-  .registration-benefits,
-  .registration-id-row {
+  .setup-feature-grid {
     grid-template-columns: 1fr;
   }
 
-  .registration-icon {
-    width: 48px;
-    height: 48px;
+  .site-footer,
+  .site-footer div,
+  .site-footer nav {
+    align-items: flex-start;
+    flex-direction: column;
   }
+}
+
+@media (max-width: 620px) {
+  .setup-home .manager-pick-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .setup-home .manager-pick-actions .secondary-button,
+  .setup-home .manager-pick-actions .primary-button {
+    width: 100%;
+    min-width: 0;
+  }
+}
+
+@media (max-width: 900px) {
+  .topbar {
+    flex-wrap: wrap;
+  }
+
+  .banner-nav {
+    order: 3;
+    width: 100%;
+    justify-content: center;
+  }
+}
+
+/* ── Draft cleanup: compact candidate list + smaller status boxes ── */
+
+.candidate-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+  min-width: 0;
+}
+
+.fm-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 7px 12px;
+  border: 1px solid var(--line);
+  border-left-width: 3px;
+  border-radius: var(--r-md);
+  background: var(--panel-strong);
+  transition: border-color 140ms ease, transform 140ms ease, background 140ms ease;
+}
+
+.fm-row:hover {
+  border-color: var(--accent);
+  transform: translateX(2px);
+}
+
+.fm-row.perfect { border-left-color: var(--accent); }
+.fm-row.good { border-left-color: var(--amber); }
+.fm-row.okay { border-left-color: var(--muted); }
+
+.fm-row-ovr {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  min-width: 36px;
+  height: 36px;
+  padding: 0 6px;
+  border-radius: var(--r-sm);
+  background: var(--accent);
+  color: #06110b;
+  font-size: 1.05rem;
+  font-weight: 900;
+}
+
+.fm-row-ovr.hidden {
+  background: var(--panel);
+  color: var(--muted);
+  border: 1px dashed var(--line);
+}
+
+.fm-row-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.fm-row-name {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: nowrap;
+  gap: 8px;
+  overflow: hidden;
+}
+
+.fm-row-name strong {
+  font-size: 0.95rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fm-row-name .boost-badge {
+  flex: 0 0 auto;
+}
+
+.fm-row-sub {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.fm-row-sub .card-positions {
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 700;
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+.fm-row .role-targets {
+  min-height: 0;
+  font-size: 0.72rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.fm-row-stats {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 4px;
+  font-size: 0.68rem;
+}
+
+.fm-row-stats span {
+  padding: 2px 5px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 5px;
+  color: var(--muted);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.fm-row .fit-badge {
+  flex: 0 0 auto;
+}
+
+.fm-row .pick-button {
+  flex: 0 0 auto;
+  width: auto;
+  margin: 0;
+  min-height: 34px;
+  padding: 0 14px;
+  white-space: nowrap;
+}
+
+@media (max-width: 720px) {
+  .fm-row-stats {
+    display: none;
+  }
+}
+
+/* Smaller status boxes */
+.status-strip {
+  gap: 6px;
+  margin: 10px 0 14px;
+  padding: 6px;
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--panel) 72%, transparent);
+}
+
+.status-strip div {
+  min-height: 40px;
+  padding: 7px 12px;
+  border-radius: var(--r-sm);
+  box-shadow: none;
+}
+
+.status-strip span {
+  font-size: 0.66rem;
+  letter-spacing: 0.03em;
+}
+
+.status-strip strong {
+  margin-top: 1px;
+  font-size: 0.96rem;
+  line-height: 1.1;
+}
+
+/* ── Draft grid: board | (pitch + formation), manager score spans full width ── */
+
+.draft-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(420px, 1fr);
+  grid-template-areas: "board side";
+  gap: 14px;
+  align-items: start;
+}
+
+.draft-grid > .draft-board {
+  grid-area: board;
+}
+
+.draft-grid > .draft-right {
+  grid-area: side;
+}
+
+.draft-right {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-areas:
+    "pitch formation"
+    "score score";
+  gap: 14px;
+  align-items: start;
+  min-width: 0;
+}
+
+.draft-right > .squad-panel { grid-area: pitch; min-width: 0; }
+.draft-right > .formation-panel { grid-area: formation; min-width: 0; }
+.draft-right > .progression-panel { grid-area: score; min-width: 0; }
+
+.draft-right .formation-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.draft-right .formation-button {
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-height: 70px;
+  padding: 7px 6px;
+  text-align: center;
+}
+
+.draft-right .formation-button span {
+  flex: none;
+  white-space: nowrap;
+}
+
+/* The list column is narrow — drop stat chips so names stay readable.
+   (Rating badge + fit label still convey quality.) Stats return when stacked. */
+.draft-grid .fm-row-stats {
+  display: none;
+}
+
+/* Collapse to a single column on smaller screens */
+@media (max-width: 1080px) {
+  .draft-grid {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "board"
+      "side";
+  }
+
+  .draft-grid .fm-row-stats {
+    display: flex;
+  }
+
+  .draft-right {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "pitch"
+      "formation"
+      "score";
+  }
+
+  .draft-right .formation-grid {
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  }
+}
+
+/* Compact draft bar: round number + spin control together */
+.draft-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.draft-round-label {
+  margin: 0;
+}
+
+.draft-bar .draft-spin-controls {
+  flex-wrap: nowrap;
+}
+
+/* Compact draw ticket: TEAM · YEAR · club name on one line */
+.draw-ticket {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+  padding: 8px 12px;
+}
+
+.draw-ticket strong {
+  font-size: 1.05rem;
+}
+
+.draw-ticket small {
+  margin-left: 4px;
+  color: var(--amber);
+}
+
+.spin-result {
+  gap: 10px;
+}
+
+/* Status strip adapts to 2 cells (draft) or 4 (league/complete) */
+.status-strip {
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
+.draft-status-strip {
+  display: flex;
+  gap: 10px;
+  margin: 8px 0 14px;
+  padding: 0;
+  background: transparent;
+}
+
+.draft-status-strip div,
+.draft-status-strip div:last-child {
+  flex: 1 1 0;
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  border-radius: var(--r-md);
+}
+
+.draft-status-strip span,
+.draft-status-strip strong {
+  margin: 0;
+  line-height: 1;
+}
+
+.draft-status-strip strong {
+  font-size: 1rem;
+}
+
+/* Draft-first viewport fit */
+.draft-board {
+  display: flex;
+  flex-direction: column;
+  min-height: 468px;
+  padding: 16px;
+}
+
+.draft-board .empty-state {
+  flex: 1 1 auto;
+  min-height: 220px;
+}
+
+.draft-board .empty-state-card {
+  gap: 10px;
+  width: min(360px, 100%);
+  padding: 26px 24px;
+}
+
+.draft-board .empty-state-icon {
+  width: 46px;
+  height: 46px;
+}
+
+.draft-right .panel {
+  padding: 16px;
+}
+
+.draft-right .panel-header {
+  margin-bottom: 10px;
+}
+
+.draft-right .pitch-container {
+  max-height: 330px;
+  min-height: 0;
+}
+
+.draft-right .formation-glyph {
+  width: 22px;
+  height: 34px;
+}
+
+.draft-right > .progression-panel {
+  display: grid;
+  grid-template-columns: auto minmax(120px, 1fr);
+  gap: 8px 12px;
+  align-items: center;
+  margin: 0;
+  padding: 12px 14px;
+}
+
+.draft-right > .progression-panel .progression-head,
+.draft-right > .progression-panel .progress-track,
+.draft-right > .progression-panel .progression-meta,
+.draft-right > .progression-panel > p {
+  margin: 0;
+}
+
+.draft-right > .progression-panel .progress-track {
+  min-width: 0;
+}
+
+.draft-right > .progression-panel .progression-meta {
+  grid-column: 1 / -1;
+}
+
+.draft-right > .progression-panel > p {
+  display: none;
 }

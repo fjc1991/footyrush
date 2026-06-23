@@ -4,7 +4,8 @@
       "Bash(python3)",
       "Bash(npx tsc *)",
       "Bash(npm test *)",
-      "Bash(npm run *)"
+      "Bash(npm run *)",
+      "Bash(sed -n '1890,1950p' /Volumes/Crucial X10/Py/footyrush/app/globals.css)"
     ]
   }
 }

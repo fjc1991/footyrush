@@ -1,6 +1,6 @@
 "use client";
 
-import { Activity, BarChart3, BadgeInfo, ChevronRight, Gamepad2, Goal, HeartPulse, Lock, LogIn, Mail, Moon, Play, Shield, Shirt, Shuffle, Sparkles, Sun, Timer, Trophy, Users } from "lucide-react";
+import { Activity, BarChart3, ChevronRight, Globe, Goal, HeartPulse, LogIn, Mail, Moon, Play, Shield, Shirt, Shuffle, Sparkles, Sun, Timer, Trophy, Users } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { en } from "@/lib/i18n/en";
 import { FORMATION_LIST, getStarterSlots } from "@/lib/game/formations";
@@ -14,18 +14,24 @@ import {
   OUT_OF_FORM_EXPECTED_GOALS_PENALTY,
   TEAM_TALK_EXPECTED_GOALS_BONUS,
   applySeasonFixtureInjuries,
+  applySeasonFixtureSuspensions,
   availableSeasonBench,
-  compactSeasonEvents,
+  canUseSeasonTeamTalk,
   createInvincibleSeason,
   createSeasonPregame,
   currentHumanFixture as getCurrentSeasonHumanFixture,
-  decrementSeasonInjuries,
+  decrementSeasonAbsences,
+  markSeasonTeamTalkUsed,
   managerForSeasonMatch,
+  remainingSeasonTeamTalks,
+  seasonMissingRequiredSubstitutions,
   seasonUnavailablePlayerIds,
+  seasonUnavailableStarters,
+  teamTalkHalfForMatchday,
   type InvincibleSeason,
   type SeasonPregameDecision
 } from "@/lib/game/season";
-import { aggregateLeaderboard, recordsFromLeague } from "@/lib/game/leaderboard";
+import { aggregateLeaderboard, demoLeaderboardRecords, recordsFromLeague } from "@/lib/game/leaderboard";
 import {
   EXPERT_SCORE_THRESHOLD,
   MIN_MANAGER_SCORE,
@@ -43,7 +49,6 @@ import {
   simulateFixture
 } from "@/lib/game/simulation";
 import { getSupabaseBrowserClient, hasSupabaseConfig } from "@/lib/supabase/client";
-import { managerIdValidationMessage, normalizeManagerId } from "@/lib/user/manager-id";
 import type { Session } from "@supabase/supabase-js";
 import type {
   DraftMode,
@@ -63,7 +68,6 @@ type GameMode = "minileague" | "be_invincible";
 
 interface LocalProfile {
   id: string;
-  managerId?: string;
   displayName: string;
   email?: string;
   demo: boolean;
@@ -120,14 +124,24 @@ const managerKey = "footyrush.manager";
 const managerSpinsKey = "footyrush.managerSpinsLeft";
 const snapshotsKey = "footyrush.communitySnapshots";
 const scoreModelKey = "footyrush.scoreModel";
-const registeredManagerIdsKey = "footyrush.registeredManagerIds";
 // Bump when the manager-score model changes so returning testers reset cleanly.
-const SCORE_MODEL = "v4-registered-fresh-start";
+const SCORE_MODEL = "v3-zero-to-1000";
 const completedLeaguesKey = "footyrush.completedLeagues";
 const expertUnlockedKey = "footyrush.expertUnlocked";
 const TESTING_MODE = process.env.NEXT_PUBLIC_TESTING_MODE === "true";
 const DRAFT_RESHUFFLE_LIMIT = 5;
 const MANAGER_SPIN_LIMIT = 3;
+
+function clearLocalRunState() {
+  window.localStorage.removeItem(recordsKey);
+  window.localStorage.removeItem(managerScoreKey);
+  window.localStorage.removeItem(completedLeaguesKey);
+  window.localStorage.removeItem(expertUnlockedKey);
+  window.localStorage.removeItem(localGuestKey);
+  window.localStorage.removeItem(managerKey);
+  window.localStorage.removeItem(managerSpinsKey);
+  window.localStorage.removeItem(snapshotsKey);
+}
 
 export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: string }) {
   const [view, setView] = useState<MainView>("play");
@@ -140,15 +154,13 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
   const [profile, setProfile] = useState<LocalProfile | null>(null);
   const [guestStatus, setGuestStatus] = useState<GuestStatus>({ allowed: true, played: false });
   const [showAuthGate, setShowAuthGate] = useState(false);
-  const [authMode, setAuthMode] = useState<"signin" | "register">("signin");
+  const [langMenuOpen, setLangMenuOpen] = useState(false);
   const [authEmail, setAuthEmail] = useState("");
-  const [authManagerId, setAuthManagerId] = useState("");
   const [authPassword, setAuthPassword] = useState("");
   const [authMessage, setAuthMessage] = useState("");
   const [isAdmin, setIsAdmin] = useState(false);
   const [leaderboardPeriod, setLeaderboardPeriod] = useState<Period>("daily");
   const [leaderboardRecords, setLeaderboardRecords] = useState<LeaderboardRecord[]>([]);
-  const [savedLeagueId, setSavedLeagueId] = useState<string | null>(null);
   const [league, setLeague] = useState<LeagueState | null>(null);
   const [currentResult, setCurrentResult] = useState<FixtureResult | null>(null);
   const [liveSecond, setLiveSecond] = useState(0);
@@ -177,17 +189,12 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
   const [exhibitionPlaying, setExhibitionPlaying] = useState(false);
   const [season, setSeason] = useState<InvincibleSeason | null>(null);
   const [seasonDecision, setSeasonDecision] = useState<SeasonPregameDecision | null>(null);
-  const [seasonCurrentResult, setSeasonCurrentResult] = useState<FixtureResult | null>(null);
-  const [seasonLiveSecond, setSeasonLiveSecond] = useState(0);
-  const [seasonPlaying, setSeasonPlaying] = useState(false);
-  const [seasonReadyToRecord, setSeasonReadyToRecord] = useState(false);
   const [seasonOutOfFormChoice, setSeasonOutOfFormChoice] = useState<"keep" | "bench" | null>(null);
   const [seasonOutOfFormSubId, setSeasonOutOfFormSubId] = useState<number | null>(null);
   const [seasonTeamTalkActive, setSeasonTeamTalkActive] = useState(false);
   const [seasonAttemptMessage, setSeasonAttemptMessage] = useState("");
   const leagueCommentaryRef = useRef<HTMLDivElement | null>(null);
   const exhibitionCommentaryRef = useRef<HTMLDivElement | null>(null);
-  const seasonCommentaryRef = useRef<HTMLDivElement | null>(null);
 
   const draftSlots = useMemo(() => getDraftSlots(formationId), [formationId]);
   const openSlots = useMemo(() => getOpenDraftSlots(formationId, picks), [formationId, picks]);
@@ -203,7 +210,11 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
       season
         ? season.managers.map((manager) =>
             manager.id === "human"
-              ? { ...manager, injuredPlayerIds: seasonUnavailablePlayerIds(season.injuryGamesByPlayerId) }
+              ? {
+                  ...manager,
+                  injuredPlayerIds: seasonUnavailablePlayerIds(season.injuryGamesByPlayerId),
+                  suspendedPlayerIds: seasonUnavailablePlayerIds({}, season.suspensionGamesByPlayerId)
+                }
               : manager
           )
         : [],
@@ -211,6 +222,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
   );
   const seasonStandings = useMemo(() => (season ? computeStandings(season.managers, season.results) : []), [season]);
   const seasonManagerById = useMemo(() => new Map(seasonDisplayManagers.map((manager) => [manager.id, manager])), [seasonDisplayManagers]);
+  const seasonHumanManager = useMemo(() => seasonDisplayManagers.find((manager) => manager.id === "human"), [seasonDisplayManagers]);
   const currentSeasonFixture = season ? getCurrentSeasonHumanFixture(season) : null;
   const visibleEvents = useMemo(
     () => currentResult?.events.filter((event) => event.second <= liveSecond) ?? [],
@@ -225,15 +237,8 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
   );
   const exhibitionHomeGoals = exhibitionEvents.filter((event) => event.code === "goal" && event.teamId === "human").length;
   const exhibitionAwayGoals = exhibitionEvents.filter((event) => event.code === "goal" && event.teamId === exhibition?.away.id).length;
-  const seasonVisibleEvents = useMemo(
-    () => seasonCurrentResult?.events.filter((event) => event.second <= seasonLiveSecond) ?? [],
-    [seasonCurrentResult, seasonLiveSecond]
-  );
-  const seasonCommentaryEvents = useMemo(() => compactSeasonEvents(seasonVisibleEvents), [seasonVisibleEvents]);
-  const seasonHomeGoals = seasonVisibleEvents.filter((event) => event.code === "goal" && event.teamId === currentSeasonFixture?.homeId).length;
-  const seasonAwayGoals = seasonVisibleEvents.filter((event) => event.code === "goal" && event.teamId === currentSeasonFixture?.awayId).length;
   const leaderboard = useMemo(
-    () => aggregateLeaderboard(leaderboardRecords, leaderboardPeriod),
+    () => aggregateLeaderboard([...demoLeaderboardRecords(), ...leaderboardRecords], leaderboardPeriod),
     [leaderboardPeriod, leaderboardRecords]
   );
   const expertUnlocked = hasExpertAccess(managerScore, expertUnlockedEarned);
@@ -256,9 +261,31 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
   const seasonOutOfFormSubs = useMemo(() => {
     const human = seasonDisplayManagers.find((manager) => manager.id === "human");
     return human && seasonDecision?.outOfForm
-      ? availableSeasonBench(human, season?.injuryGamesByPlayerId ?? {}, [seasonDecision.outOfForm.playerId])
+      ? availableSeasonBench(human, season?.injuryGamesByPlayerId ?? {}, [seasonDecision.outOfForm.playerId], season?.suspensionGamesByPlayerId ?? {})
       : [];
   }, [season, seasonDecision, seasonDisplayManagers]);
+  const seasonUnavailableStartersList = useMemo(
+    () =>
+      season && seasonHumanManager
+        ? seasonUnavailableStarters({
+            human: seasonHumanManager,
+            injuryGamesByPlayerId: season.injuryGamesByPlayerId,
+            suspensionGamesByPlayerId: season.suspensionGamesByPlayerId
+          })
+        : [],
+    [season, seasonHumanManager]
+  );
+  const seasonMissingSubstitutions = useMemo(
+    () =>
+      season && seasonHumanManager
+        ? seasonMissingRequiredSubstitutions({
+            human: seasonHumanManager,
+            injuryGamesByPlayerId: season.injuryGamesByPlayerId,
+            suspensionGamesByPlayerId: season.suspensionGamesByPlayerId
+          })
+        : [],
+    [season, seasonHumanManager]
+  );
   const pendingCandidate = spin?.candidates.find((candidate) => candidate.player.i === slotPickerCandidateId) ?? null;
   const latestHumanInjury = [...visibleEvents]
     .reverse()
@@ -289,27 +316,37 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
   }, []);
 
   useEffect(() => {
+    if (!langMenuOpen) return;
+    function handlePointer(event: MouseEvent) {
+      const target = event.target as HTMLElement | null;
+      if (target && !target.closest(".lang-menu")) setLangMenuOpen(false);
+    }
+    function handleKey(event: KeyboardEvent) {
+      if (event.key === "Escape") setLangMenuOpen(false);
+    }
+    document.addEventListener("mousedown", handlePointer);
+    document.addEventListener("keydown", handleKey);
+    return () => {
+      document.removeEventListener("mousedown", handlePointer);
+      document.removeEventListener("keydown", handleKey);
+    };
+  }, [langMenuOpen]);
+
+  useEffect(() => {
     const storedTheme = window.localStorage.getItem("footyrush.theme");
     const initialTheme: "light" | "dark" =
       storedTheme === "dark" || storedTheme === "light" ? storedTheme : "dark";
     document.documentElement.dataset.theme = initialTheme;
     setTheme(initialTheme);
 
-    if (window.localStorage.getItem(scoreModelKey) !== SCORE_MODEL) {
-      window.localStorage.removeItem(profileKey);
-      window.localStorage.removeItem(recordsKey);
-      window.localStorage.removeItem(managerScoreKey);
-      window.localStorage.removeItem(completedLeaguesKey);
-      window.localStorage.removeItem(expertUnlockedKey);
-      window.localStorage.removeItem(localGuestKey);
-      window.localStorage.removeItem(managerKey);
-      window.localStorage.removeItem(managerSpinsKey);
-      window.localStorage.removeItem(snapshotsKey);
-      window.localStorage.removeItem(registeredManagerIdsKey);
-      window.localStorage.setItem(scoreModelKey, SCORE_MODEL);
+    const storedProfile = window.localStorage.getItem(profileKey);
+    const resetAnonymousVisit =
+      !storedProfile &&
+      (TESTING_MODE || window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
+    if (resetAnonymousVisit) {
+      clearLocalRunState();
     }
 
-    const storedProfile = window.localStorage.getItem(profileKey);
     if (storedProfile) {
       setProfile(JSON.parse(storedProfile) as LocalProfile);
     }
@@ -317,6 +354,16 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     const storedRecords = window.localStorage.getItem(recordsKey);
     if (storedRecords) {
       setLeaderboardRecords(JSON.parse(storedRecords) as LeaderboardRecord[]);
+    }
+
+    // One-time reset when the score model changes, so returning testers re-appoint a manager
+    // and start from 0 on the current model instead of carrying stale scores from an old scale.
+    if (window.localStorage.getItem(scoreModelKey) !== SCORE_MODEL) {
+      window.localStorage.removeItem(managerKey);
+      window.localStorage.removeItem(managerScoreKey);
+      window.localStorage.removeItem(managerSpinsKey);
+      window.localStorage.removeItem(expertUnlockedKey);
+      window.localStorage.setItem(scoreModelKey, SCORE_MODEL);
     }
 
     const storedManager = window.localStorage.getItem(managerKey);
@@ -331,13 +378,17 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     setCompletedLeagues(Number(window.localStorage.getItem(completedLeaguesKey) ?? 0));
     setExpertUnlockedEarned(window.localStorage.getItem(expertUnlockedKey) === "true" || isExpertUnlocked(storedManagerScore));
 
-    fetch("/api/guest-plays")
-      .then((response) => response.json())
-      .then((status: GuestStatus) => {
-        const localPlayed = window.localStorage.getItem(localGuestKey) === "true";
-        setGuestStatus(localPlayed ? { allowed: false, played: true } : status);
-      })
-      .catch(() => undefined);
+    if (resetAnonymousVisit) {
+      setGuestStatus({ allowed: true, played: false });
+    } else {
+      fetch("/api/guest-plays")
+        .then((response) => response.json())
+        .then((status: GuestStatus) => {
+          const localPlayed = window.localStorage.getItem(localGuestKey) === "true";
+          setGuestStatus(localPlayed ? { allowed: false, played: true } : status);
+        })
+        .catch(() => undefined);
+    }
 
     const supabase = getSupabaseBrowserClient();
     if (!supabase) {
@@ -350,27 +401,13 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
       }
       const email = session.user.email ?? "";
       const admin = session.user.app_metadata?.role === "admin";
-      const metadataManagerId = normalizeManagerId(String(session.user.user_metadata?.manager_id ?? ""));
-      const managerId = admin ? "admin" : metadataManagerId || normalizeManagerId(email.split("@")[0] ?? "manager");
       setIsAdmin(admin);
-      const nextProfile: LocalProfile = {
+      persistProfile({
         id: session.user.id,
-        managerId,
-        displayName: admin ? "Admin (tester)" : managerId,
+        displayName: admin ? "Admin (tester)" : email.split("@")[0] || "Manager",
         email,
         demo: false
-      };
-      if (nextProfile.managerId) {
-        try {
-          const registered = JSON.parse(window.localStorage.getItem(registeredManagerIdsKey) ?? "{}") as Record<string, string>;
-          registered[nextProfile.managerId] = nextProfile.id;
-          window.localStorage.setItem(registeredManagerIdsKey, JSON.stringify(registered));
-        } catch {
-          window.localStorage.setItem(registeredManagerIdsKey, JSON.stringify({ [nextProfile.managerId]: nextProfile.id }));
-        }
-      }
-      setProfile(nextProfile);
-      window.localStorage.setItem(profileKey, JSON.stringify(nextProfile));
+      });
     };
 
     supabase.auth.getSession().then(({ data }) => applySession(data.session));
@@ -416,25 +453,6 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
   }, [exhibitionPlaying, matchSpeed]);
 
   useEffect(() => {
-    if (!seasonPlaying) {
-      return;
-    }
-    const timer = window.setInterval(() => {
-      setSeasonLiveSecond((second) => {
-        if (second >= 90) {
-          window.clearInterval(timer);
-          setSeasonPlaying(false);
-          setSeasonReadyToRecord(true);
-          return 90;
-        }
-        return second + 1;
-      });
-    }, 650 / matchSpeed);
-
-    return () => window.clearInterval(timer);
-  }, [seasonPlaying, matchSpeed]);
-
-  useEffect(() => {
     if (leagueCommentaryRef.current) {
       leagueCommentaryRef.current.scrollTop = leagueCommentaryRef.current.scrollHeight;
     }
@@ -447,12 +465,6 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
   }, [exhibitionEvents.length]);
 
   useEffect(() => {
-    if (seasonCommentaryRef.current) {
-      seasonCommentaryRef.current.scrollTop = seasonCommentaryRef.current.scrollHeight;
-    }
-  }, [seasonCommentaryEvents.length]);
-
-  useEffect(() => {
     const goalCount = visibleEvents.filter((e) => e.code === "goal").length;
     if (goalCount > lastFlashedGoalCount) {
       setScoreFlashing(true);
@@ -462,121 +474,10 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     }
   }, [visibleEvents, lastFlashedGoalCount]);
 
-  function readRegisteredManagerIds(): Record<string, string> {
-    try {
-      return JSON.parse(window.localStorage.getItem(registeredManagerIdsKey) ?? "{}") as Record<string, string>;
-    } catch {
-      return {};
-    }
-  }
-
-  function isManagerIdTaken(managerId: string, profileId?: string): boolean {
-    const registered = readRegisteredManagerIds();
-    return Boolean(registered[managerId] && registered[managerId] !== profileId);
-  }
-
-  function reserveManagerId(nextProfile: LocalProfile) {
-    if (!nextProfile.managerId) {
-      return;
-    }
-    const registered = readRegisteredManagerIds();
-    registered[nextProfile.managerId] = nextProfile.id;
-    window.localStorage.setItem(registeredManagerIdsKey, JSON.stringify(registered));
-  }
-
-  function syncProfileToSupabase(nextProfile: LocalProfile, progress?: { managerScore: number; completedLeagues: number }) {
-    if (nextProfile.demo) {
-      return;
-    }
-    const supabase = getSupabaseBrowserClient();
-    if (!supabase) {
-      return;
-    }
-    supabase
-      .from("profiles")
-      .upsert({
-        id: nextProfile.id,
-        manager_id: nextProfile.managerId,
-        display_name: nextProfile.displayName,
-        email: nextProfile.email ?? null,
-        locale,
-        mmr: progress?.managerScore ?? managerScore,
-        completed_leagues: progress?.completedLeagues ?? completedLeagues
-      })
-      .then(({ error }) => {
-        if (error) {
-          setAuthMessage(error.message);
-        }
-      });
-  }
-
   function persistProfile(nextProfile: LocalProfile) {
-    reserveManagerId(nextProfile);
     setProfile(nextProfile);
     window.localStorage.setItem(profileKey, JSON.stringify(nextProfile));
-    syncProfileToSupabase(nextProfile);
     setShowAuthGate(false);
-    if (phase === "complete" && league && savedLeagueId !== league.id) {
-      saveLeagueProgress(league, nextProfile);
-    }
-  }
-
-  function openAuth(mode: "signin" | "register" = "signin") {
-    setAuthMode(mode);
-    setAuthMessage("");
-    setShowAuthGate(true);
-  }
-
-  function saveLeagueProgress(completedLeague: LeagueState, profileForSave: LocalProfile) {
-    const finalStandings = computeStandings(completedLeague.managers, completedLeague.results);
-    const completedAt = new Date().toISOString();
-    const newRecords = recordsFromLeague({
-      managers: completedLeague.managers,
-      standings: finalStandings,
-      completedAt
-    }).map((record) => ({
-      ...record,
-      id: `${profileForSave.id}-${completedAt}`,
-      userId: profileForSave.id,
-      displayName: profileForSave.displayName
-    }));
-
-    if (newRecords.length === 0) {
-      return;
-    }
-
-    setLeaderboardRecords((currentRecords) => {
-      const mergedRecords = [...currentRecords, ...newRecords];
-      window.localStorage.setItem(recordsKey, JSON.stringify(mergedRecords));
-      return mergedRecords;
-    });
-
-    const currentCompletedLeagues = Number(window.localStorage.getItem(completedLeaguesKey) ?? completedLeagues);
-    const nextCompletedLeagues = currentCompletedLeagues + 1;
-    let scoreForSync = Number(window.localStorage.getItem(managerScoreKey) ?? managerScore);
-    window.localStorage.setItem(completedLeaguesKey, String(nextCompletedLeagues));
-    setCompletedLeagues(nextCompletedLeagues);
-
-    const human = finalStandings.find((standing) => standing.managerId === "human");
-    if (human) {
-      const currentScore = scoreForSync;
-      const wonTitle = finalStandings[0]?.managerId === "human";
-      const delta = scoreDeltaForStanding(human, wonTitle);
-      const nextScore = Math.max(MIN_MANAGER_SCORE, currentScore + delta);
-      const wasExpert = hasExpertAccess(currentScore, expertUnlockedEarned);
-      const nextExpert = hasExpertAccess(nextScore, wasExpert);
-      scoreForSync = nextScore;
-      setManagerScore(nextScore);
-      setLastScoreDelta(delta);
-      setExpertUnlockedEarned(nextExpert);
-      setExpertUnlockedThisRun(!wasExpert && nextExpert);
-      window.localStorage.setItem(managerScoreKey, String(nextScore));
-      window.localStorage.setItem(expertUnlockedKey, String(nextExpert));
-    }
-
-    saveCommunitySnapshot(completedLeague, profileForSave);
-    syncProfileToSupabase(profileForSave, { managerScore: scoreForSync, completedLeagues: nextCompletedLeagues });
-    setSavedLeagueId(completedLeague.id);
   }
 
   // Appoint a random real manager from the pool. Their finish-derived rating becomes the
@@ -619,7 +520,6 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     setPicks([]);
     setSpin(null);
     setLeague(null);
-    setSavedLeagueId(null);
     setCurrentResult(null);
     setLiveSecond(0);
     setIsPlaying(false);
@@ -632,10 +532,6 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     setExhibitionPlaying(false);
     setSeason(null);
     setSeasonDecision(null);
-    setSeasonCurrentResult(null);
-    setSeasonLiveSecond(0);
-    setSeasonPlaying(false);
-    setSeasonReadyToRecord(false);
     setSeasonOutOfFormChoice(null);
     setSeasonOutOfFormSubId(null);
     setSeasonTeamTalkActive(false);
@@ -668,7 +564,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     setSpin(null);
     setSlotPickerCandidateId(null);
     setSpinning(true);
-    const seed = `spin:${formationId}:${picks.map((pick) => pick.player.i).join("-")}:${draftReshufflesLeft}`;
+    const seed = `${Date.now()}:${picks.length}:${formationId}`;
     window.setTimeout(() => {
       setSpin(spinForOpenSlots(openSlots, usedPlayerIds, seed));
       setSpinning(false);
@@ -686,7 +582,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     setSlotPickerCandidateId(null);
     setSpinning(true);
     const nextUsedPlayerIds = new Set(nextPicks.map((pick) => pick.player.i));
-    const seed = `queue:${formationId}:${nextPicks.map((pick) => pick.player.i).join("-")}`;
+    const seed = `${Date.now()}:${nextPicks.length}:${formationId}`;
     window.setTimeout(() => {
       setSpin(spinForOpenSlots(nextOpenSlots, nextUsedPlayerIds, seed));
       setSpinning(false);
@@ -742,9 +638,6 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
   }
 
   async function createInvincibleAttempt(): Promise<string> {
-    if (!profile) {
-      throw new Error("Register to create an official Invincible attempt.");
-    }
     const response = await fetch("/api/invincible-attempts", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -783,17 +676,17 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
       return;
     }
     if (!canEnterLeague()) {
-      openAuth("register");
+      setShowAuthGate(true);
       return;
     }
 
     if (gameMode === "be_invincible") {
-      let attemptId = `local-${profile?.id ?? "guest"}-${picks.map((pick) => pick.player.i).join("-")}`;
+      let attemptId = `local-${Date.now()}`;
       setSeasonAttemptMessage("");
       try {
         attemptId = await createInvincibleAttempt();
       } catch {
-        setSeasonAttemptMessage("Guest Invincible runs stay local. Register before starting a season to qualify for official awards.");
+        setSeasonAttemptMessage("Local Invincible attempt fallback is active. Official awards require the server gate.");
       }
       const nextSeason = createInvincibleSeason({
         humanPicks: picks,
@@ -804,15 +697,11 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
         mmr: managerScore,
         managerRating: selectedManager?.rating ?? managerScore,
         attemptId,
-        seed: `invincible:${profile?.id ?? "guest"}:${formationId}:${picks.map((pick) => pick.player.i).join("-")}`
+        seed: `${Date.now()}:${profile?.id ?? "guest"}:invincible`
       });
       const preparedSeason = prepareSeasonMatch(nextSeason);
       setSeason(preparedSeason);
       setCurrentResult(null);
-      setSeasonCurrentResult(null);
-      setSeasonLiveSecond(0);
-      setSeasonPlaying(false);
-      setSeasonReadyToRecord(false);
       setPhase("season");
       return;
     }
@@ -825,7 +714,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
       completedLeagues,
       mmr: managerScore,
       managerRating: selectedManager?.rating ?? managerScore,
-      seed: `minileague:${profile?.id ?? "guest"}:${formationId}:${picks.map((pick) => pick.player.i).join("-")}`
+      seed: `${Date.now()}:${profile?.id ?? "guest"}`
     });
 
     setLeague({ ...nextLeague, currentRound: 0, results: [] });
@@ -865,7 +754,10 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
   }
 
   function canKickOffSeasonMatch(): boolean {
-    if (!season || !currentSeasonFixture || seasonCurrentResult || seasonPlaying) {
+    if (!season || !currentSeasonFixture) {
+      return false;
+    }
+    if (seasonMissingSubstitutions.length > 0) {
       return false;
     }
     if (seasonDecision?.outOfForm && !seasonOutOfFormChoice) {
@@ -877,7 +769,22 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     return true;
   }
 
-  function startSeasonMatch() {
+  function handleSeasonSubSelection(unavailablePlayerId: number, subPlayerId: number) {
+    if (!season) {
+      return;
+    }
+    const nextManagers = season.managers.map((manager) =>
+      manager.id === "human"
+        ? {
+            ...manager,
+            substitutions: { ...manager.substitutions, [unavailablePlayerId]: subPlayerId }
+          }
+        : manager
+    );
+    setSeason({ ...season, managers: nextManagers });
+  }
+
+  async function playSeasonMatchAndAdvance() {
     if (!season || !currentSeasonFixture || !canKickOffSeasonMatch()) {
       return;
     }
@@ -891,6 +798,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     const matchHuman = managerForSeasonMatch({
       human,
       injuryGamesByPlayerId: season.injuryGamesByPlayerId,
+      suspensionGamesByPlayerId: season.suspensionGamesByPlayerId,
       outOfFormPlayerId: seasonOutOfFormChoice === "bench" ? seasonDecision?.outOfForm?.playerId : undefined,
       outOfFormSubstituteId: seasonOutOfFormChoice === "bench" ? seasonOutOfFormSubId ?? undefined : undefined
     });
@@ -907,17 +815,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
       homeExpectedGoalsModifier: currentSeasonFixture.homeId === "human" ? humanModifier : 0,
       awayExpectedGoalsModifier: currentSeasonFixture.awayId === "human" ? humanModifier : 0
     });
-    setSeasonCurrentResult(result);
-    setSeasonLiveSecond(0);
-    setSeasonPlaying(true);
-    setSeasonReadyToRecord(false);
-    setLastFlashedGoalCount(0);
-  }
-
-  function finishSeasonNow() {
-    setSeasonLiveSecond(90);
-    setSeasonPlaying(false);
-    setSeasonReadyToRecord(true);
+    await recordSeasonMatchAndAdvance(result);
   }
 
   async function completeInvincibleAttempt(completedSeason: InvincibleSeason, completedStandings: ReturnType<typeof computeStandings>) {
@@ -943,14 +841,14 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     return (await response.json()) as { officialAward: boolean; production: boolean };
   }
 
-  async function recordSeasonMatchAndAdvance() {
-    if (!season || !seasonCurrentResult) {
+  async function recordSeasonMatchAndAdvance(humanResult: FixtureResult) {
+    if (!season) {
       return;
     }
 
     const currentRound = season.rounds[season.currentMatchday] ?? [];
-    const nextResults = [...season.results, seasonCurrentResult];
-    const otherFixtures = currentRound.filter((fixture) => fixture.id !== seasonCurrentResult.fixtureId);
+    const nextResults = [...season.results, humanResult];
+    const otherFixtures = currentRound.filter((fixture) => fixture.id !== humanResult.fixtureId);
     otherFixtures.forEach((fixture) => {
       const home = season.managers.find((manager) => manager.id === fixture.homeId);
       const away = season.managers.find((manager) => manager.id === fixture.awayId);
@@ -968,23 +866,27 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     });
 
     const postMatchInjuries = applySeasonFixtureInjuries({
-      injuryGamesByPlayerId: decrementSeasonInjuries(season.injuryGamesByPlayerId),
-      result: seasonCurrentResult,
+      injuryGamesByPlayerId: decrementSeasonAbsences(season.injuryGamesByPlayerId),
+      result: humanResult,
       seed: `${season.id}:post-injury:${season.currentMatchday}`
     });
+    const postMatchSuspensions = applySeasonFixtureSuspensions({
+      suspensionGamesByPlayerId: decrementSeasonAbsences(season.suspensionGamesByPlayerId),
+      result: humanResult
+    });
     const nextMatchday = season.currentMatchday + 1;
+    const nextTeamTalksUsedByHalf = seasonTeamTalkActive ? markSeasonTeamTalkUsed(season) : season.teamTalksUsedByHalf;
     let nextSeason: InvincibleSeason = {
       ...season,
       results: nextResults,
       currentMatchday: nextMatchday,
       injuryGamesByPlayerId: postMatchInjuries.injuryGamesByPlayerId,
-      boostsRemaining: seasonTeamTalkActive ? Math.max(0, season.boostsRemaining - 1) : season.boostsRemaining,
+      suspensionGamesByPlayerId: postMatchSuspensions.suspensionGamesByPlayerId,
+      teamTalksUsedByHalf: nextTeamTalksUsedByHalf,
+      boostsRemaining: remainingSeasonTeamTalks({ teamTalksUsedByHalf: nextTeamTalksUsedByHalf }),
       boostsUsed: seasonTeamTalkActive ? season.boostsUsed + 1 : season.boostsUsed
     };
 
-    setSeasonCurrentResult(null);
-    setSeasonLiveSecond(0);
-    setSeasonReadyToRecord(false);
     setSeasonOutOfFormChoice(null);
     setSeasonOutOfFormSubId(null);
     setSeasonTeamTalkActive(false);
@@ -1053,13 +955,34 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
   }
 
   function completeLeague(completedLeague: LeagueState) {
-    const saveProfile = profile ?? (TESTING_MODE ? { id: "testing-profile", managerId: "testing", displayName: "Testing Manager", demo: true } : null);
-    if (saveProfile) {
-      saveLeagueProgress(completedLeague, saveProfile);
-    } else {
-      setLastScoreDelta(null);
-      setExpertUnlockedThisRun(false);
-      setSavedLeagueId(null);
+    const finalStandings = computeStandings(completedLeague.managers, completedLeague.results);
+    const completedAt = new Date().toISOString();
+    const newRecords = recordsFromLeague({
+      managers: completedLeague.managers,
+      standings: finalStandings,
+      completedAt
+    });
+    const mergedRecords = [...leaderboardRecords, ...newRecords];
+    setLeaderboardRecords(mergedRecords);
+    window.localStorage.setItem(recordsKey, JSON.stringify(mergedRecords));
+    const nextCompletedLeagues = completedLeagues + 1;
+    setCompletedLeagues(nextCompletedLeagues);
+    window.localStorage.setItem(completedLeaguesKey, String(nextCompletedLeagues));
+
+    const human = finalStandings.find((standing) => standing.managerId === "human");
+    if (human) {
+      const currentScore = Number(window.localStorage.getItem(managerScoreKey) ?? managerScore);
+      const wonTitle = finalStandings[0]?.managerId === "human";
+      const delta = scoreDeltaForStanding(human, wonTitle);
+      const nextScore = Math.max(MIN_MANAGER_SCORE, currentScore + delta);
+      const wasExpert = hasExpertAccess(currentScore, expertUnlockedEarned);
+      const nextExpert = hasExpertAccess(nextScore, wasExpert);
+      setManagerScore(nextScore);
+      setLastScoreDelta(delta);
+      setExpertUnlockedEarned(nextExpert);
+      setExpertUnlockedThisRun(!wasExpert && nextExpert);
+      window.localStorage.setItem(managerScoreKey, String(nextScore));
+      window.localStorage.setItem(expertUnlockedKey, String(nextExpert));
     }
 
     if (!profile && !TESTING_MODE) {
@@ -1068,6 +991,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
       setGuestStatus({ allowed: false, played: true });
     }
 
+    saveCommunitySnapshot(completedLeague);
     setPhase("complete");
   }
 
@@ -1080,15 +1004,15 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     }
   }
 
-  function saveCommunitySnapshot(completedLeague: LeagueState, profileForSave: LocalProfile) {
+  function saveCommunitySnapshot(completedLeague: LeagueState) {
     const human = completedLeague.managers.find((manager) => manager.id === "human");
     if (!human) {
       return;
     }
     const snapshot: ManagerSquad = {
       ...human,
-      id: `snapshot-${profileForSave.id}-${completedLeague.id}`,
-      displayName: `${profileForSave.displayName} XI`,
+      id: `snapshot-${Date.now()}`,
+      displayName: `${profile?.displayName ?? "Guest Manager"} XI`,
       kind: "reserve",
       source: "snapshot",
       injuredPlayerIds: [],
@@ -1152,7 +1076,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
       suspendedPlayerIds: [],
       substitutions: {}
     };
-    const fixture = { id: `exhibition-${league.id}-${opponent.id}`, round: 1, homeId: "human", awayId: away.id };
+    const fixture = { id: `exhibition-${Date.now()}`, round: 1, homeId: "human", awayId: away.id };
     const result = simulateFixture({
       fixture,
       home,
@@ -1204,92 +1128,29 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
       setAuthMessage(error.message);
       return;
     }
-    // onAuthStateChange applies the profile (and admin reset). Clear the password field.
+    // onAuthStateChange applies the profile. Clear the password field.
     setAuthPassword("");
     setAuthMessage("");
   }
 
-  async function signUpWithPassword(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function signUpWithPassword() {
     setAuthMessage("");
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase) {
+      setAuthMessage("Sign-up is unavailable until Supabase is configured.");
+      return;
+    }
     const email = authEmail.trim();
-    const managerId = normalizeManagerId(authManagerId);
-    const managerIdError = managerIdValidationMessage(managerId);
-    if (managerIdError) {
-      setAuthMessage(managerIdError);
-      return;
-    }
-    if (isManagerIdTaken(managerId)) {
-      setAuthMessage("That manager ID is already taken. Choose another one.");
-      return;
-    }
     if (!email || authPassword.length < 6) {
       setAuthMessage("Enter an email and a password of at least 6 characters.");
       return;
     }
-
-    const registrationResponse = await fetch("/api/registration", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, managerId })
-    });
-    const registrationResult = (await registrationResponse.json()) as { ok?: boolean; email?: string; managerId?: string; reason?: string };
-    if (!registrationResponse.ok || !registrationResult.ok || !registrationResult.email || !registrationResult.managerId) {
-      setAuthMessage(registrationResult.reason ?? "Registration could not be validated.");
-      return;
-    }
-    if (isManagerIdTaken(registrationResult.managerId)) {
-      setAuthMessage("That manager ID is already taken on this device. Choose another one.");
-      return;
-    }
-
-    const supabase = getSupabaseBrowserClient();
-    if (!supabase) {
-      persistProfile({
-        id: `local-${registrationResult.managerId}`,
-        managerId: registrationResult.managerId,
-        displayName: registrationResult.managerId,
-        email: registrationResult.email,
-        demo: true
-      });
-      setAuthEmail("");
-      setAuthManagerId("");
-      setAuthPassword("");
-      return;
-    }
-
-    const { data, error } = await supabase.auth.signUp({
-      email: registrationResult.email,
-      password: authPassword,
-      options: {
-        data: {
-          manager_id: registrationResult.managerId,
-          display_name: registrationResult.managerId
-        }
-      }
-    });
+    const { data, error } = await supabase.auth.signUp({ email, password: authPassword });
     if (error) {
       setAuthMessage(error.message);
       return;
     }
-    reserveManagerId({
-      id: data.user?.id ?? `pending-${registrationResult.managerId}`,
-      managerId: registrationResult.managerId,
-      displayName: registrationResult.managerId,
-      email: registrationResult.email,
-      demo: false
-    });
-    if (data.session?.user) {
-      persistProfile({
-        id: data.session.user.id,
-        managerId: registrationResult.managerId,
-        displayName: registrationResult.managerId,
-        email: registrationResult.email,
-        demo: false
-      });
-    }
     setAuthPassword("");
-    setAuthManagerId("");
     setAuthMessage(data.session ? "Account created. You're signed in." : "Account created. Check your email to confirm, then sign in.");
   }
 
@@ -1300,7 +1161,6 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     setIsAdmin(false);
     window.localStorage.removeItem(profileKey);
     setAuthEmail("");
-    setAuthManagerId("");
     setAuthPassword("");
     setAuthMessage("");
     setShowAuthGate(false);
@@ -1330,13 +1190,18 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
       return;
     }
 
-    setAuthMode("register");
-    setAuthMessage("Use Create account to choose a unique manager ID for this prototype.");
+    persistProfile({
+      id: `demo-${result.email}`,
+      displayName: result.email.split("@")[0] || "Manager",
+      email: result.email,
+      demo: true
+    });
+    setAuthMessage("Demo profile saved locally.");
   }
 
   function startAnotherRun() {
     if (!TESTING_MODE && !profile && guestStatus.played) {
-      openAuth("register");
+      setShowAuthGate(true);
       return;
     }
     resetDraft("setup");
@@ -1362,9 +1227,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
             ? `This draw is ${spin.teamName} ${spin.year}. Pick any player, then assign their role.`
             : `Open roles: ${openSlots.slice(0, 4).map((slot) => slot.label).join(", ")}${openSlots.length > 4 ? "..." : ""}. Spin a club-season when ready.`
         : phase === "league"
-          ? profile
-            ? "These are historical opponents. Your signed-in result can save to your profile and leaderboard."
-            : "These are historical opponents. Guest results are temporary until you create a manager ID."
+          ? "These are historical opponents. Your season result goes to the real-player leaderboard."
           : phase === "season"
             ? "Thirty-eight matches. Stay unbeaten, manage the knocks, and use team talks carefully."
           : phase === "exhibition"
@@ -1383,18 +1246,61 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
             <h1>{copy.tagline}</h1>
           </div>
         </div>
+        <nav className="banner-nav" aria-label="Primary">
+          <button
+            type="button"
+            className={`banner-tab${view === "play" ? " active" : ""}`}
+            onClick={() => switchView("play")}
+          >
+            {copy.tabPlay}
+          </button>
+          <button
+            type="button"
+            className={`banner-tab${view === "leaderboards" ? " active" : ""}`}
+            onClick={() => !isPlaying && !exhibitionPlaying && switchView("leaderboards")}
+            disabled={isPlaying || exhibitionPlaying}
+            title={isPlaying || exhibitionPlaying ? copy.tabLockedHint : undefined}
+          >
+            {copy.tabLeaderboards}
+            {(isPlaying || exhibitionPlaying) && <span className="tab-lock">· {copy.tabLive}</span>}
+          </button>
+          <button
+            type="button"
+            className={`banner-tab${view === "personal" ? " active" : ""}`}
+            onClick={() => !isPlaying && !exhibitionPlaying && switchView("personal")}
+            disabled={isPlaying || exhibitionPlaying}
+            title={isPlaying || exhibitionPlaying ? copy.tabLockedHint : undefined}
+          >
+            {copy.tabProgress}
+          </button>
+        </nav>
         <div className="topbar-actions">
-          <div className="lang-switcher">
-            {(["en", "es", "fr", "pt"] as const).map((lang) => (
-              <a
-                key={lang}
-                href={`/${lang}`}
-                className={`lang-btn${locale === lang ? " active" : ""}`}
-                aria-label={lang.toUpperCase()}
-              >
-                {lang.toUpperCase()}
-              </a>
-            ))}
+          <div className="lang-menu">
+            <button
+              type="button"
+              className="lang-menu-button"
+              onClick={() => setLangMenuOpen((open) => !open)}
+              aria-haspopup="menu"
+              aria-expanded={langMenuOpen}
+              aria-label="Language"
+            >
+              <Globe size={16} />
+              <span>{locale.toUpperCase()}</span>
+            </button>
+            {langMenuOpen && (
+              <div className="lang-menu-list" role="menu">
+                {(["en", "es", "fr", "pt"] as const).map((lang) => (
+                  <a
+                    key={lang}
+                    href={`/${lang}`}
+                    className={`lang-menu-item${locale === lang ? " active" : ""}`}
+                    role="menuitem"
+                  >
+                    {lang.toUpperCase()}
+                  </a>
+                ))}
+              </div>
+            )}
           </div>
           <button
             className="icon-button theme-toggle"
@@ -1410,72 +1316,39 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
           >
             {theme === "light" ? <Moon size={18} /> : <Sun size={18} />}
           </button>
-          {profile ? (
-            <button className="profile-pill" type="button" onClick={() => openAuth("signin")}>
-              <LogIn size={16} />
-              <span>{profile.displayName}</span>
-            </button>
-          ) : (
-            <a className="profile-pill" href={`/${locale}/register`}>
-              <LogIn size={16} />
-              <span>Register</span>
-            </a>
-          )}
+          <button className="profile-pill" type="button" onClick={() => setShowAuthGate(true)}>
+            <LogIn size={16} />
+            <span>{profile?.displayName ?? "Sign in"}</span>
+          </button>
         </div>
       </header>
 
-      <section className="status-strip" aria-label="Game status">
-        <div>
-          <span>Draft</span>
-          <strong>{draftStatus}</strong>
-        </div>
-        <div>
-          <span>League</span>
-          <strong>{leagueStatus}</strong>
-        </div>
-        <div>
-          <span>Score</span>
-          <strong>{selectedManager ? managerScore : "—"}</strong>
-        </div>
-        <div>
-          <span>Draft level</span>
-          <strong>{expertUnlocked ? "Expert" : "Assisted"}</strong>
-        </div>
-      </section>
+      {phase !== "setup" && (
+        <section className={`status-strip${phase === "draft" ? " draft-status-strip" : ""}`} aria-label="Game status">
+          {phase !== "draft" && (
+            <div>
+              <span>Draft</span>
+              <strong>{draftStatus}</strong>
+            </div>
+          )}
+          {phase !== "draft" && (
+            <div>
+              <span>League</span>
+              <strong>{leagueStatus}</strong>
+            </div>
+          )}
+          <div>
+            <span>Score</span>
+            <strong>{selectedManager ? managerScore : "—"}</strong>
+          </div>
+          <div>
+            <span>Draft level</span>
+            <strong>{expertUnlocked ? "Expert" : "Assisted"}</strong>
+          </div>
+        </section>
+      )}
 
-      <nav className="main-tabs" aria-label="Primary">
-        <button
-          type="button"
-          className={`tab-button${view === "play" ? " active" : ""}`}
-          onClick={() => switchView("play")}
-        >
-          <Gamepad2 size={17} />
-          {copy.tabPlay}
-        </button>
-        <button
-          type="button"
-          className={`tab-button${view === "leaderboards" ? " active" : ""}`}
-          onClick={() => !isPlaying && !exhibitionPlaying && !seasonPlaying && switchView("leaderboards")}
-          disabled={isPlaying || exhibitionPlaying || seasonPlaying}
-          title={isPlaying || exhibitionPlaying || seasonPlaying ? copy.tabLockedHint : undefined}
-        >
-          <BarChart3 size={17} />
-          {copy.tabLeaderboards}
-          {(isPlaying || exhibitionPlaying || seasonPlaying) && <span className="tab-lock">· {copy.tabLive}</span>}
-        </button>
-        <button
-          type="button"
-          className={`tab-button${view === "personal" ? " active" : ""}`}
-          onClick={() => !isPlaying && !exhibitionPlaying && !seasonPlaying && switchView("personal")}
-          disabled={isPlaying || exhibitionPlaying || seasonPlaying}
-          title={isPlaying || exhibitionPlaying || seasonPlaying ? copy.tabLockedHint : undefined}
-        >
-          <Activity size={17} />
-          My progress
-        </button>
-      </nav>
-
-      {view === "play" && (
+      {view === "play" && phase !== "setup" && (
         <section className="assistant-strip" aria-label="Assistant tip">
           <ManagerAvatar mood={assistantMood} line={assistantLine} compact />
         </section>
@@ -1492,135 +1365,169 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
 
       {view === "personal" && (
         <PersonalProgressScreen
-          profile={profile}
           records={leaderboardRecords}
           managerScore={managerScore}
           completedLeagues={completedLeagues}
           expertUnlocked={expertUnlocked}
-          onRegister={() => openAuth("register")}
         />
       )}
 
       {view === "play" && phase === "setup" && (
-        <section className="layout-grid setup-grid">
-          <div className="panel intro-panel">
-            <p className="eyebrow">{copy.setupTitle}</p>
-            <h2>Draft fast, then manage the damage.</h2>
-            <p>{copy.setupCopy}</p>
+        <>
+          <section className="setup-home">
+            <div className="setup-left">
+              <div className="setup-feature-grid" aria-label="Setup flow">
+                <div>
+                  <span>01</span>
+                  <strong>Pick manager</strong>
+                  <small>Set your starting score and match edge.</small>
+                </div>
+                <div>
+                  <span>02</span>
+                  <strong>Choose the run</strong>
+                  <small>Mini league or full invincible season.</small>
+                </div>
+                <div>
+                  <span>03</span>
+                  <strong>Draft the XI</strong>
+                  <small>Build around your manager, then chase the table.</small>
+                </div>
+              </div>
 
-            <div className="mode-grid" aria-label="Game mode">
-              <button
-                type="button"
-                className={`choice-card${gameMode === "minileague" ? " active" : ""}`}
-                onClick={() => setGameMode("minileague")}
-              >
-                <span className="eyebrow">Mini league</span>
-                <strong>Five-match rush</strong>
-                <small>Draft once, climb a compact historical table.</small>
-              </button>
-              <button
-                type="button"
-                className={`choice-card${gameMode === "be_invincible" ? " active" : ""}`}
-                onClick={() => setGameMode("be_invincible")}
-              >
-                <span className="eyebrow">Be Invincible</span>
-                <strong>38-game season</strong>
-                <small>Stay unbeaten through injuries, form dips and tight fixtures.</small>
-              </button>
-            </div>
-
-            <div className="manager-pick">
-              {managerSpinning ? (
-                <>
-                  <p className="eyebrow">Manager wheel</p>
-                  <div className="manager-wheel" aria-live="polite">
-                    <span>Guardiola</span>
-                    <span>Klopp</span>
-                    <span>Arteta</span>
-                    <span>Tuchel</span>
-                  </div>
-                  <p className="manager-pick-prompt">Revealing your appointment...</p>
-                </>
-              ) : selectedManager ? (
-                <>
-                  <div className="manager-pick-head">
-                    <div>
-                      <p className="eyebrow">Your manager</p>
-                      <strong className="manager-pick-name">{selectedManager.manager}</strong>
-                      <span className="manager-pick-club">
-                        {selectedManager.teamName} {selectedManager.year} · finished {ordinal(selectedManager.position)}
-                      </span>
+              <div className="manager-pick">
+                {managerSpinning ? (
+                  <>
+                    <p className="eyebrow">Choose manager</p>
+                    <div className="manager-wheel" aria-live="polite">
+                      <span>Guardiola</span>
+                      <span>Klopp</span>
+                      <span>Arteta</span>
+                      <span>Tuchel</span>
                     </div>
-                    <span className="manager-pick-rating">{selectedManager.rating}</span>
-                  </div>
-                  <div className="manager-pick-actions">
-                    <span className="spin-bank">{managerSpinsLeft} manager spin{managerSpinsLeft === 1 ? "" : "s"} left</span>
+                    <p className="manager-pick-prompt">Revealing your appointment...</p>
+                  </>
+                ) : selectedManager ? (
+                  <>
+                    <div className="manager-panel-head">
+                      <div>
+                        <p className="eyebrow">Choose manager</p>
+                      </div>
+                      <span>Stage 01</span>
+                    </div>
+                    <div className="manager-pick-head">
+                      <div>
+                        <strong className="manager-pick-name">{selectedManager.manager}</strong>
+                        <span className="manager-pick-club">
+                          {selectedManager.teamName} {selectedManager.year} · finished {ordinal(selectedManager.position)}
+                        </span>
+                      </div>
+                      <span className="manager-pick-rating">{selectedManager.rating}</span>
+                    </div>
+                    <div className="manager-impact">
+                      <div>
+                        <strong>Starting score</strong>
+                      <span>Higher finish gives a stronger manager score.</span>
+                    </div>
+                    <div>
+                        <strong>Match edge</strong>
+                        <span>Better managers add a small simulation boost.</span>
+                      </div>
+                    </div>
+                    <div className="manager-pick-actions">
+                      <span className="spin-bank">{managerSpinsLeft} manager spin{managerSpinsLeft === 1 ? "" : "s"} left</span>
                     <button className="secondary-button" type="button" onClick={shuffleManager} disabled={managerSpinsLeft <= 0 || managerSpinning}>
-                      <Shuffle size={16} />
-                      Re-shuffle manager
-                    </button>
+                        <Shuffle size={16} />
+                        Re-shuffle manager
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="manager-panel-head">
+                      <p className="eyebrow">Choose manager</p>
+                      <span>Stage 01</span>
+                    </div>
+                    <div className="manager-impact">
+                      <div>
+                        <strong>Starting score</strong>
+                      <span>Your manager sets the score you defend.</span>
+                    </div>
+                    <div>
+                      <strong>Match edge</strong>
+                      <span>Strong appointments help tight fixtures.</span>
+                    </div>
                   </div>
-                </>
-              ) : (
-                <>
-                  <p className="eyebrow">Appoint your manager</p>
-                  <p className="manager-pick-prompt">
-                    Shuffle to draw a real manager. Their league finish sets your starting score and a slight match-day edge.
-                  </p>
                   <div className="manager-pick-actions">
                     <span className="spin-bank">{managerSpinsLeft} manager spins available</span>
                     <button className="primary-button" type="button" onClick={shuffleManager} disabled={managerSpinsLeft <= 0 || managerSpinning}>
-                      <Shuffle size={16} />
-                      Shuffle manager
-                    </button>
-                  </div>
-                </>
-              )}
+                        <Shuffle size={16} />
+                        Shuffle manager
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
             </div>
 
-            <button className="primary-button" type="button" onClick={startDraft} disabled={!selectedManager || managerSpinning}>
-              <Play size={18} />
-              {copy.startDraft}
-            </button>
-            {selectedManager && (
-              <ProgressionPanel
-                score={managerScore}
-                completedLeagues={completedLeagues}
-                expertUnlocked={expertUnlocked}
-              />
-            )}
-          </div>
+            <div className="setup-stack">
+              <div className="setup-control">
+                <div className="setup-section-head">
+                  <p className="eyebrow">Game mode</p>
+                  <span>Stage 02</span>
+                </div>
+                <div className="mode-grid" aria-label="Game mode">
+                  <button
+                    type="button"
+                    className={`choice-card${gameMode === "minileague" ? " active" : ""}`}
+                    onClick={() => setGameMode("minileague")}
+                  >
+                    <span className="eyebrow">Mini league</span>
+                    <strong>Five-match rush</strong>
+                    <small>Draft once, climb a compact historical table.</small>
+                  </button>
+                  <button
+                    type="button"
+                    className={`choice-card${gameMode === "be_invincible" ? " active" : ""}`}
+                    onClick={() => setGameMode("be_invincible")}
+                  >
+                    <span className="eyebrow">Be Invincible</span>
+                    <strong>38-game season</strong>
+                    <small>Stay unbeaten through injuries, form dips and tight fixtures.</small>
+                  </button>
+                </div>
+              </div>
 
-          <div className="panel formation-panel">
-            <p className="eyebrow">Formation</p>
-            <div className="formation-grid">
-              {FORMATION_LIST.map((formation) => (
-                <button
-                  key={formation.id}
-                  type="button"
-                  className={formationId === formation.id ? "formation-button active" : "formation-button"}
-                  onClick={() => setFormationId(formation.id)}
-                >
-                  <FormationGlyph formationId={formation.id} />
-                  <span>{formation.name}</span>
-                </button>
-              ))}
+              <button className="primary-button" type="button" onClick={startDraft} disabled={!selectedManager || managerSpinning}>
+                <Play size={18} />
+                {copy.startDraft}
+              </button>
             </div>
-            <FormationSetupPreview formationId={formationId} />
-          </div>
-        </section>
+          </section>
+
+          <footer className="site-footer">
+            <div>
+              <strong>FootyRush</strong>
+              <span>© 2026 FootyRush. All rights reserved.</span>
+            </div>
+            <nav aria-label="Footer">
+              <a href="mailto:hello@footyrush.app">Contact</a>
+              <a href="mailto:support@footyrush.app">Support</a>
+              <button type="button">Privacy</button>
+              <button type="button">Terms</button>
+            </nav>
+          </footer>
+        </>
       )}
 
       {view === "play" && phase === "draft" && (
-        <section className="draft-layout">
+        <section className="draft-grid">
           <div className="panel draft-board">
-            <div className="panel-header">
-              <div>
-                <p className="eyebrow">
-                  {copy.draftRound} {Math.min(picks.length + 1, draftSlots.length)} / {draftSlots.length}
-                </p>
-                <h2>{draftComplete ? "Squad complete" : "Spin team/year, then assign a role"}</h2>
-              </div>
+            <div className="draft-bar">
+              <p className="eyebrow draft-round-label">
+                {draftComplete
+                  ? "Squad complete"
+                  : `${copy.draftRound} ${Math.min(picks.length + 1, draftSlots.length)} / ${draftSlots.length}`}
+              </p>
               {dataError ? (
                 <button className="secondary-button" type="button" onClick={loadData}>
                   <Shuffle size={17} />
@@ -1628,7 +1535,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                 </button>
               ) : (
                 <div className="draft-spin-controls">
-                  <span className="spin-bank">{draftReshufflesLeft} reshuffle{draftReshufflesLeft === 1 ? "" : "s"} left</span>
+                  <span className="spin-bank">{draftReshufflesLeft} left</span>
                   <button
                     className="secondary-button"
                     type="button"
@@ -1636,34 +1543,19 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                     disabled={draftComplete || spinning || !dataReady || (Boolean(spin) && draftReshufflesLeft <= 0)}
                   >
                     <Shuffle size={17} className={spinning ? "spin-icon" : ""} />
-                    {!dataReady ? "Loading..." : spinning ? "Drawing..." : spin ? "Re-spin draw" : copy.spin}
+                    {!dataReady ? "Loading..." : spinning ? "Drawing..." : spin ? "Re-spin" : copy.spin}
                   </button>
-                  {spin && draftReshufflesLeft <= 0 && (
-                    <button className="secondary-button locked-button" type="button" disabled>
-                      <Lock size={16} />
-                      Extra reshuffles later
-                    </button>
-                  )}
                 </div>
               )}
-            </div>
-
-            <div className="fit-explainer">
-              <BadgeInfo size={16} />
-              <span><strong>Perfect</strong> is a natural role.</span>
-              <span><strong>Good Fit</strong> is an adjacent role with a small penalty.</span>
-              <span><strong>Okay</strong> is an emergency fit.</span>
             </div>
 
             {spin ? (
               <div className="spin-result">
                 <div className="draw-ticket">
-                  <span>TEAM</span>
                   <strong>{spin.teamCode}</strong>
-                  <span>YEAR</span>
+                  <span>·</span>
                   <strong>{spin.year}</strong>
                   <small>{spin.teamName}</small>
-                  <small>Open roles: {openSlots.slice(0, 5).map((slot) => slot.label).join(", ")}{openSlots.length > 5 ? "..." : ""}</small>
                 </div>
                 {pendingCandidate && (
                   <div
@@ -1710,55 +1602,44 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                     </div>
                   </div>
                 )}
-                <div className="candidate-grid">
+                <div className="candidate-list">
                   {spin.candidates.map((candidate, index) => {
                     const fitLabel = fitLabelFor(candidate.fit);
                     const fitText = fitTextFor(candidate.fit);
                     const cardFitClass = draftMode === "classic" ? ` ${fitLabel}` : "";
                     const boostWillActivate = Boolean(candidate.boost && activeBoostCount < BOOST_LIMIT);
+                    const roleTargets = candidate.slotOptions.slice(0, 3).map((option) => option.slotLabel).join(" · ") + (candidate.slotOptions.length > 3 ? " · +" : "");
                     return (
-                      <div className={`player-card fm-card${cardFitClass}`} key={candidate.player.i}>
-                        <div className="fm-card-top">
-                          <span className="card-pos">{candidate.slotOptions.length} role{candidate.slotOptions.length === 1 ? "" : "s"}</span>
-                          {draftMode === "classic" ? (
-                            <span className="card-ovr">{Math.round(candidate.effectiveRating)}</span>
-                          ) : (
-                            <span className="card-ovr hidden">?</span>
-                          )}
-                        </div>
-                        <span className="player-shirt">
-                          <Shirt size={42} strokeWidth={1.7} />
-                          <span>{candidate.player.num}</span>
-                        </span>
-                        <strong>{candidate.player.n}</strong>
-                        <span className="card-positions">{candidate.player.p.join(" / ")}</span>
-                        <span className="role-targets">
-                          {candidate.slotOptions.slice(0, 3).map((option) => option.slotLabel).join(" · ")}
-                          {candidate.slotOptions.length > 3 ? " · +" : ""}
-                        </span>
-                        {candidate.boost && (
-                          <span className={`boost-badge${boostWillActivate ? "" : " inactive"}`}>
-                            <Sparkles size={13} />
-                            {candidate.boost.label}{boostWillActivate ? "" : " (inactive)"}
-                          </span>
-                        )}
+                      <div className={`fm-row${cardFitClass}`} key={candidate.player.i}>
                         {draftMode === "classic" ? (
-                          <>
-                            <span className={`fit-badge ${fitLabel}`}>{fitText}</span>
-                            <div className="ovr-bar-wrap">
-                              <div className="ovr-bar-fill" style={{ width: `${Math.round(candidate.effectiveRating)}%` }} />
-                            </div>
-                            <div className="stat-row">
-                              <span>PAC {candidate.player.pac}</span>
-                              <span>SHO {candidate.player.sho}</span>
-                              <span>PAS {candidate.player.pas}</span>
-                              <span>DEF {candidate.player.def}</span>
-                            </div>
-                          </>
+                          <span className="fm-row-ovr">{Math.round(candidate.effectiveRating)}</span>
                         ) : (
-                          <div className="hidden-stats">Stats hidden</div>
+                          <span className="fm-row-ovr hidden">?</span>
                         )}
-                        <span className="team-chip">{spin.teamCode} &apos;{String(spin.year).slice(2)}</span>
+                        <div className="fm-row-main">
+                          <div className="fm-row-name">
+                            <strong>{candidate.player.n}</strong>
+                            {candidate.boost && (
+                              <span className={`boost-badge${boostWillActivate ? "" : " inactive"}`}>
+                                <Sparkles size={12} />
+                                {candidate.boost.label}{boostWillActivate ? "" : " (inactive)"}
+                              </span>
+                            )}
+                          </div>
+                          <div className="fm-row-sub">
+                            <span className="card-positions">{candidate.player.p.join(" / ")}</span>
+                            <span className="role-targets">→ {roleTargets}</span>
+                          </div>
+                        </div>
+                        {draftMode === "classic" && (
+                          <div className="fm-row-stats">
+                            <span>PAC {candidate.player.pac}</span>
+                            <span>SHO {candidate.player.sho}</span>
+                            <span>PAS {candidate.player.pas}</span>
+                            <span>DEF {candidate.player.def}</span>
+                          </div>
+                        )}
+                        {draftMode === "classic" && <span className={`fit-badge ${fitLabel}`}>{fitText}</span>}
                         <button className="primary-button pick-button" type="button" onClick={() => choosePlayer(index)}>
                           {candidate.slotOptions.length === 1 ? `Add to ${candidate.slotOptions[0].slotLabel}` : "Pick role"}
                           <ChevronRight size={16} />
@@ -1788,7 +1669,41 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
             )}
           </div>
 
-          <SquadPanel picks={picks} formationId={formationId} mode={draftMode} />
+          <div className="draft-right">
+            <SquadPanel picks={picks} formationId={formationId} mode={draftMode} />
+
+            <div className="panel formation-panel">
+              <div className="formation-panel-head">
+                <p className="eyebrow">Formation</p>
+                {picks.length > 0 && <span className="fine-print">Locked</span>}
+              </div>
+              <div className="formation-grid">
+                {FORMATION_LIST.map((formation) => (
+                  <button
+                    key={formation.id}
+                    type="button"
+                    className={formationId === formation.id ? "formation-button active" : "formation-button"}
+                    onClick={() => {
+                      if (picks.length === 0) setFormationId(formation.id);
+                    }}
+                    disabled={picks.length > 0 && formationId !== formation.id}
+                    title={picks.length > 0 ? "Formation locks once you start assigning players" : undefined}
+                  >
+                    <FormationGlyph formationId={formation.id} />
+                    <span>{formation.name}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {selectedManager && (
+              <ProgressionPanel
+                score={managerScore}
+                completedLeagues={completedLeagues}
+                expertUnlocked={expertUnlocked}
+              />
+            )}
+          </div>
         </section>
       )}
 
@@ -1932,109 +1847,91 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
       )}
 
       {view === "play" && phase === "season" && season && (
-        <section className="league-layout matchday season-layout">
-          <div className="panel match-panel">
-            <div className="panel-header">
-              <div>
-                <p className="eyebrow">Be Invincible · {season.skillBand}</p>
-                <h2>Match {season.currentMatchday + 1} of 38</h2>
+        <section className="season-dashboard">
+          <div className="season-dashboard-grid">
+            <div className="season-main-stack">
+              <div className="panel match-panel season-control-panel">
+                <div className="panel-header">
+                  <div>
+                    <p className="eyebrow">Be Invincible · {season.skillBand}</p>
+                    <h2>Match {season.currentMatchday + 1} of 38</h2>
+                  </div>
+                  <div className="timer season-stage-chip">Stage {season.currentMatchday + 1}</div>
+                </div>
+
+                {seasonAttemptMessage && <p className="fine-print compact-note">{seasonAttemptMessage}</p>}
+
+                {currentSeasonFixture && (
+                  <MatchHeader
+                    home={seasonManagerById.get(currentSeasonFixture.homeId)}
+                    away={seasonManagerById.get(currentSeasonFixture.awayId)}
+                    started={false}
+                    homeGoals={0}
+                    awayGoals={0}
+                  />
+                )}
+
+                {currentSeasonFixture && seasonHumanManager && (
+                  <SeasonPreMatchPanel
+                    opponent={currentSeasonFixture.homeId === "human"
+                      ? seasonManagerById.get(currentSeasonFixture.awayId)
+                      : seasonManagerById.get(currentSeasonFixture.homeId)}
+                    human={seasonHumanManager}
+                    humanStanding={seasonHumanStanding}
+                    decision={seasonDecision}
+                    season={season}
+                    teamTalkActive={seasonTeamTalkActive}
+                    outOfFormChoice={seasonOutOfFormChoice}
+                    outOfFormSubId={seasonOutOfFormSubId}
+                    availableSubs={seasonOutOfFormSubs}
+                    unavailableStarters={seasonUnavailableStartersList}
+                    missingSubstitutions={seasonMissingSubstitutions}
+                    onChooseSub={handleSeasonSubSelection}
+                    onUseTeamTalk={() => canUseSeasonTeamTalk(season) && setSeasonTeamTalkActive(true)}
+                    onSkipTeamTalk={() => setSeasonTeamTalkActive(false)}
+                    onKeepOutOfForm={() => {
+                      setSeasonOutOfFormChoice("keep");
+                      setSeasonOutOfFormSubId(null);
+                    }}
+                    onBenchOutOfForm={(subId) => {
+                      setSeasonOutOfFormChoice("bench");
+                      setSeasonOutOfFormSubId(subId);
+                    }}
+                    onStart={playSeasonMatchAndAdvance}
+                    canStart={canKickOffSeasonMatch()}
+                  />
+                )}
               </div>
-              <div className="timer">
-                <Timer size={18} />
-                {seasonLiveSecond}&apos;
-              </div>
+
+              <StandingsPanel standings={seasonStandings} eyebrow="Be Invincible" title="Season table" scrollable />
             </div>
 
-            {seasonAttemptMessage && <p className="fine-print">{seasonAttemptMessage}</p>}
-
-            {currentSeasonFixture && (
-              <MatchHeader
-                home={seasonManagerById.get(currentSeasonFixture.homeId)}
-                away={seasonManagerById.get(currentSeasonFixture.awayId)}
-                started={Boolean(seasonCurrentResult)}
-                homeGoals={seasonHomeGoals}
-                awayGoals={seasonAwayGoals}
-              />
-            )}
-
-            {!seasonCurrentResult && currentSeasonFixture && (
-              <SeasonPreMatchPanel
-                fixtureId={currentSeasonFixture.id}
-                opponent={currentSeasonFixture.homeId === "human"
-                  ? seasonManagerById.get(currentSeasonFixture.awayId)
-                  : seasonManagerById.get(currentSeasonFixture.homeId)}
-                humanStanding={seasonHumanStanding}
-                decision={seasonDecision}
-                boostRemaining={season.boostsRemaining}
-                teamTalkActive={seasonTeamTalkActive}
-                outOfFormChoice={seasonOutOfFormChoice}
-                outOfFormSubId={seasonOutOfFormSubId}
-                availableSubs={seasonOutOfFormSubs}
-                onUseTeamTalk={() => season.boostsRemaining > 0 && setSeasonTeamTalkActive(true)}
-                onSkipTeamTalk={() => setSeasonTeamTalkActive(false)}
-                onKeepOutOfForm={() => {
-                  setSeasonOutOfFormChoice("keep");
-                  setSeasonOutOfFormSubId(null);
-                }}
-                onBenchOutOfForm={(subId) => {
-                  setSeasonOutOfFormChoice("bench");
-                  setSeasonOutOfFormSubId(subId);
-                }}
-                onStart={startSeasonMatch}
-                canStart={canKickOffSeasonMatch()}
-              />
-            )}
-
-            {seasonCurrentResult && (
-              <>
-                <div className="commentary-log" aria-live="polite" ref={seasonCommentaryRef}>
-                  {seasonCommentaryEvents.map((event) => (
-                    <div
-                      className={`commentary-line${event.code === "goal" ? " goal-flash" : event.code === "red_card" ? " red-flash" : ""}`}
-                      key={event.id}
-                    >
-                      <span>{event.second}&apos;</span>
-                      <p>
-                        {event.code === "goal" && <Goal className="goal-icon" size={18} aria-label="Goal" />}
-                        {renderCommentary(event, locale)}
-                      </p>
+            <div className="side-stack season-side-stack">
+              {seasonHumanManager && (
+                <div className="panel season-pitch-panel">
+                  <div className="panel-header">
+                    <div>
+                      <p className="eyebrow">Your XI</p>
+                      <h2>{seasonHumanManager.formationId}</h2>
                     </div>
-                  ))}
-                </div>
-
-                <div className="match-actions">
-                  <div className="speed-controls" aria-label="Match speed">
-                    {([1, 2, 4] as const).map((speed) => (
-                      <button
-                        key={speed}
-                        type="button"
-                        className={matchSpeed === speed ? "active" : ""}
-                        onClick={() => setMatchSpeed(speed)}
-                      >
-                        {speed}x
-                      </button>
-                    ))}
+                    <strong className="rating-chip">{Math.round(calculateSquadStrength(seasonHumanManager).overall)}</strong>
                   </div>
-                  {seasonPlaying ? (
-                    <button className="secondary-button" type="button" onClick={finishSeasonNow}>
-                      Finish now
-                    </button>
-                  ) : (
-                    <button className="primary-button" type="button" onClick={recordSeasonMatchAndAdvance} disabled={!seasonReadyToRecord && seasonLiveSecond < 90}>
-                      Next match
-                    </button>
-                  )}
+                  <FormationPitch
+                    picks={seasonHumanManager.picks}
+                    formationId={seasonHumanManager.formationId}
+                    injuredPlayerIds={seasonUnavailablePlayerIds(season.injuryGamesByPlayerId)}
+                    suspendedPlayerIds={seasonUnavailablePlayerIds({}, season.suspensionGamesByPlayerId)}
+                  />
                 </div>
-              </>
-            )}
-
-            <SeasonResultsList season={season} managers={season.managers} />
-          </div>
-
-          <div className="side-stack">
-            <StandingsPanel standings={seasonStandings} eyebrow="Be Invincible" title="Season table" />
-            <SeasonStatusPanel season={season} />
-            <InjuryPanel managers={seasonDisplayManagers} />
+              )}
+              <SeasonStatusPanel season={season} />
+              {season.results.some((result) => result.homeId === "human" || result.awayId === "human") && (
+                <SeasonResultsList season={season} managers={season.managers} />
+              )}
+              {seasonDisplayManagers.some((manager) => manager.injuredPlayerIds.length > 0 || manager.suspendedPlayerIds.length > 0) && (
+                <InjuryPanel managers={seasonDisplayManagers} />
+              )}
+            </div>
           </div>
         </section>
       )}
@@ -2044,24 +1941,18 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
           <div className="panel intro-panel">
             <p className="eyebrow">League complete</p>
             <h2>{humanStanding ? `${humanStanding.points} points from five games` : "Final whistle"}</h2>
-            <p>
-              {profile || TESTING_MODE || savedLeagueId === league.id
-                ? "Your result has been saved to your manager profile and is eligible for the leaderboard."
-                : "Guest results are not saved. Create a manager ID to put this run on your profile and save future progress."}
-            </p>
+            <p>Your cumulative leaderboard score has been recorded for daily, weekly and monthly tables.</p>
             <div className={`score-change-card${expertUnlockedThisRun ? " unlocked" : ""}`}>
               <div>
-                <span>{profile || TESTING_MODE || savedLeagueId === league.id ? "Manager score" : "Guest score"}</span>
-                <strong>{profile || TESTING_MODE || savedLeagueId === league.id ? managerScore : "Not saved"}</strong>
+                <span>Manager score</span>
+                <strong>{managerScore}</strong>
               </div>
               <div>
                 <span>This league</span>
-                <strong>{lastScoreDelta === null ? "—" : `${lastScoreDelta >= 0 ? "+" : ""}${lastScoreDelta}`}</strong>
+                <strong>{lastScoreDelta === null ? "0" : `${lastScoreDelta >= 0 ? "+" : ""}${lastScoreDelta}`}</strong>
               </div>
               <p>
-                {!profile && !TESTING_MODE && savedLeagueId !== league.id
-                  ? "Create a manager ID to attach this result to your profile."
-                  : expertUnlockedThisRun
+                {expertUnlockedThisRun
                   ? "Expert mode unlocked. Your next draft will hide ratings until the squad is complete."
                   : expertUnlocked
                     ? "Expert mode is active for your next draft."
@@ -2073,17 +1964,11 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                 <Shuffle size={18} />
                 Build another squad
               </button>
-              {!profile && !TESTING_MODE && (
-                <button className="primary-button" type="button" onClick={() => openAuth("register")}>
-                  <LogIn size={18} />
-                  Create manager ID
-                </button>
-              )}
               <button className="secondary-button" type="button" onClick={startExhibition} disabled={!dataReady}>
                 <Users size={18} />
                 Community exhibition
               </button>
-              <button className="secondary-button" type="button" onClick={() => switchView("leaderboards")}>
+              <button className="secondary-button" type="button" onClick={() => setView("leaderboards")}>
                 <BarChart3 size={18} />
                 View leaderboards
               </button>
@@ -2131,7 +2016,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                 <Shuffle size={18} />
                 Build another squad
               </button>
-              <button className="secondary-button" type="button" onClick={() => switchView("leaderboards")}>
+              <button className="secondary-button" type="button" onClick={() => setView("leaderboards")}>
                 <BarChart3 size={18} />
                 View leaderboards
               </button>
@@ -2263,7 +2148,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                 <p>
                   Signed in as <strong>{profile.displayName}</strong>
                   {profile.email ? ` (${profile.email})` : ""}.
-                  {isAdmin ? " Admin mode is active; progress now saves from the fresh zero state." : ""}
+                  {isAdmin ? " Admin testing mode — signed-in progress is preserved for returning-user checks." : ""}
                 </p>
                 <button className="primary-button wide" type="button" onClick={signOut}>
                   <LogIn size={18} />
@@ -2272,21 +2157,8 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
               </>
             ) : (
               <>
-                <p>
-                  {authMode === "register"
-                    ? "Create a manager ID to save results, appear on leaderboards, and build personal progress."
-                    : copy.signInCopy}
-                </p>
-                <form className="auth-stack" onSubmit={authMode === "register" ? signUpWithPassword : signInWithPassword}>
-                  {authMode === "register" && (
-                    <input
-                      value={authManagerId}
-                      onChange={(event) => setAuthManagerId(normalizeManagerId(event.target.value))}
-                      placeholder="unique_manager_id"
-                      autoComplete="username"
-                      aria-label="Unique manager ID"
-                    />
-                  )}
+                <p>{copy.signInCopy}</p>
+                <form className="auth-stack" onSubmit={signInWithPassword}>
                   <input
                     value={authEmail}
                     onChange={(event) => setAuthEmail(event.target.value)}
@@ -2299,35 +2171,27 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                     onChange={(event) => setAuthPassword(event.target.value)}
                     placeholder="Password"
                     type="password"
-                    autoComplete={authMode === "register" ? "new-password" : "current-password"}
+                    autoComplete="current-password"
                   />
                   <button className="primary-button wide" type="submit">
                     <LogIn size={18} />
-                    {authMode === "register" ? "Create manager ID" : "Sign in"}
+                    Sign in
                   </button>
-                  {authMode === "register" ? (
-                    <button className="secondary-button wide" type="button" onClick={() => setAuthMode("signin")}>
-                      Already registered? Sign in
-                    </button>
-                  ) : (
-                    <button className="secondary-button wide" type="button" onClick={() => setAuthMode("register")}>
-                      Create account
-                    </button>
-                  )}
+                  <button className="secondary-button wide" type="button" onClick={signUpWithPassword}>
+                    Create account
+                  </button>
                 </form>
                 <p className="auth-divider">or</p>
                 <button className="secondary-button wide" type="button" onClick={signInWithGoogle}>
                   <LogIn size={16} />
                   {copy.google}
                 </button>
-                {authMode === "signin" && (
-                  <form className="email-form" onSubmit={signInWithEmail}>
-                    <button className="secondary-button wide" type="submit">
-                      <Mail size={16} />
-                      {copy.email}
-                    </button>
-                  </form>
-                )}
+                <form className="email-form" onSubmit={signInWithEmail}>
+                  <button className="secondary-button wide" type="submit">
+                    <Mail size={16} />
+                    {copy.email}
+                  </button>
+                </form>
               </>
             )}
             {!hasSupabaseConfig() && <p className="fine-print">Local demo mode is active until Supabase env vars are added.</p>}
@@ -2570,72 +2434,6 @@ function FormationGlyph({ formationId }: { formationId: string }) {
   );
 }
 
-function FormationSetupPreview({ formationId }: { formationId: string }) {
-  const slots = getStarterSlots(formationId);
-  const draftSlotCount = getDraftSlots(formationId).length;
-  const benchCount = Math.max(0, draftSlotCount - slots.length);
-  const lineOrder = ["attack", "midfield", "defense", "keeper"];
-  const lineLabels: Record<string, string> = {
-    attack: "Attack",
-    midfield: "Midfield",
-    defense: "Defense",
-    keeper: "Keeper"
-  };
-  const lineYPct: Record<string, number> = { attack: 18, midfield: 42, defense: 66, keeper: 87 };
-  const byLine: Record<string, FormationSlot[]> = {};
-
-  slots.forEach((slot) => {
-    if (!byLine[slot.line]) byLine[slot.line] = [];
-    byLine[slot.line].push(slot);
-  });
-
-  return (
-    <div className="formation-preview" aria-label={`${formationId} formation preview`}>
-      <div className="formation-preview-head">
-        <div>
-          <span>Selected shape</span>
-          <strong>{formationId}</strong>
-        </div>
-        <div>
-          <span>Draft plan</span>
-          <strong>{slots.length} XI + {benchCount} bench</strong>
-        </div>
-      </div>
-
-      <div className="formation-preview-pitch" aria-hidden="true">
-        <span className="formation-preview-line halfway" />
-        <span className="formation-preview-circle" />
-        {lineOrder.flatMap((line) => {
-          const lineSlots = byLine[line] ?? [];
-          const yPct = lineYPct[line] ?? 50;
-          return lineSlots.map((slot, index) => {
-            const count = lineSlots.length;
-            const xPct = count === 1 ? 50 : 18 + (index / (count - 1)) * 64;
-            return (
-              <span
-                className="formation-preview-dot"
-                key={slot.id}
-                style={{ left: `${xPct}%`, top: `${yPct}%` }}
-              >
-                {slot.target}
-              </span>
-            );
-          });
-        })}
-      </div>
-
-      <div className="formation-preview-meta">
-        {lineOrder.map((line) => (
-          <span key={line}>
-            <strong>{byLine[line]?.length ?? 0}</strong>
-            {lineLabels[line]}
-          </span>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 function MatchHeader({
   home,
   away,
@@ -2679,14 +2477,16 @@ function managerSourceLabel(manager?: ManagerSquad): string {
 function StandingsPanel({
   standings,
   eyebrow = "Historical league",
-  title = "Standings"
+  title = "Standings",
+  scrollable = false
 }: {
   standings: ReturnType<typeof computeStandings>;
   eyebrow?: string;
   title?: string;
+  scrollable?: boolean;
 }) {
   return (
-    <div className="panel table-panel">
+    <div className={`panel table-panel${scrollable ? " scrollable-table-panel" : ""}`}>
       <div className="panel-header">
         <div>
           <p className="eyebrow">{eyebrow}</p>
@@ -2830,15 +2630,18 @@ function PreMatchPanel({
 
 function SeasonPreMatchPanel({
   opponent,
+  human,
   humanStanding,
-  fixtureId,
   decision,
-  boostRemaining,
+  season,
   teamTalkActive,
   outOfFormChoice,
   outOfFormSubId,
   availableSubs,
+  unavailableStarters,
+  missingSubstitutions,
   canStart,
+  onChooseSub,
   onUseTeamTalk,
   onSkipTeamTalk,
   onKeepOutOfForm,
@@ -2846,15 +2649,18 @@ function SeasonPreMatchPanel({
   onStart
 }: {
   opponent?: ManagerSquad;
+  human: ManagerSquad;
   humanStanding?: ReturnType<typeof computeStandings>[number];
-  fixtureId: string;
   decision: SeasonPregameDecision | null;
-  boostRemaining: number;
+  season: InvincibleSeason;
   teamTalkActive: boolean;
   outOfFormChoice: "keep" | "bench" | null;
   outOfFormSubId: number | null;
   availableSubs: DraftPick[];
+  unavailableStarters: DraftPick[];
+  missingSubstitutions: DraftPick[];
   canStart: boolean;
+  onChooseSub: (unavailablePlayerId: number, subPlayerId: number) => void;
   onUseTeamTalk: () => void;
   onSkipTeamTalk: () => void;
   onKeepOutOfForm: () => void;
@@ -2862,20 +2668,64 @@ function SeasonPreMatchPanel({
   onStart: () => void;
 }) {
   const oppStrength = opponent ? calculateSquadStrength(opponent) : null;
-  const quote = managerQuotes[hashStr(fixtureId) % managerQuotes.length];
+  const talkHalf = teamTalkHalfForMatchday(season.currentMatchday);
+  const teamTalkAvailable = canUseSeasonTeamTalk(season);
+  const usedSubIds = new Set(
+    unavailableStarters
+      .map((starter) => human.substitutions[starter.player.i])
+      .filter((playerId): playerId is number => playerId !== undefined)
+  );
+  const unavailableIds = new Set(seasonUnavailablePlayerIds(season.injuryGamesByPlayerId, season.suspensionGamesByPlayerId));
+  const absenceLabel = (playerId: number) => {
+    const injuryGames = season.injuryGamesByPlayerId[playerId] ?? 0;
+    const suspensionGames = season.suspensionGamesByPlayerId[playerId] ?? 0;
+    if (injuryGames > 0) return `Injured · ${injuryGames} match${injuryGames === 1 ? "" : "es"} out`;
+    if (suspensionGames > 0) return `Red card · ${suspensionGames} match${suspensionGames === 1 ? "" : "es"} out`;
+    return "Unavailable";
+  };
+  const availableReplacementOptions = (starter: DraftPick) => {
+    const selectedForStarter = human.substitutions[starter.player.i];
+    return human.picks.filter(
+      (pick) =>
+        pick.target === "SUB" &&
+        !unavailableIds.has(pick.player.i) &&
+        (!usedSubIds.has(pick.player.i) || pick.player.i === selectedForStarter)
+    );
+  };
+  const latestHumanResult = season.results
+    .filter((result) => result.homeId === "human" || result.awayId === "human")
+    .slice(-1)[0];
+  const latestSummary = latestHumanResult
+    ? {
+        opponentId: latestHumanResult.homeId === "human" ? latestHumanResult.awayId : latestHumanResult.homeId,
+        humanGoals: latestHumanResult.homeId === "human" ? latestHumanResult.homeGoals : latestHumanResult.awayGoals,
+        opponentGoals: latestHumanResult.homeId === "human" ? latestHumanResult.awayGoals : latestHumanResult.homeGoals
+      }
+    : null;
   return (
     <div className="prematch-panel season-pregame">
-      <div className="prematch-header">
-        <div className="prematch-team">
-          <span className="you-label">You</span>
-          <strong>{humanStanding ? `${humanStanding.wins}-${humanStanding.draws}-${humanStanding.losses}` : "0-0-0"}</strong>
+      <div className="season-primary-action">
+        <div>
+          <span>Next up</span>
+          <strong>{opponent?.displayName ?? "Opponent"}</strong>
+          <small>{missingSubstitutions.length > 0 ? "Choose replacements to continue" : "Ready for the next fixture"}</small>
         </div>
-        <span className="prematch-vs">v</span>
-        <div className="prematch-team">
-          <span>{opponent?.displayName ?? "Opponent"}</span>
-          <strong>{opponent?.formationId ?? ""}</strong>
-        </div>
+        <button className="primary-button season-next-button" type="button" onClick={onStart} disabled={!canStart}>
+          <Play size={18} />
+          Next game
+        </button>
       </div>
+
+      {latestSummary && (
+        <div className="season-last-result">
+          <span>Last result</span>
+          <strong>
+            {latestSummary.humanGoals} – {latestSummary.opponentGoals}
+          </strong>
+          <small>{season.managers.find((manager) => manager.id === latestSummary.opponentId)?.displayName ?? latestSummary.opponentId}</small>
+        </div>
+      )}
+
       <div className="prematch-stats">
         {oppStrength && (
           <div className="prematch-stat">
@@ -2883,7 +2733,7 @@ function SeasonPreMatchPanel({
           </div>
         )}
         <div className="prematch-stat">
-          <span>Boosts </span>{boostRemaining}
+          <span>Talks </span>{remainingSeasonTeamTalks(season)}/2
         </div>
         <div className="prematch-stat">
           <span>Pts </span>{humanStanding?.points ?? 0}
@@ -2894,6 +2744,46 @@ function SeasonPreMatchPanel({
         <div className="season-event-card danger">
           <strong>Training injury</strong>
           <p>{decision.trainingInjury.playerName} is out for {decision.trainingInjury.games} game{decision.trainingInjury.games === 1 ? "" : "s"}.</p>
+        </div>
+      )}
+
+      {unavailableStarters.length > 0 && (
+        <div className="season-event-card danger season-sub-card">
+          <strong>Selection required</strong>
+          <p>Choose replacements before the next game. Injured and suspended players return automatically when their match counter reaches zero.</p>
+          <div className="season-absence-list">
+            {unavailableStarters.map((starter) => {
+              const selectedSubId = human.substitutions[starter.player.i];
+              const options = availableReplacementOptions(starter);
+              return (
+                <div className="season-absence-row" key={starter.player.i}>
+                  <div>
+                    <strong>{starter.player.n}</strong>
+                    <span>{absenceLabel(starter.player.i)}</span>
+                  </div>
+                  <div className="sub-row">
+                    {options.length === 0 ? (
+                      <p className="fine-print">No available substitutes.</p>
+                    ) : (
+                      options.map((pick) => (
+                        <button
+                          key={pick.player.i}
+                          className={`sub-option${selectedSubId === pick.player.i ? " assistant-pick" : ""}`}
+                          type="button"
+                          onClick={() => onChooseSub(starter.player.i, pick.player.i)}
+                        >
+                          <span className="sub-option-num">{pick.player.num}</span>
+                          <span className="sub-option-name">{pick.player.n.split(/[\s.]+/).filter(Boolean).slice(-1)[0]}</span>
+                          <span className="sub-option-pos">{pick.benchRole ?? pick.player.p[0]}</span>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          {missingSubstitutions.length > 0 && <p className="fine-print">Pick {missingSubstitutions.length} more replacement{missingSubstitutions.length === 1 ? "" : "s"} to unlock Next game.</p>}
         </div>
       )}
 
@@ -2925,9 +2815,15 @@ function SeasonPreMatchPanel({
 
       <div className={`season-event-card${teamTalkActive ? " active" : ""}`}>
         <strong>Team talk</strong>
-        <p>{teamTalkActive ? "One-match boost active. It helps, but it will not force a win." : "Use one of three modest boosts before a difficult match."}</p>
+        <p>
+          {teamTalkActive
+            ? "One-match boost active. It helps, but it will not force a win."
+            : teamTalkAvailable
+              ? `Available for the ${talkHalf === "first" ? "first" : "second"} half of the season. You get one team talk per half.`
+              : `The ${talkHalf === "first" ? "first" : "second"}-half team talk has already been used.`}
+        </p>
         <div className="match-actions inline-actions">
-          <button className="secondary-button" type="button" onClick={onUseTeamTalk} disabled={teamTalkActive || boostRemaining <= 0}>
+          <button className="secondary-button" type="button" onClick={onUseTeamTalk} disabled={teamTalkActive || !teamTalkAvailable}>
             <Sparkles size={16} />
             Use team talk
           </button>
@@ -2938,12 +2834,6 @@ function SeasonPreMatchPanel({
           )}
         </div>
       </div>
-
-      <ManagerAvatar mood="thinking" line={quote} />
-      <button className="primary-button wide" type="button" onClick={onStart} disabled={!canStart}>
-        <Activity size={18} />
-        Kick off
-      </button>
     </div>
   );
 }
@@ -2988,7 +2878,8 @@ function SeasonResultsList({ season, managers }: { season: InvincibleSeason; man
 function SeasonStatusPanel({ season }: { season: InvincibleSeason }) {
   const standings = computeStandings(season.managers, season.results);
   const human = standings.find((standing) => standing.managerId === "human");
-  const injuries = Object.entries(season.injuryGamesByPlayerId);
+  const injuries = Object.entries(season.injuryGamesByPlayerId).filter(([, games]) => games > 0);
+  const suspensions = Object.entries(season.suspensionGamesByPlayerId).filter(([, games]) => games > 0);
   return (
     <div className="panel season-status-panel">
       <p className="eyebrow">Season status</p>
@@ -3003,11 +2894,11 @@ function SeasonStatusPanel({ season }: { season: InvincibleSeason }) {
         </div>
         <div>
           <span>Team talks</span>
-          <strong>{season.boostsRemaining}/3</strong>
+          <strong>{remainingSeasonTeamTalks(season)}/2</strong>
         </div>
         <div>
-          <span>Injuries</span>
-          <strong>{injuries.length}</strong>
+          <span>Absences</span>
+          <strong>{injuries.length + suspensions.length}</strong>
         </div>
       </div>
       <p className="fine-print">Official Invincible eligibility is hidden until the season ends.</p>
@@ -3114,45 +3005,16 @@ function LeaderboardsScreen({
 const PERSONAL_PERIODS: Period[] = ["daily", "weekly", "monthly"];
 
 function PersonalProgressScreen({
-  profile,
   records,
   managerScore,
   completedLeagues,
-  expertUnlocked,
-  onRegister
+  expertUnlocked
 }: {
-  profile: LocalProfile | null;
   records: LeaderboardRecord[];
   managerScore: number;
   completedLeagues: number;
   expertUnlocked: boolean;
-  onRegister: () => void;
 }) {
-  if (!profile) {
-    return (
-      <section className="personal-screen">
-        <div className="panel personal-panel">
-          <div className="panel-header">
-            <div>
-              <p className="eyebrow">Personal progress</p>
-              <h2>Create a manager ID to save history</h2>
-            </div>
-            <Activity size={22} />
-          </div>
-          <div className="personal-empty">
-            <p>
-              Guest runs stay temporary. Register to save mini-league results, appear on the leaderboard, and track best-of-all-time stats.
-            </p>
-            <button className="primary-button" type="button" onClick={onRegister}>
-              <LogIn size={18} />
-              Create manager ID
-            </button>
-          </div>
-        </div>
-      </section>
-    );
-  }
-
   const personalRecords = records.filter((record) => record.kind === "human");
   const totalPoints = personalRecords.reduce((sum, record) => sum + record.matchPoints, 0);
   const totalGoalDifference = personalRecords.reduce((sum, record) => sum + record.goalDifference, 0);
@@ -3167,7 +3029,7 @@ function PersonalProgressScreen({
     .slice(0, 5);
   const periodRanks = PERSONAL_PERIODS.map((period) => ({
     period,
-    entry: aggregateLeaderboard(personalRecords, period).find((entry) => entry.kind === "human")
+    entry: aggregateLeaderboard([...demoLeaderboardRecords(), ...personalRecords], period).find((entry) => entry.kind === "human")
   }));
 
   return (

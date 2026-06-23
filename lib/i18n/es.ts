@@ -24,6 +24,7 @@ export const es = {
   dark: "Oscuro",
   tabPlay: "Jugar",
   tabLeaderboards: "Clasificaciones",
+  tabProgress: "Mi progreso",
   tabLive: "en vivo",
   tabLockedHint: "Termina el partido en curso para abrir las clasificaciones.",
   yourRank: "Tu posición",
