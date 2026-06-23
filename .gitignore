@@ -14,3 +14,9 @@ tsconfig.tsbuildinfo
 .env.*.local
 ADMIN_CREDENTIALS.local.md
 *.local.md
+*.bak
+playwright-report/
+test-results/
+/playwright/.cache/
+.env*.local
+.sentryclirc

@@ -1,3 +1,12 @@
+// DEPRECATED / OPTIONAL: the running app reads team/squad/player data from the
+// bundled `/data.json`, NOT from Supabase. These seeded tables (teams, seasons,
+// players, squad_players, ...) are not used at runtime, so seeding them is
+// unnecessary at the current scale and is kept only for possible future use.
+// The competitive tables that ARE used (profiles, leaderboard_entries,
+// invincible_attempts, guest_play_allowances) are populated by the app/server,
+// not by this script. Prefer NOT running `npm run seed:supabase` unless you are
+// intentionally migrating game data into the database.
+
 import { readFile } from "node:fs/promises";
 import { createClient } from "@supabase/supabase-js";
 

@@ -31,7 +31,7 @@ import {
   type InvincibleSeason,
   type SeasonPregameDecision
 } from "@/lib/game/season";
-import { aggregateLeaderboard, demoLeaderboardRecords, recordsFromLeague } from "@/lib/game/leaderboard";
+import { aggregateLeaderboard, recordsFromLeague } from "@/lib/game/leaderboard";
 import {
   EXPERT_SCORE_THRESHOLD,
   MIN_MANAGER_SCORE,
@@ -55,6 +55,7 @@ import type {
   DraftPick,
   FixtureResult,
   FormationSlot,
+  LeaderboardEntry,
   LeaderboardRecord,
   ManagerSquad,
   Period,
@@ -71,6 +72,18 @@ interface LocalProfile {
   displayName: string;
   email?: string;
   demo: boolean;
+}
+
+// Authorization header carrying the verified Supabase access token. Competitive
+// routes derive identity from this token, never from a request-body field.
+async function authHeaders(): Promise<Record<string, string>> {
+  const supabase = getSupabaseBrowserClient();
+  if (!supabase) {
+    return {};
+  }
+  const { data } = await supabase.auth.getSession();
+  const token = data.session?.access_token;
+  return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
 interface SelectedManager {
@@ -161,6 +174,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
   const [isAdmin, setIsAdmin] = useState(false);
   const [leaderboardPeriod, setLeaderboardPeriod] = useState<Period>("daily");
   const [leaderboardRecords, setLeaderboardRecords] = useState<LeaderboardRecord[]>([]);
+  const [serverLeaderboard, setServerLeaderboard] = useState<LeaderboardEntry[] | null>(null);
   const [league, setLeague] = useState<LeagueState | null>(null);
   const [currentResult, setCurrentResult] = useState<FixtureResult | null>(null);
   const [liveSecond, setLiveSecond] = useState(0);
@@ -237,10 +251,37 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
   );
   const exhibitionHomeGoals = exhibitionEvents.filter((event) => event.code === "goal" && event.teamId === "human").length;
   const exhibitionAwayGoals = exhibitionEvents.filter((event) => event.code === "goal" && event.teamId === exhibition?.away.id).length;
-  const leaderboard = useMemo(
-    () => aggregateLeaderboard([...demoLeaderboardRecords(), ...leaderboardRecords], leaderboardPeriod),
+  // Local fallback used only when the server leaderboard is unavailable (demo
+  // mode / fetch error). The public board prefers serverLeaderboard.
+  const localLeaderboard = useMemo(
+    () => aggregateLeaderboard(leaderboardRecords, leaderboardPeriod),
     [leaderboardPeriod, leaderboardRecords]
   );
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/leaderboards?period=${leaderboardPeriod}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { entries?: LeaderboardEntry[]; production?: boolean; degraded?: boolean } | null) => {
+        if (cancelled) {
+          return;
+        }
+        // Adopt server data only when it is the production board AND not degraded;
+        // otherwise keep the local fallback (demo mode, or a transient DB error).
+        setServerLeaderboard(data?.production && !data.degraded ? data.entries ?? [] : null);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setServerLeaderboard(null);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [leaderboardPeriod]);
+
+  // Cross-user board when available, else the local aggregate.
+  const leaderboard = serverLeaderboard ?? localLeaderboard;
   const expertUnlocked = hasExpertAccess(managerScore, expertUnlockedEarned);
   const draftMode: DraftMode = expertUnlocked ? "expert" : "classic";
   const draftStatus = phase === "complete" || phase === "exhibition" || phase === "invincible_complete" ? "Complete" : `${picks.length}/${draftSlots.length}`;
@@ -640,8 +681,8 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
   async function createInvincibleAttempt(): Promise<string> {
     const response = await fetch("/api/invincible-attempts", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ profileId: profile?.id })
+      headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+      body: JSON.stringify({})
     });
     if (!response.ok) {
       throw new Error("Invincible attempt could not be registered.");
@@ -825,7 +866,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     }
     const response = await fetch(`/api/invincible-attempts/${completedSeason.attemptId}/complete`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...(await authHeaders()) },
       body: JSON.stringify({
         unbeaten: human.losses === 0,
         points: human.points,
@@ -965,6 +1006,18 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     const mergedRecords = [...leaderboardRecords, ...newRecords];
     setLeaderboardRecords(mergedRecords);
     window.localStorage.setItem(recordsKey, JSON.stringify(mergedRecords));
+
+    // Best-effort: persist to the cross-user leaderboard. The server derives the
+    // identity from the verified token, so guests/demo profiles stay local-only.
+    if (profile && !profile.demo) {
+      void (async () => {
+        await fetch("/api/results", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+          body: JSON.stringify({ records: newRecords, completedAt })
+        });
+      })().catch(() => undefined);
+    }
     const nextCompletedLeagues = completedLeagues + 1;
     setCompletedLeagues(nextCompletedLeagues);
     window.localStorage.setItem(completedLeaguesKey, String(nextCompletedLeagues));
@@ -3029,7 +3082,7 @@ function PersonalProgressScreen({
     .slice(0, 5);
   const periodRanks = PERSONAL_PERIODS.map((period) => ({
     period,
-    entry: aggregateLeaderboard([...demoLeaderboardRecords(), ...personalRecords], period).find((entry) => entry.kind === "human")
+    entry: aggregateLeaderboard(personalRecords, period).find((entry) => entry.kind === "human")
   }));
 
   return (
