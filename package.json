@@ -13,10 +13,15 @@
     "lint": "eslint . --max-warnings=0",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:e2e": "playwright test",
     "seed:supabase": "node scripts/seed-supabase.mjs"
   },
   "dependencies": {
+    "@sentry/nextjs": "^10.59.0",
     "@supabase/supabase-js": "^2.108.0",
+    "@upstash/ratelimit": "^2.0.8",
+    "@upstash/redis": "^1.38.0",
+    "@vercel/analytics": "^2.0.1",
     "lucide-react": "^1.17.0",
     "next": "^16.2.7",
     "react": "^19.2.7",
@@ -24,6 +29,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.0",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@types/node": "^25.9.2",

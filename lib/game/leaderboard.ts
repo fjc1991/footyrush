@@ -82,6 +82,13 @@ export function aggregateLeaderboard(records: LeaderboardRecord[], period: Perio
   return periodRows.map((record, index) => ({ ...record, rank: index + 1 }));
 }
 
+// Returns no records: cross-user leaderboard data now comes from Supabase
+// (see Phase 2 / app/api/leaderboards). Kept so the client call sites keep a
+// stable signature until they are switched over to fetched data.
+export function demoLeaderboardRecords(): LeaderboardRecord[] {
+  return [];
+}
+
 export function recordsFromLeague(params: {
   managers: ManagerSquad[];
   standings: Standing[];
