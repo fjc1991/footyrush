@@ -16,6 +16,8 @@ the last deploy:
   RPC (closes a guest-gate race and prevents over-recording past the limit).
 - `0006_guest_plays_daily.sql` — **new.** Adds `play_day` and makes guest plays a
   per-day allowance (3 free plays/day, resets at UTC midnight).
+- `0007_community_squads.sql` — **new.** `community_squads` table for the cross-user
+  end-of-season one-off (stores a completed squad as jsonb; public read).
 
 ```bash
 # via Supabase CLI (or paste into the SQL editor in order)
@@ -44,6 +46,10 @@ supabase db push
 | `TURNSTILE_SECRET_KEY` | Server-side Cloudflare Turnstile verification on `/api/auth/email` | Verification skipped |
 | `SENTRY_DSN` and/or `NEXT_PUBLIC_SENTRY_DSN` | Error monitoring (server + client) | No-op |
 | `SENTRY_ORG`, `SENTRY_PROJECT`, `SENTRY_AUTH_TOKEN` | Source-map upload during build | Upload skipped (build still succeeds) |
+
+> **Payments removed:** Stripe Checkout and the paid extra-spins bundle were removed
+> to focus on core gameplay first. Manager spins and draft re-shuffles are the free
+> allowances only. Payments will be reintroduced later.
 
 Vercel Web Analytics (`<Analytics />`) activates automatically when deployed on
 Vercel; nothing to configure.

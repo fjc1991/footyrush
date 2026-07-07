@@ -142,6 +142,19 @@ export interface Fixture {
   awayId: string;
 }
 
+export type SeasonCasualtyKind = "injury" | "redCard";
+
+/**
+ * Directs simulateFixture to force one specific casualty on a side instead of the default random
+ * rolls. Used by the Be Invincible season to spend its whole-season casualty budget deterministically
+ * while still letting the victim be chosen with weighted randomness.
+ */
+export interface CasualtyDirective {
+  kind: SeasonCasualtyKind;
+  /** playerId → relative likelihood of being the one who goes off. Missing players default to weight 1. */
+  weightByPlayerId?: Record<number, number>;
+}
+
 export type MatchEventCode =
   | "kickoff"
   | "chance"

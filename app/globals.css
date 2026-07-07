@@ -1,31 +1,32 @@
 /* ============================================================
    FootyRush design tokens  (clean-modern, light + dark)
    ============================================================ */
+/* Floodlit Night — deep navy base, electric cyan accent, floodlight gold. */
 :root,
 :root[data-theme="light"] {
   color-scheme: light;
 
   /* surfaces */
-  --bg: #eef2f7;
-  --bg-tint: radial-gradient(1200px 600px at 80% -10%, rgba(15, 178, 116, 0.08), transparent 60%),
-             radial-gradient(900px 500px at -10% 0%, rgba(15, 178, 116, 0.05), transparent 55%);
+  --bg: #eef3f9;
+  --bg-tint: radial-gradient(1200px 600px at 80% -10%, rgba(8, 145, 178, 0.09), transparent 60%),
+             radial-gradient(900px 500px at -10% 0%, rgba(8, 145, 178, 0.05), transparent 55%);
   --panel: #ffffff;
-  --panel-strong: #eef2f8;
-  --panel-soft: #f6f9fc;
+  --panel-strong: #e9f0f8;
+  --panel-soft: #f4f8fc;
 
   /* text */
-  --text: #0c1a2b;
-  --muted: #5a6b80;
-  --line: #e1e8f1;
-  --line-strong: #cdd8e6;
+  --text: #0a1626;
+  --muted: #51637c;
+  --line: #dde6f1;
+  --line-strong: #c6d4e6;
 
-  /* brand */
-  --accent: #0a9b66;          /* readable emerald (text, borders, icons) */
-  --accent-strong: #077a50;   /* deeper emerald (gradients, pressed) */
-  --accent-bright: #14c684;   /* vibrant emerald (dots, glows, fills) */
+  /* brand — electric cyan */
+  --accent: #0891b2;          /* readable cyan (text, borders, icons) */
+  --accent-strong: #0e7490;   /* deeper cyan (gradients, pressed) */
+  --accent-bright: #06b6d4;   /* vibrant cyan (dots, glows, fills) */
   --accent-soft: color-mix(in srgb, var(--accent) 12%, var(--panel));
-  --amber: #e0920a;           /* rewards / score highlight */
-  --amber-bright: #f6b53a;
+  --amber: #c98a00;           /* floodlight gold — rewards / score */
+  --amber-bright: #e0a82e;
   --danger: #e23b48;          /* destructive only */
 
   /* buttons */
@@ -34,9 +35,9 @@
 
   /* effects */
   --ring: color-mix(in srgb, var(--accent) 55%, transparent);
-  --shadow-sm: 0 1px 2px rgba(12, 26, 43, 0.05);
-  --shadow: 0 1px 2px rgba(12, 26, 43, 0.04), 0 10px 26px rgba(12, 26, 43, 0.08);
-  --shadow-lg: 0 6px 14px rgba(12, 26, 43, 0.08), 0 24px 50px rgba(12, 26, 43, 0.16);
+  --shadow-sm: 0 1px 2px rgba(10, 22, 38, 0.05);
+  --shadow: 0 1px 2px rgba(10, 22, 38, 0.04), 0 10px 26px rgba(10, 22, 38, 0.08);
+  --shadow-lg: 0 6px 14px rgba(10, 22, 38, 0.08), 0 24px 50px rgba(10, 22, 38, 0.16);
 
   /* radii */
   --r-xs: 8px;
@@ -50,33 +51,33 @@
 :root[data-theme="dark"] {
   color-scheme: dark;
 
-  --bg: #0a0f1a;
-  --bg-tint: radial-gradient(1200px 600px at 80% -10%, rgba(46, 230, 160, 0.10), transparent 60%),
-             radial-gradient(900px 500px at -10% 0%, rgba(46, 230, 160, 0.06), transparent 55%);
-  --panel: #131b29;
-  --panel-strong: #1b2536;
-  --panel-soft: #18212f;
+  --bg: #070b16;
+  --bg-tint: radial-gradient(1200px 600px at 80% -10%, rgba(34, 211, 238, 0.12), transparent 60%),
+             radial-gradient(900px 500px at -10% 0%, rgba(34, 211, 238, 0.07), transparent 55%);
+  --panel: #101a2e;
+  --panel-strong: #16233c;
+  --panel-soft: #0e1830;
 
-  --text: #e9eef6;
-  --muted: #95a6bc;
-  --line: #283447;
-  --line-strong: #36475e;
+  --text: #ffffff;
+  --muted: #9fb2cf;
+  --line: #243353;
+  --line-strong: #324769;
 
-  --accent: #2ee6a0;
-  --accent-strong: #18c98a;
-  --accent-bright: #34f0a8;
+  --accent: #22d3ee;
+  --accent-strong: #06b6d4;
+  --accent-bright: #67e8f9;
   --accent-soft: color-mix(in srgb, var(--accent) 16%, var(--panel));
-  --amber: #fbbf24;
-  --amber-bright: #fcd34d;
-  --danger: #f4636e;
+  --amber: #f5d90a;
+  --amber-bright: #fde047;
+  --danger: #fb6f7a;
 
   --button: var(--accent-strong);
-  --button-text: #03150d;
+  --button-text: #04141f;
 
   --ring: color-mix(in srgb, var(--accent) 60%, transparent);
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
-  --shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 12px 30px rgba(0, 0, 0, 0.45);
-  --shadow-lg: 0 8px 18px rgba(0, 0, 0, 0.45), 0 28px 60px rgba(0, 0, 0, 0.6);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.45);
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 12px 30px rgba(2, 8, 20, 0.55);
+  --shadow-lg: 0 8px 18px rgba(2, 8, 20, 0.5), 0 28px 60px rgba(2, 8, 20, 0.65);
 }
 
 * {
@@ -1211,14 +1212,21 @@ p {
   position: fixed;
   inset: 0;
   z-index: 50;
-  display: grid;
-  place-items: center;
+  display: flex;
+  justify-content: center;
+  /* start (not center) + scroll so tall content (e.g. the pending-confirmation
+     block) is reachable instead of clipping off-screen on short viewports */
+  align-items: flex-start;
+  overflow-y: auto;
   padding: 18px;
   background: rgba(0, 0, 0, 0.62);
 }
 
 .auth-modal {
   width: min(480px, 100%);
+  margin: auto;
+  max-height: calc(100dvh - 36px);
+  overflow-y: auto;
   padding: 18px;
   background: var(--panel);
   border-radius: var(--r-md);
@@ -1350,7 +1358,7 @@ p {
   font-size: 0.78rem;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  opacity: 0.6;
+  color: var(--muted);
 }
 
 .fine-print {
@@ -1362,6 +1370,34 @@ p {
   margin: 10px 0 0;
   color: var(--amber);
   font-weight: 800;
+}
+
+.auth-pending {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: var(--accent-soft);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.auth-pending p {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.4;
+  color: var(--muted);
+}
+
+.auth-pending strong {
+  color: var(--text);
+  word-break: break-all;
+}
+
+.auth-pending button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 /* ── Language switcher ──────────────────────────────────────── */
@@ -1514,6 +1550,40 @@ p {
 .fit-badge.perfect { background: color-mix(in srgb, var(--accent) 22%, transparent); color: var(--accent); }
 .fit-badge.good    { background: color-mix(in srgb, var(--amber) 22%, transparent); color: var(--amber); }
 .fit-badge.okay    { background: color-mix(in srgb, var(--muted) 22%, transparent); color: var(--muted); }
+
+/* ── Position-fit legend (explains the badges) ──────────────── */
+
+.fit-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  margin-top: 8px;
+  padding: 8px 12px;
+  border: 1px dashed var(--line);
+  border-radius: var(--r-md);
+  background: var(--panel);
+  font-size: 0.74rem;
+  color: var(--muted);
+}
+
+.fit-legend-title {
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text);
+}
+
+.fit-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.fit-legend .fit-badge {
+  margin-top: 0;
+}
+
 
 /* ── Team-year chip on player card ──────────────────────────── */
 
@@ -3992,13 +4062,13 @@ h2,
 }
 
 .primary-button:not(.locked-button):not(:disabled) {
-  background: linear-gradient(135deg, var(--brand-rose), var(--brand-orange));
+  background: linear-gradient(135deg, var(--accent-bright), var(--accent-strong));
   border-color: transparent;
-  color: #ffffff;
+  color: var(--button-text);
 }
 
 .primary-button:not(.locked-button):hover:not(:disabled) {
-  box-shadow: 0 14px 30px color-mix(in srgb, var(--brand-rose) 30%, transparent);
+  box-shadow: 0 14px 30px color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
 .tab-button.active {
@@ -4947,6 +5017,28 @@ body {
   background: var(--panel);
   color: var(--muted);
   border: 1px dashed var(--line);
+}
+
+.fm-row-kit {
+  position: relative;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  color: var(--accent);
+}
+
+.fm-row-kit .kit-icon {
+  color: inherit;
+}
+
+.fm-row-kit-num {
+  position: absolute;
+  top: 54%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 0.58rem;
+  font-weight: 900;
+  color: #06110b;
 }
 
 .fm-row-main {

@@ -1,12 +1,21 @@
 import { getStarterSlots } from "./formations";
 import { buildRoundRobin, createHistoricalOpponent, getSkillBand } from "./matchmaking";
-import { createRng, pickOne } from "./rng";
-import type { DraftMode, DraftPick, Fixture, FixtureResult, ManagerSquad, MatchEvent } from "./types";
+import { createRng, pickOne, shuffle } from "./rng";
+import type { DraftMode, DraftPick, Fixture, FixtureResult, ManagerSquad, MatchEvent, SeasonCasualtyKind } from "./types";
 
 export const INVINCIBLE_TEAM_TALK_LIMIT = 2;
 export const TEAM_TALK_EXPECTED_GOALS_BONUS = 0.18;
 export const OUT_OF_FORM_EXPECTED_GOALS_PENALTY = 0.12;
 export const SEASON_RED_CARD_SUSPENSION_GAMES = 3;
+/** Whole-season ceiling on human injuries + red cards combined; the actual count is a random 0..N. */
+export const INVINCIBLE_MAX_SEASON_CASUALTIES = 5;
+/** Share of the season's casualties that are red cards rather than injuries. */
+export const INVINCIBLE_RED_CARD_SHARE = 0.18;
+/** Each season goal a player has scored multiplies how likely they are to be the casualty. */
+export const SEASON_CASUALTY_GOAL_WEIGHT = 2;
+/** Rating above this pivot adds a small "important player" tilt so key men are struck more often. */
+export const SEASON_CASUALTY_RATING_PIVOT = 78;
+export const SEASON_CASUALTY_RATING_WEIGHT = 0.15;
 
 export interface SeasonTrainingInjury {
   playerId: number;
@@ -34,6 +43,8 @@ export interface InvincibleSeason {
   results: FixtureResult[];
   injuryGamesByPlayerId: Record<number, number>;
   suspensionGamesByPlayerId: Record<number, number>;
+  /** Whole-season casualty budget: matchday index → the injury/red card that strikes the human that round. */
+  casualtySchedule: Record<number, SeasonCasualtyKind>;
   boostsRemaining: number;
   boostsUsed: number;
   teamTalksUsedByHalf: {
@@ -87,15 +98,22 @@ export function createInvincibleSeason(params: {
   );
 
   const managers = [human, ...opponents];
+  const rounds = buildDoubleRoundRobin(managers);
+  // A dedicated rng keeps the casualty budget independent of opponent generation above.
+  const casualtySchedule = buildSeasonCasualtySchedule({
+    totalMatchdays: rounds.length,
+    rng: createRng(`${params.seed}:casualties`)
+  });
   return {
     id: `invincible-${Date.now()}-${Math.floor(rng() * 10000)}`,
     managers,
-    rounds: buildDoubleRoundRobin(managers),
+    rounds,
     skillBand,
     currentMatchday: 0,
     results: [],
     injuryGamesByPlayerId: {},
     suspensionGamesByPlayerId: {},
+    casualtySchedule,
     boostsRemaining: INVINCIBLE_TEAM_TALK_LIMIT,
     boostsUsed: 0,
     teamTalksUsedByHalf: { first: false, second: false },
@@ -122,6 +140,66 @@ export function buildDoubleRoundRobin(managers: ManagerSquad[]): Fixture[][] {
     }))
   );
   return [...firstLeg, ...secondLeg];
+}
+
+/**
+ * Draws a whole-season casualty budget: a random 0..INVINCIBLE_MAX_SEASON_CASUALTIES injuries + red
+ * cards, scattered across distinct matchdays so jeopardy is occasional rather than constant. Sometimes
+ * returns an empty schedule (a lucky, casualty-free season).
+ */
+export function buildSeasonCasualtySchedule(params: {
+  totalMatchdays: number;
+  rng: () => number;
+}): Record<number, SeasonCasualtyKind> {
+  const { totalMatchdays, rng } = params;
+  const schedule: Record<number, SeasonCasualtyKind> = {};
+  if (totalMatchdays <= 0) {
+    return schedule;
+  }
+  const count = Math.min(totalMatchdays, Math.floor(rng() * (INVINCIBLE_MAX_SEASON_CASUALTIES + 1)));
+  const matchdays = shuffle(
+    Array.from({ length: totalMatchdays }, (_, index) => index),
+    rng
+  ).slice(0, count);
+  for (const matchday of matchdays) {
+    schedule[matchday] = rng() < INVINCIBLE_RED_CARD_SHARE ? "redCard" : "injury";
+  }
+  return schedule;
+}
+
+/** Tallies how many league goals each human player has scored so far this season. */
+export function humanSeasonGoalsByPlayer(results: FixtureResult[], humanId = "human"): Record<number, number> {
+  const goals: Record<number, number> = {};
+  for (const result of results) {
+    for (const event of result.events) {
+      if (event.code === "goal" && event.teamId === humanId && event.playerId !== undefined) {
+        goals[event.playerId] = (goals[event.playerId] ?? 0) + 1;
+      }
+    }
+  }
+  return goals;
+}
+
+/**
+ * Relative likelihood, per player, of being the one who goes off when a season casualty strikes.
+ * Everyone starts on a base of 1 so nobody is safe, but season goals and squad rating tilt the odds so
+ * your talisman is often — not always — the man you lose, giving the setback real bite.
+ */
+export function seasonCasualtyWeights(params: {
+  human: ManagerSquad;
+  results: FixtureResult[];
+  humanId?: string;
+}): Record<number, number> {
+  const humanId = params.humanId ?? "human";
+  const goals = humanSeasonGoalsByPlayer(params.results, humanId);
+  const weights: Record<number, number> = {};
+  for (const pick of params.human.picks) {
+    const goalsScored = goals[pick.player.i] ?? 0;
+    const ratingEdge = Math.max(0, pick.effectiveRating - SEASON_CASUALTY_RATING_PIVOT);
+    weights[pick.player.i] =
+      1 + goalsScored * SEASON_CASUALTY_GOAL_WEIGHT + ratingEdge * SEASON_CASUALTY_RATING_WEIGHT;
+  }
+  return weights;
 }
 
 export function currentHumanFixture(season: Pick<InvincibleSeason, "rounds" | "currentMatchday">): Fixture | null {
@@ -224,7 +302,9 @@ export function createSeasonPregame(params: {
 
   // Goalkeepers never pick up training injuries (only red cards can sideline a GK).
   const injuryCandidates = starters.filter((pick) => !pick.player.p.includes("GK"));
-  const trainingInjuryChance = params.trainingInjuryChance ?? 0.13;
+  // Defaults to 0: in Be Invincible all human injuries now come from the whole-season casualty budget
+  // (see buildSeasonCasualtySchedule). Tests still pass an explicit chance to force deterministic events.
+  const trainingInjuryChance = params.trainingInjuryChance ?? 0;
   if (injuryCandidates.length > 0 && rng() < trainingInjuryChance) {
     const pick = pickOne(injuryCandidates, rng);
     const games = 1 + Math.floor(rng() * 10);

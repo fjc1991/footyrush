@@ -1,8 +1,8 @@
 import { effectiveRating } from "./data";
 import { applyBoostToRating } from "./boosts";
 import { getStarterSlots } from "./formations";
-import { clamp, createRng, pickOne } from "./rng";
-import type { DraftPick, Fixture, FixtureResult, FormationSlot, ManagerSquad, MatchEvent, Player, Standing } from "./types";
+import { clamp, createRng, pickOne, weightedPick } from "./rng";
+import type { CasualtyDirective, DraftPick, Fixture, FixtureResult, FormationSlot, ManagerSquad, MatchEvent, Player, Standing } from "./types";
 
 interface StrengthProfile {
   overall: number;
@@ -49,6 +49,13 @@ export function simulateFixture(params: {
   seed: string;
   homeExpectedGoalsModifier?: number;
   awayExpectedGoalsModifier?: number;
+  /**
+   * Overrides the default random casualty rolls for a side. A `CasualtyDirective` forces exactly that
+   * casualty (choosing the victim by weight); `null` guarantees the side takes no casualty this match;
+   * `undefined` keeps the original random behaviour (AI opponents, mini-leagues, exhibitions).
+   */
+  homeCasualty?: CasualtyDirective | null;
+  awayCasualty?: CasualtyDirective | null;
 }): FixtureResult {
   const rng = createRng(params.seed);
   const homeStrength = calculateSquadStrength(params.home);
@@ -83,8 +90,8 @@ export function simulateFixture(params: {
 
   // Decide injuries/red cards up front so later events (goals, chances, near misses)
   // never feature a player after the second they left the pitch.
-  const homeOff = determineCasualties(params.home, rng);
-  const awayOff = determineCasualties(params.away, rng);
+  const homeOff = determineCasualties(params.home, rng, params.homeCasualty);
+  const awayOff = determineCasualties(params.away, rng, params.awayCasualty);
   pushCasualtyEvents(events, params.fixture.id, params.home, homeOff);
   pushCasualtyEvents(events, params.fixture.id, params.away, awayOff);
 
@@ -265,11 +272,25 @@ interface Casualty {
 }
 
 /** Decide which (if any) starter is injured or sent off this match, and who replaces them. */
-function determineCasualties(manager: ManagerSquad, rng: () => number): Map<number, Casualty> {
+function determineCasualties(
+  manager: ManagerSquad,
+  rng: () => number,
+  directive?: CasualtyDirective | null
+): Map<number, Casualty> {
   const offMap = new Map<number, Casualty>();
+  // `null` = a controlled side (e.g. the human in a Be Invincible season) with no scheduled casualty
+  // this match: never roll a random injury or red card.
+  if (directive === null) {
+    return offMap;
+  }
   const out = unavailable(manager);
   const slots = getStarterSlots(manager.formationId);
   const active = getActiveStarters(manager);
+
+  if (directive) {
+    setForcedCasualty(offMap, manager, active, slots, out, rng, directive);
+    return offMap;
+  }
 
   if (rng() <= 0.18) {
     // Goalkeepers never pick up in-match injuries (only red cards can sideline a GK).
@@ -304,6 +325,47 @@ function determineCasualties(manager: ManagerSquad, rng: () => number): Map<numb
   }
 
   return offMap;
+}
+
+/** Force the season-scheduled casualty onto one starter, weighting the victim by season contribution. */
+function setForcedCasualty(
+  offMap: Map<number, Casualty>,
+  manager: ManagerSquad,
+  active: ActivePlayer[],
+  slots: FormationSlot[],
+  out: number[],
+  rng: () => number,
+  directive: CasualtyDirective
+): void {
+  const weightFor = (playerId: number) => directive.weightByPlayerId?.[playerId] ?? 1;
+  const eligible = active.flatMap((entry, index) => {
+    const pick = entry.pick;
+    if (!pick || out.includes(pick.player.i)) {
+      return [];
+    }
+    // Goalkeepers never pick up in-match injuries (only red cards can sideline a GK).
+    if (directive.kind === "injury" && pick.player.p.includes("GK")) {
+      return [];
+    }
+    return [{ pick, slot: slots[index] }];
+  });
+  if (eligible.length === 0) {
+    return;
+  }
+  const chosen = weightedPick(eligible, (candidate) => weightFor(candidate.pick.player.i), rng);
+  if (directive.kind === "injury") {
+    const second = 20 + Math.floor(rng() * 61);
+    const sub = selectBestSub(manager.picks, chosen.slot.target, [...out, chosen.pick.player.i]);
+    offMap.set(chosen.pick.player.i, {
+      kind: "injury",
+      second,
+      replacementId: sub?.player.i ?? null,
+      replacementOnSecond: Math.min(89, second + 1)
+    });
+    return;
+  }
+  const second = 30 + Math.floor(rng() * 58);
+  offMap.set(chosen.pick.player.i, { kind: "redCard", second, replacementId: null, replacementOnSecond: Infinity });
 }
 
 function pushCasualtyEvents(events: MatchEvent[], fixtureId: string, manager: ManagerSquad, offMap: Map<number, Casualty>): void {

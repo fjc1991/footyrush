@@ -1,6 +1,6 @@
 "use client";
 
-import { Activity, BarChart3, ChevronRight, Globe, Goal, HeartPulse, LogIn, Mail, Moon, Play, Shield, Shirt, Shuffle, Sparkles, Sun, Timer, Trophy, Users } from "lucide-react";
+import { Activity, BarChart3, ChevronRight, Globe, Goal, HeartPulse, LogIn, Mail, Moon, Play, Shirt, Shuffle, Sparkles, Sun, Timer, Trophy, Users, X } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { en } from "@/lib/i18n/en";
 import { FORMATION_LIST, getStarterSlots } from "@/lib/game/formations";
@@ -11,6 +11,7 @@ import { MANAGER_POOL, managerRatingForPosition } from "@/lib/game/managers";
 import { createMinileague } from "@/lib/game/matchmaking";
 import { renderCommentary } from "@/lib/game/commentary";
 import {
+  INVINCIBLE_TEAM_TALK_LIMIT,
   OUT_OF_FORM_EXPECTED_GOALS_PENALTY,
   TEAM_TALK_EXPECTED_GOALS_BONUS,
   applySeasonFixtureInjuries,
@@ -24,6 +25,7 @@ import {
   markSeasonTeamTalkUsed,
   managerForSeasonMatch,
   remainingSeasonTeamTalks,
+  seasonCasualtyWeights,
   seasonMissingRequiredSubstitutions,
   seasonUnavailablePlayerIds,
   seasonUnavailableStarters,
@@ -69,6 +71,7 @@ type GameMode = "minileague" | "be_invincible";
 
 interface LocalProfile {
   id: string;
+  managerId?: string;
   displayName: string;
   email?: string;
   demo: boolean;
@@ -160,6 +163,31 @@ function clearLocalRunState() {
   window.localStorage.removeItem(snapshotsKey);
 }
 
+// Open X's tweet composer pre-filled with the player's result so they can brag about a run.
+// Uses the public intent URL — no API keys, no account linking.
+function shareResultOnX(text: string) {
+  const url = window.location.origin;
+  const intent = `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url)}`;
+  window.open(intent, "_blank", "noopener,noreferrer");
+}
+
+function XLogo({ size = 16 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231 5.45-6.231Zm-1.161 17.52h1.833L7.084 4.126H5.117L17.083 19.77Z" />
+    </svg>
+  );
+}
+
+function ShareOnXButton({ text }: { text: string }) {
+  return (
+    <button className="secondary-button share-x" type="button" onClick={() => shareResultOnX(text)}>
+      <XLogo size={16} />
+      Share on X
+    </button>
+  );
+}
+
 export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: string }) {
   const [view, setView] = useState<MainView>("play");
   const [phase, setPhase] = useState<Phase>("setup");
@@ -171,10 +199,14 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
   const [profile, setProfile] = useState<LocalProfile | null>(null);
   const [guestStatus, setGuestStatus] = useState<GuestStatus>({ allowed: true, played: false });
   const [showAuthGate, setShowAuthGate] = useState(false);
+  const authCloseRef = useRef<HTMLButtonElement | null>(null);
   const [langMenuOpen, setLangMenuOpen] = useState(false);
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
   const [authMessage, setAuthMessage] = useState("");
+  // Email awaiting a confirmation-link click after sign-up; drives the "resend" affordance.
+  const [pendingConfirmEmail, setPendingConfirmEmail] = useState("");
+  const [resendCooldown, setResendCooldown] = useState(0);
   const [isAdmin, setIsAdmin] = useState(false);
   const [leaderboardPeriod, setLeaderboardPeriod] = useState<Period>("daily");
   const [leaderboardRecords, setLeaderboardRecords] = useState<LeaderboardRecord[]>([]);
@@ -205,6 +237,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
   const [exhibition, setExhibition] = useState<ExhibitionState | null>(null);
   const [exhibitionSecond, setExhibitionSecond] = useState(0);
   const [exhibitionPlaying, setExhibitionPlaying] = useState(false);
+  const [exhibitionReturnPhase, setExhibitionReturnPhase] = useState<Phase>("complete");
   const [season, setSeason] = useState<InvincibleSeason | null>(null);
   const [seasonDecision, setSeasonDecision] = useState<SeasonPregameDecision | null>(null);
   const [seasonOutOfFormChoice, setSeasonOutOfFormChoice] = useState<"keep" | "bench" | null>(null);
@@ -286,6 +319,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
 
   // Cross-user board when available, else the local aggregate.
   const leaderboard = serverLeaderboard ?? localLeaderboard;
+
   const expertUnlocked = hasExpertAccess(managerScore, expertUnlockedEarned);
   const draftMode: DraftMode = expertUnlocked ? "expert" : "classic";
   const draftStatus = phase === "complete" || phase === "exhibition" || phase === "invincible_complete" ? "Complete" : `${picks.length}/${draftSlots.length}`;
@@ -443,12 +477,20 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
       if (!session?.user) {
         return;
       }
+      // A confirmed link produces a session: clear the pending-confirmation prompt.
+      setPendingConfirmEmail("");
       const email = session.user.email ?? "";
       const admin = session.user.app_metadata?.role === "admin";
       setIsAdmin(admin);
+      // Preserve the registered identity: RegistrationPage stores manager_id / display_name in the
+      // signup metadata, so read it back here instead of always falling back to the email prefix.
+      const meta = session.user.user_metadata ?? {};
+      const managerId = typeof meta.manager_id === "string" ? meta.manager_id : undefined;
+      const metaName = typeof meta.display_name === "string" ? meta.display_name : undefined;
       persistProfile({
         id: session.user.id,
-        displayName: admin ? "Admin (tester)" : email.split("@")[0] || "Manager",
+        managerId,
+        displayName: admin ? "Admin (tester)" : metaName || managerId || email.split("@")[0] || "Manager",
         email,
         demo: false
       });
@@ -458,6 +500,41 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => applySession(session));
     return () => authListener.subscription.unsubscribe();
   }, []);
+
+  // Tick down the "resend confirmation" cooldown so users can't spam the (rate-limited) email sender.
+  useEffect(() => {
+    if (resendCooldown <= 0) {
+      return;
+    }
+    const timer = window.setTimeout(() => setResendCooldown((seconds) => Math.max(0, seconds - 1)), 1000);
+    return () => window.clearTimeout(timer);
+  }, [resendCooldown]);
+
+  // Auth dialog keyboard accessibility: Escape closes it, focus moves into the dialog on open, and
+  // focus returns to whatever opened it on close.
+  useEffect(() => {
+    if (!showAuthGate) {
+      return;
+    }
+    const previouslyFocused = document.activeElement as HTMLElement | null;
+    authCloseRef.current?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setShowAuthGate(false);
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      previouslyFocused?.focus?.();
+    };
+  }, [showAuthGate]);
+
+  // The root layout hardcodes <html lang="en">; reflect the actual locale so /es /fr /pt
+  // announce correctly to assistive tech (WCAG 3.1.1).
+  useEffect(() => {
+    document.documentElement.lang = locale;
+  }, [locale]);
 
   useEffect(() => {
     if (!isPlaying) {
@@ -526,15 +603,8 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
 
   // Appoint a random real manager from the pool. Their finish-derived rating becomes the
   // starting manager score (replacing the old flat 1000) and grants a slight simulation edge.
-  function shuffleManager() {
-    if (managerSpinning || managerSpinsLeft <= 0) {
-      return;
-    }
-    const nextSpinsLeft = managerSpinsLeft - 1;
-    setManagerSpinsLeft(nextSpinsLeft);
-    window.localStorage.setItem(managerSpinsKey, String(nextSpinsLeft));
+  function runManagerSpin() {
     setManagerSpinning(true);
-
     window.setTimeout(() => {
       const entry = MANAGER_POOL[Math.floor(Math.random() * MANAGER_POOL.length)];
       const rating = managerRatingForPosition(entry.position);
@@ -558,6 +628,16 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
       window.localStorage.setItem(managerScoreKey, String(rating));
       setManagerSpinning(false);
     }, 820);
+  }
+
+  function shuffleManager() {
+    if (managerSpinning || managerSpinsLeft <= 0) {
+      return;
+    }
+    const nextSpinsLeft = managerSpinsLeft - 1;
+    setManagerSpinsLeft(nextSpinsLeft);
+    window.localStorage.setItem(managerSpinsKey, String(nextSpinsLeft));
+    runManagerSpin();
   }
 
   function resetDraft(nextPhase: Phase = "setup") {
@@ -594,17 +674,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}${nextHash}`);
   }
 
-  function spinRound() {
-    if (openSlots.length === 0 || spinning || !dataReady) {
-      return;
-    }
-    const consumesReshuffle = Boolean(spin);
-    if (consumesReshuffle && draftReshufflesLeft <= 0) {
-      return;
-    }
-    if (consumesReshuffle) {
-      setDraftReshufflesLeft((left) => Math.max(0, left - 1));
-    }
+  function runDraftSpin() {
     setSpin(null);
     setSlotPickerCandidateId(null);
     setSpinning(true);
@@ -613,6 +683,21 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
       setSpin(spinForOpenSlots(openSlots, usedPlayerIds, seed));
       setSpinning(false);
     }, 650);
+  }
+
+  // First draw is free; each re-spin uses a free re-shuffle.
+  function spinRound() {
+    if (openSlots.length === 0 || spinning || !dataReady) {
+      return;
+    }
+    if (!spin) {
+      runDraftSpin();
+      return;
+    }
+    if (draftReshufflesLeft > 0) {
+      setDraftReshufflesLeft((left) => Math.max(0, left - 1));
+      runDraftSpin();
+    }
   }
 
   function queueSpinForOpenSlots(nextPicks: DraftPick[]) {
@@ -851,13 +936,22 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     const humanModifier =
       (seasonTeamTalkActive ? TEAM_TALK_EXPECTED_GOALS_BONUS : 0) -
       (seasonOutOfFormChoice === "keep" ? OUT_OF_FORM_EXPECTED_GOALS_PENALTY : 0);
+    // The human's only injuries/red cards come from the whole-season casualty budget. If this matchday
+    // is scheduled to strike, force it on the human's side (victim weighted by season contribution);
+    // otherwise pass `null` so no random casualty can occur.
+    const scheduledCasualty = season.casualtySchedule[season.currentMatchday];
+    const humanCasualty = scheduledCasualty
+      ? { kind: scheduledCasualty, weightByPlayerId: seasonCasualtyWeights({ human, results: season.results }) }
+      : null;
     const result = simulateFixture({
       fixture: currentSeasonFixture,
       home,
       away,
       seed: `${season.id}:${currentSeasonFixture.id}:${season.results.length}`,
       homeExpectedGoalsModifier: currentSeasonFixture.homeId === "human" ? humanModifier : 0,
-      awayExpectedGoalsModifier: currentSeasonFixture.awayId === "human" ? humanModifier : 0
+      awayExpectedGoalsModifier: currentSeasonFixture.awayId === "human" ? humanModifier : 0,
+      homeCasualty: currentSeasonFixture.homeId === "human" ? humanCasualty : undefined,
+      awayCasualty: currentSeasonFixture.awayId === "human" ? humanCasualty : undefined
     });
     await recordSeasonMatchAndAdvance(result);
   }
@@ -940,6 +1034,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
       const completion = await completeInvincibleAttempt(nextSeason, finalStandings);
       nextSeason = { ...nextSeason, officialAward: completion.officialAward, awardProduction: completion.production };
       recordGuestPlayIfNeeded();
+      saveCommunitySquad(nextSeason.managers.find((manager) => manager.id === "human"));
       setSeason(nextSeason);
       setSeasonDecision(null);
       setPhase("invincible_complete");
@@ -1062,6 +1157,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
 
     recordGuestPlayIfNeeded();
 
+    saveCommunitySquad(completedLeague.managers.find((manager) => manager.id === "human"));
     saveCommunitySnapshot(completedLeague);
     setPhase("complete");
   }
@@ -1118,20 +1214,59 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     }
   }
 
-  function getCommunityOpponent(): ManagerSquad | null {
+  // Best-effort: publish the human's completed squad so other real players can
+  // face it. Registered users only; guests/demo stay local.
+  function saveCommunitySquad(squad: ManagerSquad | undefined) {
+    if (!squad || !profile || profile.demo) {
+      return;
+    }
+    const clean: ManagerSquad = {
+      ...squad,
+      kind: "reserve",
+      source: "snapshot",
+      injuredPlayerIds: [],
+      suspendedPlayerIds: [],
+      substitutions: {}
+    };
+    void (async () => {
+      try {
+        await fetch("/api/community-squads", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+          body: JSON.stringify({ squad: clean })
+        });
+      } catch {
+        // best-effort
+      }
+    })();
+  }
+
+  // Prefer a real player's squad from the server; fall back to a local snapshot
+  // or the demo squad when offline / none available.
+  async function getCommunityOpponent(): Promise<ManagerSquad | null> {
+    try {
+      const response = await fetch("/api/community-squads", { headers: { ...(await authHeaders()) } });
+      if (response.ok) {
+        const data = (await response.json()) as { squad?: ManagerSquad | null };
+        if (data.squad && Array.isArray(data.squad.picks) && data.squad.picks.length > 0) {
+          return {
+            ...data.squad,
+            kind: "reserve",
+            source: "snapshot",
+            injuredPlayerIds: [],
+            suspendedPlayerIds: [],
+            substitutions: {}
+          };
+        }
+      }
+    } catch {
+      // fall through to local/demo
+    }
     const snapshots = readCommunitySnapshots();
     return snapshots[1] ?? buildDemoSnapshot();
   }
 
-  function startExhibition() {
-    if (!league || !dataReady) {
-      return;
-    }
-    const human = league.managers.find((manager) => manager.id === "human");
-    const opponent = getCommunityOpponent();
-    if (!human || !opponent) {
-      return;
-    }
+  function playExhibition(human: ManagerSquad, opponent: ManagerSquad, returnPhase: Phase) {
     const home: ManagerSquad = {
       ...human,
       injuredPlayerIds: [],
@@ -1157,7 +1292,32 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     setExhibition({ home, away, result });
     setExhibitionSecond(0);
     setExhibitionPlaying(true);
+    setExhibitionReturnPhase(returnPhase);
     setPhase("exhibition");
+  }
+
+  async function startExhibition() {
+    if (!league || !dataReady) {
+      return;
+    }
+    const human = league.managers.find((manager) => manager.id === "human");
+    const opponent = await getCommunityOpponent();
+    if (!human || !opponent) {
+      return;
+    }
+    playExhibition(human, opponent, "complete");
+  }
+
+  async function startSeasonExhibition() {
+    if (!season || !dataReady) {
+      return;
+    }
+    const human = season.managers.find((manager) => manager.id === "human");
+    const opponent = await getCommunityOpponent();
+    if (!human || !opponent) {
+      return;
+    }
+    playExhibition(human, opponent, "invincible_complete");
   }
 
   function finishExhibitionNow() {
@@ -1169,7 +1329,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     setExhibition(null);
     setExhibitionSecond(0);
     setExhibitionPlaying(false);
-    setPhase("complete");
+    setPhase(exhibitionReturnPhase);
   }
 
   async function signInWithGoogle() {
@@ -1178,12 +1338,15 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
       setAuthMessage("Add Supabase environment variables to enable Google login. Email demo login is available locally.");
       return;
     }
-    await supabase.auth.signInWithOAuth({
+    const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
         redirectTo: `${window.location.origin}/${locale}`
       }
     });
+    if (error) {
+      setAuthMessage(error.message);
+    }
   }
 
   async function signInWithPassword(event: FormEvent<HTMLFormElement>) {
@@ -1216,13 +1379,48 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
       setAuthMessage("Enter an email and a password of at least 6 characters.");
       return;
     }
-    const { data, error } = await supabase.auth.signUp({ email, password: authPassword });
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password: authPassword,
+      // Return the user to the app after they click the confirmation link; the browser client
+      // (detectSessionInUrl) then picks up the session automatically and signs them in.
+      options: { emailRedirectTo: `${window.location.origin}/${locale}` }
+    });
     if (error) {
       setAuthMessage(error.message);
       return;
     }
     setAuthPassword("");
-    setAuthMessage(data.session ? "Account created. You're signed in." : "Account created. Check your email to confirm, then sign in.");
+    if (data.session) {
+      setPendingConfirmEmail("");
+      setAuthMessage("Account created. You're signed in.");
+      return;
+    }
+    setPendingConfirmEmail(email);
+    setResendCooldown(30);
+    setAuthMessage(`We've emailed a confirmation link to ${email}. Click it to activate your account, then sign in.`);
+  }
+
+  async function resendConfirmationEmail() {
+    if (!pendingConfirmEmail || resendCooldown > 0) {
+      return;
+    }
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase) {
+      setAuthMessage("Sign-up is unavailable until Supabase is configured.");
+      return;
+    }
+    const { error } = await supabase.auth.resend({
+      type: "signup",
+      email: pendingConfirmEmail,
+      options: { emailRedirectTo: `${window.location.origin}/${locale}` }
+    });
+    if (error) {
+      setAuthMessage(error.message);
+      return;
+    }
+    setResendCooldown(30);
+    setAuthMessage(`Confirmation link re-sent to ${pendingConfirmEmail}. Check your inbox and spam folder.`);
   }
 
   async function signOut() {
@@ -1234,6 +1432,8 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     setAuthEmail("");
     setAuthPassword("");
     setAuthMessage("");
+    setPendingConfirmEmail("");
+    setResendCooldown(0);
     setShowAuthGate(false);
   }
 
@@ -1366,6 +1566,16 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                     href={`/${lang}`}
                     className={`lang-menu-item${locale === lang ? " active" : ""}`}
                     role="menuitem"
+                    onClick={(event) => {
+                      // A locale change is a full-page nav that resets an in-progress run — confirm first.
+                      if (
+                        locale !== lang &&
+                        (isPlaying || exhibitionPlaying) &&
+                        !window.confirm("Changing language will end your current run. Continue?")
+                      ) {
+                        event.preventDefault();
+                      }
+                    }}
                   >
                     {lang.toUpperCase()}
                   </a>
@@ -1431,6 +1641,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
           period={leaderboardPeriod}
           setPeriod={setLeaderboardPeriod}
           copy={copy}
+          profileId={profile && !profile.demo ? profile.id : null}
         />
       )}
 
@@ -1583,8 +1794,6 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
             <nav aria-label="Footer">
               <a href="mailto:hello@footyrush.app">Contact</a>
               <a href="mailto:support@footyrush.app">Support</a>
-              <button type="button">Privacy</button>
-              <button type="button">Terms</button>
             </nav>
           </footer>
         </>
@@ -1673,6 +1882,14 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                     </div>
                   </div>
                 )}
+                {draftMode === "classic" && (
+                  <div className="fit-legend" aria-label="Position fit guide">
+                    <span className="fit-legend-title">Position fit</span>
+                    <span className="fit-legend-item"><span className="fit-badge perfect">Perfect</span> natural position</span>
+                    <span className="fit-legend-item"><span className="fit-badge good">Good fit</span> can adapt, small rating drop</span>
+                    <span className="fit-legend-item"><span className="fit-badge okay">Okay</span> out of position, bigger drop</span>
+                  </div>
+                )}
                 <div className="candidate-list">
                   {spin.candidates.map((candidate, index) => {
                     const fitLabel = fitLabelFor(candidate.fit);
@@ -1687,6 +1904,10 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                         ) : (
                           <span className="fm-row-ovr hidden">?</span>
                         )}
+                        <span className="fm-row-kit" aria-hidden="true">
+                          <Shirt size={30} strokeWidth={1.5} className="kit-icon" />
+                          <span className="fm-row-kit-num">{candidate.player.num}</span>
+                        </span>
                         <div className="fm-row-main">
                           <div className="fm-row-name">
                             <strong>{candidate.player.n}</strong>
@@ -1755,7 +1976,12 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                     type="button"
                     className={formationId === formation.id ? "formation-button active" : "formation-button"}
                     onClick={() => {
-                      if (picks.length === 0) setFormationId(formation.id);
+                      if (picks.length > 0 || formation.id === formationId) return;
+                      // Clear any active draw: its candidates belong to the old formation's open slots,
+                      // so assigning them after a formation change would silently fail.
+                      setSpin(null);
+                      setSlotPickerCandidateId(null);
+                      setFormationId(formation.id);
                     }}
                     disabled={picks.length > 0 && formationId !== formation.id}
                     title={picks.length > 0 ? "Formation locks once you start assigning players" : undefined}
@@ -1884,7 +2110,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                 )}
 
                 <div className="match-actions">
-                  <div className="speed-controls" aria-label="Match speed">
+                  <div className="speed-controls" role="group" aria-label="Match speed">
                     {([1, 2, 4] as const).map((speed) => (
                       <button
                         key={speed}
@@ -2043,6 +2269,13 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                 <BarChart3 size={18} />
                 View leaderboards
               </button>
+              <ShareOnXButton
+                text={
+                  humanStanding
+                    ? `I scored ${humanStanding.points} points in a FootyRush league. Can you top the table? #FootyRush`
+                    : `Just finished a FootyRush league. Can you top the table? #FootyRush`
+                }
+              />
             </div>
           </div>
           <StandingsPanel standings={standings} />
@@ -2071,7 +2304,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
               </div>
               <div>
                 <span>Team talks</span>
-                <strong>{season.boostsUsed}/3</strong>
+                <strong>{season.boostsUsed}/{INVINCIBLE_TEAM_TALK_LIMIT}</strong>
               </div>
               <p>
                 {season.officialAward && season.awardProduction !== false
@@ -2087,10 +2320,21 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                 <Shuffle size={18} />
                 Build another squad
               </button>
+              <button className="secondary-button" type="button" onClick={startSeasonExhibition} disabled={!dataReady}>
+                <Users size={18} />
+                Community exhibition
+              </button>
               <button className="secondary-button" type="button" onClick={() => setView("leaderboards")}>
                 <BarChart3 size={18} />
                 View leaderboards
               </button>
+              <ShareOnXButton
+                text={
+                  seasonHumanStanding?.losses === 0
+                    ? `I went UNBEATEN in FootyRush Be Invincible — ${seasonHumanStanding?.wins ?? 0}W-${seasonHumanStanding?.draws ?? 0}D-0L, ${seasonHumanStanding?.points ?? 0} pts. 🛡️ Can you survive a whole season? #FootyRush`
+                    : `My FootyRush Be Invincible dream ended after ${seasonHumanStanding?.losses ?? 0} loss${seasonHumanStanding?.losses === 1 ? "" : "es"} (${seasonHumanStanding?.points ?? 0} pts). Think you can go unbeaten? #FootyRush`
+                }
+              />
             </div>
           </div>
           <StandingsPanel standings={seasonStandings} eyebrow="Be Invincible" title="Final table" />
@@ -2132,7 +2376,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
               ))}
             </div>
             <div className="match-actions">
-              <div className="speed-controls" aria-label="Match speed">
+              <div className="speed-controls" role="group" aria-label="Match speed">
                 {([1, 2, 4] as const).map((speed) => (
                   <button
                     key={speed}
@@ -2212,7 +2456,15 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                 <p className="eyebrow">Private beta</p>
                 <h2 id="auth-title">{copy.signInTitle}</h2>
               </div>
-              <Shield size={22} />
+              <button
+                ref={authCloseRef}
+                type="button"
+                className="icon-button auth-close"
+                aria-label="Close sign-in"
+                onClick={() => setShowAuthGate(false)}
+              >
+                <X size={20} />
+              </button>
             </div>
             {profile ? (
               <>
@@ -2268,6 +2520,23 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                     {copy.email}
                   </button>
                 </form>
+                {pendingConfirmEmail && (
+                  <div className="auth-pending" role="status">
+                    <Mail size={16} aria-hidden="true" />
+                    <p>
+                      Confirm your email to finish. We sent a link to <strong>{pendingConfirmEmail}</strong> — check your
+                      inbox (and spam), click it, then sign in above.
+                    </p>
+                    <button
+                      className="secondary-button wide"
+                      type="button"
+                      onClick={resendConfirmationEmail}
+                      disabled={resendCooldown > 0}
+                    >
+                      {resendCooldown > 0 ? `Resend link in ${resendCooldown}s` : "Resend confirmation link"}
+                    </button>
+                  </div>
+                )}
               </>
             )}
             {!hasSupabaseConfig() && <p className="fine-print">Local demo mode is active until Supabase env vars are added.</p>}
@@ -2315,7 +2584,14 @@ function ProgressionPanel({
         </div>
         <span className="progression-level-chip">{expertUnlocked ? "Expert" : "Assist"}</span>
       </div>
-      <div className="progress-track" aria-label="Progress to expert mode">
+      <div
+        className="progress-track"
+        role="progressbar"
+        aria-label="Progress to expert mode"
+        aria-valuenow={Math.round(progress)}
+        aria-valuemin={0}
+        aria-valuemax={100}
+      >
         <span style={{ width: `${progress}%` }} />
       </div>
       <div className="progression-meta">
@@ -2994,15 +3270,20 @@ function LeaderboardsScreen({
   entries,
   period,
   setPeriod,
-  copy
+  copy,
+  profileId
 }: {
   entries: ReturnType<typeof aggregateLeaderboard>;
   period: Period;
   setPeriod: (period: Period) => void;
   copy: Copy;
+  profileId: string | null;
 }) {
   const visible = entries.slice(0, VISIBLE_LEADERBOARD_ROWS);
-  const isPlayer = (entry: (typeof entries)[number]) => entry.kind === "human";
+  // On the cross-user server board every row is kind "human", so identify the viewer by their
+  // own userId. Fall back to kind === "human" for the guest/local board (all rows are their own runs).
+  const isPlayer = (entry: (typeof entries)[number]) =>
+    profileId ? entry.userId === profileId : entry.kind === "human";
   const playerEntries = entries.filter(isPlayer);
   const playerBest = playerEntries.length
     ? playerEntries.reduce((best, entry) => (entry.rank < best.rank ? entry : best))
@@ -3047,32 +3328,32 @@ function LeaderboardsScreen({
         {visible.length === 0 ? (
           <p className="muted leaderboard-empty">{copy.leaderboardEmpty}</p>
         ) : (
-          <div className="table leaderboard-table">
-            <div className="lb-row lb-head">
-              <span>#</span>
-              <span>Manager</span>
-              <span>Pts</span>
-              <span>GD</span>
-              <span>GF</span>
+          <div className="table leaderboard-table" role="table" aria-label={`${periodLabel} rankings`}>
+            <div className="lb-row lb-head" role="row">
+              <span role="columnheader">#</span>
+              <span role="columnheader">Manager</span>
+              <span role="columnheader">Pts</span>
+              <span role="columnheader">GD</span>
+              <span role="columnheader">GF</span>
             </div>
             {visible.map((entry) => (
-              <div className={`lb-row${isPlayer(entry) ? " is-you" : ""}${entry.rank <= 3 ? ` podium p${entry.rank}` : ""}`} key={entry.id}>
-                <span className="lb-rank">{entry.rank <= 3 ? ["🥇", "🥈", "🥉"][entry.rank - 1] : entry.rank}</span>
-                <strong>{entry.displayName}{isPlayer(entry) ? <span className="you-tag">YOU</span> : null}</strong>
-                <span>{entry.matchPoints}</span>
-                <span>{entry.goalDifference}</span>
-                <span>{entry.goalsFor}</span>
+              <div className={`lb-row${isPlayer(entry) ? " is-you" : ""}${entry.rank <= 3 ? ` podium p${entry.rank}` : ""}`} role="row" key={entry.id}>
+                <span className="lb-rank" role="cell">{entry.rank <= 3 ? ["🥇", "🥈", "🥉"][entry.rank - 1] : entry.rank}</span>
+                <strong role="cell">{entry.displayName}{isPlayer(entry) ? <span className="you-tag">YOU</span> : null}</strong>
+                <span role="cell">{entry.matchPoints}</span>
+                <span role="cell">{entry.goalDifference}</span>
+                <span role="cell">{entry.goalsFor}</span>
               </div>
             ))}
             {playerBest && !playerVisible && (
               <>
-                <div className="lb-gap">···</div>
-                <div className="lb-row is-you" key={`you-${playerBest.id}`}>
-                  <span className="lb-rank">{playerBest.rank}</span>
-                  <strong>{playerBest.displayName}<span className="you-tag">YOU</span></strong>
-                  <span>{playerBest.matchPoints}</span>
-                  <span>{playerBest.goalDifference}</span>
-                  <span>{playerBest.goalsFor}</span>
+                <div className="lb-gap" role="presentation" aria-hidden="true">···</div>
+                <div className="lb-row is-you" role="row" key={`you-${playerBest.id}`}>
+                  <span className="lb-rank" role="cell">{playerBest.rank}</span>
+                  <strong role="cell">{playerBest.displayName}<span className="you-tag">YOU</span></strong>
+                  <span role="cell">{playerBest.matchPoints}</span>
+                  <span role="cell">{playerBest.goalDifference}</span>
+                  <span role="cell">{playerBest.goalsFor}</span>
                 </div>
               </>
             )}

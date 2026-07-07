@@ -25,6 +25,25 @@ export function pickOne<T>(items: T[], rng: () => number): T {
   return items[Math.floor(rng() * items.length)];
 }
 
+export function weightedPick<T>(items: T[], weight: (item: T) => number, rng: () => number): T {
+  if (items.length === 0) {
+    throw new Error("Cannot pick from an empty array.");
+  }
+  const weights = items.map((item) => Math.max(0, weight(item)));
+  const total = weights.reduce((sum, value) => sum + value, 0);
+  if (total <= 0) {
+    return pickOne(items, rng);
+  }
+  let threshold = rng() * total;
+  for (let index = 0; index < items.length; index += 1) {
+    threshold -= weights[index];
+    if (threshold < 0) {
+      return items[index];
+    }
+  }
+  return items[items.length - 1];
+}
+
 export function shuffle<T>(items: T[], rng: () => number): T[] {
   const copy = [...items];
   for (let index = copy.length - 1; index > 0; index -= 1) {

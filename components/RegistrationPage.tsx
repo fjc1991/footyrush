@@ -82,65 +82,72 @@ export default function RegistrationPage({ locale }: { locale: string }) {
       return;
     }
 
-    const response = await fetch("/api/registration", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, managerId: normalized })
-    });
-    const result = (await response.json()) as { ok?: boolean; email?: string; managerId?: string; reason?: string };
-    if (!response.ok || !result.ok || !result.email || !result.managerId) {
-      setSubmitting(false);
-      setAvailable(false);
-      setMessage(result.reason ?? "Registration could not be validated.");
-      return;
-    }
-
-    const supabase = getSupabaseBrowserClient();
-    if (supabase) {
-      const { data, error } = await supabase.auth.signUp({
-        email: result.email,
-        password,
-        options: {
-          data: {
-            manager_id: result.managerId,
-            display_name: result.managerId
-          }
-        }
+    try {
+      const response = await fetch("/api/registration", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, managerId: normalized })
       });
-      if (error) {
+      const result = (await response.json()) as { ok?: boolean; email?: string; managerId?: string; reason?: string };
+      if (!response.ok || !result.ok || !result.email || !result.managerId) {
         setSubmitting(false);
-        setMessage(error.message);
+        setAvailable(false);
+        setMessage(result.reason ?? "Registration could not be validated.");
         return;
       }
-      if (data.session?.user) {
-        const profile = {
-          id: data.session.user.id,
-          managerId: result.managerId,
-          displayName: result.managerId,
-          email: result.email,
-          demo: false
-        };
-        reserveLocalManagerId(result.managerId, profile.id);
-        window.localStorage.setItem(profileKey, JSON.stringify(profile));
-        router.push(`/${locale}#personal`);
-        return;
-      }
-      reserveLocalManagerId(result.managerId, `pending-${result.managerId}`);
-      setSubmitting(false);
-      setMessage("Account created. Check your email to confirm, then sign in.");
-      return;
-    }
 
-    const profile = {
-      id: `local-${result.managerId}`,
-      managerId: result.managerId,
-      displayName: result.managerId,
-      email: result.email,
-      demo: true
-    };
-    reserveLocalManagerId(result.managerId, profile.id);
-    window.localStorage.setItem(profileKey, JSON.stringify(profile));
-    router.push(`/${locale}#personal`);
+      const supabase = getSupabaseBrowserClient();
+      if (supabase) {
+        const { data, error } = await supabase.auth.signUp({
+          email: result.email,
+          password,
+          options: {
+            // Send the confirmation link back to the app so the session is picked up on return.
+            emailRedirectTo: `${window.location.origin}/${locale}`,
+            data: {
+              manager_id: result.managerId,
+              display_name: result.managerId
+            }
+          }
+        });
+        if (error) {
+          setSubmitting(false);
+          setMessage(error.message);
+          return;
+        }
+        if (data.session?.user) {
+          const profile = {
+            id: data.session.user.id,
+            managerId: result.managerId,
+            displayName: result.managerId,
+            email: result.email,
+            demo: false
+          };
+          reserveLocalManagerId(result.managerId, profile.id);
+          window.localStorage.setItem(profileKey, JSON.stringify(profile));
+          router.push(`/${locale}#personal`);
+          return;
+        }
+        reserveLocalManagerId(result.managerId, `pending-${result.managerId}`);
+        setSubmitting(false);
+        setMessage("Account created. Check your email to confirm, then sign in.");
+        return;
+      }
+
+      const profile = {
+        id: `local-${result.managerId}`,
+        managerId: result.managerId,
+        displayName: result.managerId,
+        email: result.email,
+        demo: true
+      };
+      reserveLocalManagerId(result.managerId, profile.id);
+      window.localStorage.setItem(profileKey, JSON.stringify(profile));
+      router.push(`/${locale}#personal`);
+    } catch {
+      setSubmitting(false);
+      setMessage("Something went wrong. Please check your connection and try again.");
+    }
   }
 
   return (
