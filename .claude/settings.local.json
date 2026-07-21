@@ -5,7 +5,12 @@
       "Bash(npx tsc *)",
       "Bash(npm test *)",
       "Bash(npm run *)",
-      "Bash(sed -n '1890,1950p' /Volumes/Crucial X10/Py/footyrush/app/globals.css)"
+      "Bash(sed -n '1890,1950p' /Volumes/Crucial X10/Py/footyrush/app/globals.css)",
+      "Bash(xargs wc -l)",
+      "Bash(git check-ignore *)",
+      "Bash(node -e \"const d=require\\('./data.json'\\); console.log\\('TOP KEYS:', Object.keys\\(d\\)\\); console.log\\('teams count:', Object.keys\\(d.teams||{}\\).length\\); console.log\\('sample team:', JSON.stringify\\(Object.entries\\(d.teams||{}\\)[0]\\)\\); console.log\\('years:', \\(d.years||[]\\).slice\\(0,50\\)\\); console.log\\('combos count:', \\(d.combos||[]\\).length\\); console.log\\('sample combos:', JSON.stringify\\(\\(d.combos||[]\\).slice\\(0,5\\)\\)\\); const sk=Object.keys\\(d.squads||{}\\); console.log\\('squads count:', sk.length\\); console.log\\('sample squad key:', sk[0], 'len', d.squads[sk[0]].length\\); console.log\\('sample player:', JSON.stringify\\(d.squads[sk[0]][0]\\)\\);\")",
+      "Bash(npm install *)",
+      "Bash(echo \"tsc exit: $?\")"
     ]
   }
 }
