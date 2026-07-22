@@ -1,7 +1,7 @@
 "use client";
 
 import { Activity, BarChart3, ChevronRight, Globe, Goal, HeartPulse, LogIn, Mail, Moon, Pause, Play, Shirt, Shuffle, Sparkles, Sun, Timer, Trophy, Users, X } from "lucide-react";
-import { FormEvent, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { en } from "@/lib/i18n/en";
 import { FORMATION_LIST, getStarterSlots } from "@/lib/game/formations";
 import { autoDraftManager, getDraftSlots, getOpenDraftSlots, makeDraftPick } from "@/lib/game/draft";
@@ -22,6 +22,7 @@ import {
   createSeasonPregame,
   currentHumanFixture as getCurrentSeasonHumanFixture,
   decrementSeasonAbsences,
+  invincibleContenderModifiers,
   markSeasonTeamTalkUsed,
   managerForSeasonMatch,
   remainingSeasonTeamTalks,
@@ -62,11 +63,13 @@ import {
 import { getSupabaseBrowserClient, hasSupabaseConfig } from "@/lib/supabase/client";
 import type { Session } from "@supabase/supabase-js";
 import type {
+  CompetitionMode,
   DraftMode,
   DraftPick,
   FixtureResult,
   FormationSlot,
   LeaderboardEntry,
+  LeaderboardMetric,
   LeaderboardRecord,
   ManagerSquad,
   Period,
@@ -130,6 +133,13 @@ interface GuestStatus {
   limit?: number;
 }
 
+type ResultSyncStatus = "idle" | "saving" | "saved" | "failed";
+
+interface PendingResultSync {
+  records: LeaderboardRecord[];
+  completedAt: string;
+}
+
 interface LeagueState {
   id: string;
   skillBand: string;
@@ -153,6 +163,7 @@ const managerKey = "footyrush.manager";
 const managerSpinsKey = "footyrush.managerSpinsLeft";
 const snapshotsKey = "footyrush.communitySnapshots";
 const scoreModelKey = "footyrush.scoreModel";
+const legacyProgressClaimKey = "footyrush.progressLegacyClaimed";
 // Bump when the manager-score model changes so returning testers reset cleanly.
 const SCORE_MODEL = "v3-zero-to-1000";
 const completedLeaguesKey = "footyrush.completedLeagues";
@@ -160,6 +171,44 @@ const expertUnlockedKey = "footyrush.expertUnlocked";
 const TESTING_MODE = process.env.NEXT_PUBLIC_TESTING_MODE === "true";
 const DRAFT_RESHUFFLE_LIMIT = 5;
 const MANAGER_SPIN_LIMIT = 3;
+
+function recordsStorageKey(profile: LocalProfile | null): string {
+  return profileStorageKey(recordsKey, profile);
+}
+
+function profileStorageKey(baseKey: string, profile: LocalProfile | null): string {
+  return profile && !profile.demo ? `${baseKey}.${profile.id}` : baseKey;
+}
+
+function mergeRunRecords(...groups: LeaderboardRecord[][]): LeaderboardRecord[] {
+  const byRun = new Map<string, LeaderboardRecord>();
+  groups.flat().forEach((record) => {
+    const mode: CompetitionMode = record.competitionMode === "invincible" ? "invincible" : "minileague";
+    const runId = record.runId || record.id;
+    byRun.set(`${record.userId}:${mode}:${runId}`, {
+      ...record,
+      competitionMode: mode,
+      runId,
+      gamesPlayed: Number.isFinite(record.gamesPlayed) ? record.gamesPlayed : 0,
+      finalPosition: Number.isFinite(record.finalPosition) ? record.finalPosition : null
+    });
+  });
+  return Array.from(byRun.values()).sort(
+    (first, second) => Date.parse(second.completedAt) - Date.parse(first.completedAt)
+  );
+}
+
+function completedResultFingerprint(record: LeaderboardRecord): string {
+  const parsedCompletedAt = Date.parse(record.completedAt);
+  return [
+    record.competitionMode === "invincible" ? "invincible" : "minileague",
+    Number.isFinite(parsedCompletedAt) ? parsedCompletedAt : record.completedAt,
+    record.matchPoints,
+    record.goalDifference,
+    record.goalsFor,
+    record.leagueTitles
+  ].join("|");
+}
 
 function clearLocalRunState() {
   window.localStorage.removeItem(recordsKey);
@@ -218,8 +267,13 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
   const [resendCooldown, setResendCooldown] = useState(0);
   const [isAdmin, setIsAdmin] = useState(false);
   const [leaderboardPeriod, setLeaderboardPeriod] = useState<Period>("daily");
+  const [leaderboardMetric, setLeaderboardMetric] = useState<LeaderboardMetric>("points");
+  const [leaderboardCompetitionMode, setLeaderboardCompetitionMode] = useState<CompetitionMode>("minileague");
   const [leaderboardRecords, setLeaderboardRecords] = useState<LeaderboardRecord[]>([]);
   const [serverLeaderboard, setServerLeaderboard] = useState<LeaderboardEntry[] | null>(null);
+  const [leaderboardRevision, setLeaderboardRevision] = useState(0);
+  const [resultSyncStatus, setResultSyncStatus] = useState<ResultSyncStatus>("idle");
+  const [resultSyncMessage, setResultSyncMessage] = useState("");
   const [league, setLeague] = useState<LeagueState | null>(null);
   const [currentResult, setCurrentResult] = useState<FixtureResult | null>(null);
   const [liveSecond, setLiveSecond] = useState(0);
@@ -257,12 +311,156 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
   const [seasonAutoplayCountdown, setSeasonAutoplayCountdown] = useState(INVINCIBLE_AUTOPLAY_SECONDS);
   const [seasonAutoplayPending, setSeasonAutoplayPending] = useState(false);
   const [seasonAutoplayError, setSeasonAutoplayError] = useState("");
+  const [seasonCompletionPending, setSeasonCompletionPending] = useState(false);
   const seasonAdvanceLockRef = useRef(false);
   const activeSeasonIdRef = useRef<string | null>(null);
   const pendingSeasonCompletionRef = useRef<InvincibleSeason | null>(null);
+  const pendingResultSyncRef = useRef<PendingResultSync | null>(null);
+  const recordedRunIdsRef = useRef(new Set<string>());
+  const leaderboardRecordsRef = useRef<LeaderboardRecord[]>([]);
   const seasonAdvanceRef = useRef<() => Promise<void>>(async () => undefined);
   const leagueCommentaryRef = useRef<HTMLDivElement | null>(null);
   const exhibitionCommentaryRef = useRef<HTMLDivElement | null>(null);
+
+  const hydrateLocalProgress = useCallback((nextProfile: LocalProfile | null) => {
+    const progressionKeys = [managerKey, managerScoreKey, managerSpinsKey, expertUnlockedKey, completedLeaguesKey];
+    const isAuthenticatedProfile = Boolean(nextProfile && !nextProfile.demo);
+
+    // Claim the pre-account-scoping browser progression once, for the account
+    // that was already signed in when this upgrade arrived. Later accounts get
+    // clean isolated state instead of inheriting that manager's progress.
+    if (
+      isAuthenticatedProfile &&
+      nextProfile &&
+      !window.localStorage.getItem(legacyProgressClaimKey)
+    ) {
+      if (!window.localStorage.getItem(profileStorageKey(managerScoreKey, nextProfile))) {
+        progressionKeys.forEach((baseKey) => {
+          const legacyValue = window.localStorage.getItem(baseKey);
+          if (legacyValue !== null) {
+            window.localStorage.setItem(profileStorageKey(baseKey, nextProfile), legacyValue);
+            window.localStorage.removeItem(baseKey);
+          }
+        });
+        window.localStorage.setItem(
+          profileStorageKey(scoreModelKey, nextProfile),
+          window.localStorage.getItem(scoreModelKey) ?? SCORE_MODEL
+        );
+        window.localStorage.removeItem(scoreModelKey);
+      }
+      try {
+        const legacyRaw = window.localStorage.getItem(recordsKey);
+        const scopedKey = recordsStorageKey(nextProfile);
+        if (legacyRaw) {
+          const parsedLegacy = JSON.parse(legacyRaw) as LeaderboardRecord[];
+          const scopedRaw = window.localStorage.getItem(scopedKey);
+          const parsedScoped = scopedRaw ? (JSON.parse(scopedRaw) as LeaderboardRecord[]) : [];
+          const claimed = parsedLegacy.map((record, index): LeaderboardRecord => {
+            const competitionMode: CompetitionMode = record.competitionMode === "invincible"
+              ? "invincible"
+              : "minileague";
+            const runId = record.runId || record.id || `legacy-${index}`;
+            return {
+              ...record,
+              id: `${nextProfile.id}-${runId}`,
+              userId: nextProfile.id,
+              displayName: nextProfile.displayName,
+              competitionMode,
+              runId,
+              legacy: true,
+              gamesPlayed: Number.isFinite(record.gamesPlayed)
+                ? record.gamesPlayed
+                : competitionMode === "invincible" ? 38 : 5,
+              finalPosition: Number.isFinite(record.finalPosition)
+                ? record.finalPosition
+                : record.leagueTitles > 0 ? 1 : null
+            };
+          });
+          window.localStorage.setItem(scopedKey, JSON.stringify(mergeRunRecords(parsedScoped, claimed)));
+          window.localStorage.removeItem(recordsKey);
+        }
+      } catch {
+        // A malformed legacy cache should not stop the canonical account from loading.
+      }
+      window.localStorage.setItem(legacyProgressClaimKey, nextProfile.id);
+    }
+
+    const modelStorageKey = profileStorageKey(scoreModelKey, nextProfile);
+    if (window.localStorage.getItem(modelStorageKey) !== SCORE_MODEL) {
+      [managerKey, managerScoreKey, managerSpinsKey, expertUnlockedKey].forEach((baseKey) =>
+        window.localStorage.removeItem(profileStorageKey(baseKey, nextProfile))
+      );
+      window.localStorage.setItem(modelStorageKey, SCORE_MODEL);
+    }
+
+    let parsedManager: SelectedManager | null = null;
+    try {
+      const storedManager = window.localStorage.getItem(profileStorageKey(managerKey, nextProfile));
+      parsedManager = storedManager ? (JSON.parse(storedManager) as SelectedManager) : null;
+    } catch {
+      parsedManager = null;
+    }
+    const storedScoreRaw = window.localStorage.getItem(profileStorageKey(managerScoreKey, nextProfile));
+    const storedManagerScore = storedScoreRaw !== null
+      ? Number(storedScoreRaw)
+      : parsedManager?.rating ?? STARTING_MANAGER_SCORE;
+    setSelectedManager(parsedManager);
+    setManagerScore(storedManagerScore);
+    setManagerSpinsLeft(
+      Number(window.localStorage.getItem(profileStorageKey(managerSpinsKey, nextProfile)) ?? MANAGER_SPIN_LIMIT)
+    );
+    setCompletedLeagues(
+      Number(window.localStorage.getItem(profileStorageKey(completedLeaguesKey, nextProfile)) ?? 0)
+    );
+    setExpertUnlockedEarned(
+      window.localStorage.getItem(profileStorageKey(expertUnlockedKey, nextProfile)) === "true" ||
+        isExpertUnlocked(storedManagerScore)
+    );
+    setLastScoreDelta(null);
+  }, []);
+
+  const persistProfile = useCallback((nextProfile: LocalProfile) => {
+    setProfile(nextProfile);
+    window.localStorage.setItem(profileKey, JSON.stringify(nextProfile));
+    hydrateLocalProgress(nextProfile);
+    setShowAuthGate(false);
+  }, [hydrateLocalProgress]);
+
+  const syncCompletedResult = useCallback(async (payload: PendingResultSync) => {
+    if (!profile || profile.demo) {
+      setResultSyncStatus("saved");
+      setResultSyncMessage("Saved on this device. Sign in to keep future results with your account.");
+      pendingResultSyncRef.current = null;
+      return;
+    }
+
+    pendingResultSyncRef.current = payload;
+    setResultSyncStatus("saving");
+    setResultSyncMessage("Saving this result to your account…");
+    try {
+      const response = await fetch("/api/results", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+        body: JSON.stringify(payload)
+      });
+      const body = (await response.json().catch(() => null)) as { error?: string } | null;
+      if (!response.ok) {
+        throw new Error(body?.error ?? "Your result could not be saved.");
+      }
+      pendingResultSyncRef.current = null;
+      setResultSyncStatus("saved");
+      setResultSyncMessage("Saved to your account and added to your progress.");
+      setLeaderboardRevision((revision) => revision + 1);
+    } catch (error) {
+      setResultSyncStatus("failed");
+      setResultSyncMessage(
+        error instanceof Error
+          ? `${error.message} Your result is safe on this device.`
+          : "Your result is safe on this device, but account sync failed."
+      );
+      setServerLeaderboard(null);
+    }
+  }, [profile]);
 
   const draftSlots = useMemo(() => getDraftSlots(formationId), [formationId]);
   const openSlots = useMemo(() => getOpenDraftSlots(formationId, picks), [formationId, picks]);
@@ -308,13 +506,23 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
   // Local fallback used only when the server leaderboard is unavailable (demo
   // mode / fetch error). The public board prefers serverLeaderboard.
   const localLeaderboard = useMemo(
-    () => aggregateLeaderboard(leaderboardRecords, leaderboardPeriod),
-    [leaderboardPeriod, leaderboardRecords]
+    () =>
+      aggregateLeaderboard(
+        leaderboardMetric === "points"
+          ? leaderboardRecords.filter((record) => record.competitionMode === leaderboardCompetitionMode)
+          : leaderboardRecords,
+        leaderboardPeriod,
+        new Date(),
+        leaderboardMetric
+      ),
+    [leaderboardCompetitionMode, leaderboardMetric, leaderboardPeriod, leaderboardRecords]
   );
 
   useEffect(() => {
     let cancelled = false;
-    fetch(`/api/leaderboards?period=${leaderboardPeriod}`)
+    fetch(
+      `/api/leaderboards?period=${leaderboardPeriod}&metric=${leaderboardMetric}&competitionMode=${leaderboardCompetitionMode}`
+    )
       .then((res) => (res.ok ? res.json() : null))
       .then((data: { entries?: LeaderboardEntry[]; production?: boolean; degraded?: boolean } | null) => {
         if (cancelled) {
@@ -332,7 +540,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     return () => {
       cancelled = true;
     };
-  }, [leaderboardPeriod]);
+  }, [leaderboardCompetitionMode, leaderboardMetric, leaderboardPeriod, leaderboardRevision]);
 
   // Cross-user board when available, else the local aggregate.
   const leaderboard = serverLeaderboard ?? localLeaderboard;
@@ -458,36 +666,16 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
       clearLocalRunState();
     }
 
-    if (storedProfile) {
-      setProfile(JSON.parse(storedProfile) as LocalProfile);
+    let initialProfile: LocalProfile | null = null;
+    try {
+      initialProfile = storedProfile ? (JSON.parse(storedProfile) as LocalProfile) : null;
+    } catch {
+      window.localStorage.removeItem(profileKey);
     }
-
-    const storedRecords = window.localStorage.getItem(recordsKey);
-    if (storedRecords) {
-      setLeaderboardRecords(JSON.parse(storedRecords) as LeaderboardRecord[]);
+    if (initialProfile) {
+      setProfile(initialProfile);
     }
-
-    // One-time reset when the score model changes, so returning testers re-appoint a manager
-    // and start from 0 on the current model instead of carrying stale scores from an old scale.
-    if (window.localStorage.getItem(scoreModelKey) !== SCORE_MODEL) {
-      window.localStorage.removeItem(managerKey);
-      window.localStorage.removeItem(managerScoreKey);
-      window.localStorage.removeItem(managerSpinsKey);
-      window.localStorage.removeItem(expertUnlockedKey);
-      window.localStorage.setItem(scoreModelKey, SCORE_MODEL);
-    }
-
-    const storedManager = window.localStorage.getItem(managerKey);
-    const parsedManager = storedManager ? (JSON.parse(storedManager) as SelectedManager) : null;
-    if (parsedManager) {
-      setSelectedManager(parsedManager);
-    }
-    const storedScoreRaw = window.localStorage.getItem(managerScoreKey);
-    const storedManagerScore = storedScoreRaw !== null ? Number(storedScoreRaw) : parsedManager?.rating ?? STARTING_MANAGER_SCORE;
-    setManagerScore(storedManagerScore);
-    setManagerSpinsLeft(Number(window.localStorage.getItem(managerSpinsKey) ?? MANAGER_SPIN_LIMIT));
-    setCompletedLeagues(Number(window.localStorage.getItem(completedLeaguesKey) ?? 0));
-    setExpertUnlockedEarned(window.localStorage.getItem(expertUnlockedKey) === "true" || isExpertUnlocked(storedManagerScore));
+    hydrateLocalProgress(initialProfile);
 
     if (resetAnonymousVisit) {
       setGuestStatus({ allowed: true, played: false });
@@ -535,6 +723,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
       if (!storedProfileIsDemo) {
         window.localStorage.removeItem(profileKey);
         setProfile((current) => (current?.demo ? current : null));
+        hydrateLocalProgress(null);
       }
       setIsAdmin(false);
     };
@@ -583,7 +772,109 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
       disposed = true;
       authListener.subscription.unsubscribe();
     };
-  }, [locale]);
+  }, [hydrateLocalProgress, locale, persistProfile]);
+
+  // Result history follows the signed-in account. Guests keep a separate device-only
+  // history, while authenticated managers merge their private server history with
+  // any unsynced local run and cache that account-specific view for fast reloads.
+  useEffect(() => {
+    const storageKey = recordsStorageKey(profile);
+    let cached: LeaderboardRecord[] = [];
+    try {
+      const raw = window.localStorage.getItem(storageKey);
+      cached = raw ? mergeRunRecords(JSON.parse(raw) as LeaderboardRecord[]) : [];
+    } catch {
+      cached = [];
+    }
+    leaderboardRecordsRef.current = cached;
+    setLeaderboardRecords(cached);
+    recordedRunIdsRef.current = new Set(cached.map((record) => `${record.competitionMode}:${record.runId}`));
+
+    if (!profile || profile.demo) {
+      return;
+    }
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        const remoteRecords: LeaderboardRecord[] = [];
+        const headers = await authHeaders();
+        let cursor: { completedAt: string; id: string } | null = null;
+        for (let page = 0; page < 100; page += 1) {
+          const cursorQuery = cursor
+            ? `&cursorAt=${encodeURIComponent(cursor.completedAt)}&cursorId=${encodeURIComponent(cursor.id)}`
+            : "";
+          const response = await fetch(`/api/results?limit=500${cursorQuery}`, { headers });
+          if (!response.ok) {
+            throw new Error("Competition history is temporarily unavailable.");
+          }
+          const data = (await response.json()) as {
+            records?: LeaderboardRecord[];
+            nextCursor?: { completedAt: string; id: string } | null;
+          };
+          remoteRecords.push(...(data.records ?? []));
+          if (data.nextCursor === null || data.nextCursor === undefined) {
+            break;
+          }
+          if (
+            !data.nextCursor.id ||
+            !data.nextCursor.completedAt ||
+            Number.isNaN(Date.parse(data.nextCursor.completedAt)) ||
+            (cursor && data.nextCursor.id === cursor.id && data.nextCursor.completedAt === cursor.completedAt)
+          ) {
+            throw new Error("Competition history pagination was invalid.");
+          }
+          cursor = data.nextCursor;
+          if (cancelled) {
+            return;
+          }
+        }
+        if (cancelled) {
+          return;
+        }
+        const serverRecords = mergeRunRecords(remoteRecords);
+        const accountLocal = leaderboardRecordsRef.current.filter((record) => record.userId === profile.id);
+        const serverByRun = new Map(
+          serverRecords.map((record) => [`${record.competitionMode}:${record.runId}`, record])
+        );
+        const serverFingerprints = new Set(serverRecords.map(completedResultFingerprint));
+        const localOverrides = accountLocal.filter((record) => {
+          const serverRecord = serverByRun.get(`${record.competitionMode}:${record.runId}`);
+          if (serverRecord) {
+            return serverRecord.finalPosition === null && record.finalPosition !== null;
+          }
+          return !serverFingerprints.has(completedResultFingerprint(record));
+        });
+        const merged = mergeRunRecords(serverRecords, localOverrides);
+        leaderboardRecordsRef.current = merged;
+        setLeaderboardRecords(merged);
+        window.localStorage.setItem(storageKey, JSON.stringify(merged));
+        const completedMiniLeagues = merged.filter((record) => record.competitionMode !== "invincible").length;
+        setCompletedLeagues(completedMiniLeagues);
+        window.localStorage.setItem(
+          profileStorageKey(completedLeaguesKey, profile),
+          String(completedMiniLeagues)
+        );
+        recordedRunIdsRef.current = new Set(
+          merged.map((record) => `${record.competitionMode}:${record.runId}`)
+        );
+
+        const unsynced = localOverrides.filter(
+          (record) => record.finalPosition !== null || (record.competitionMode === "minileague" && record.legacy)
+        );
+        if (unsynced.length > 0 && !cancelled) {
+          const batch = unsynced.slice(0, 10);
+          void syncCompletedResult({ records: batch, completedAt: batch[0].completedAt });
+        }
+      } catch {
+        // The account-scoped cache remains usable during a transient history outage.
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [leaderboardRevision, profile, syncCompletedResult]);
 
   // Tick down the "resend confirmation" cooldown so users can't spam the (rate-limited) email sender.
   useEffect(() => {
@@ -679,12 +970,6 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     }
   }, [visibleEvents, lastFlashedGoalCount]);
 
-  function persistProfile(nextProfile: LocalProfile) {
-    setProfile(nextProfile);
-    window.localStorage.setItem(profileKey, JSON.stringify(nextProfile));
-    setShowAuthGate(false);
-  }
-
   // Appoint a random real manager from the pool. Their finish-derived rating becomes the
   // starting manager score (replacing the old flat 1000) and grants a slight simulation edge.
   function runManagerSpin() {
@@ -707,9 +992,9 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
         rating
       };
       setSelectedManager(next);
-      window.localStorage.setItem(managerKey, JSON.stringify(next));
+      window.localStorage.setItem(profileStorageKey(managerKey, profile), JSON.stringify(next));
       setManagerScore(rating);
-      window.localStorage.setItem(managerScoreKey, String(rating));
+      window.localStorage.setItem(profileStorageKey(managerScoreKey, profile), String(rating));
       setManagerSpinning(false);
     }, 820);
   }
@@ -720,7 +1005,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     }
     const nextSpinsLeft = managerSpinsLeft - 1;
     setManagerSpinsLeft(nextSpinsLeft);
-    window.localStorage.setItem(managerSpinsKey, String(nextSpinsLeft));
+    window.localStorage.setItem(profileStorageKey(managerSpinsKey, profile), String(nextSpinsLeft));
     runManagerSpin();
   }
 
@@ -751,6 +1036,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     seasonAdvanceLockRef.current = false;
     activeSeasonIdRef.current = null;
     pendingSeasonCompletionRef.current = null;
+    setSeasonCompletionPending(false);
     setExpertUnlockedThisRun(false);
     setPhase(nextPhase);
   }
@@ -802,7 +1088,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     setSlotPickerCandidateId(null);
     setSpinning(true);
     const nextUsedPlayerIds = new Set(nextPicks.map((pick) => pick.player.i));
-    const seed = `${Date.now()}:${nextPicks.length}:${formationId}`;
+    const seed = `draft:${formationId}:${nextPicks.map((pick) => pick.player.i).join("-")}`;
     window.setTimeout(() => {
       setSpin(spinForOpenSlots(nextOpenSlots, nextUsedPlayerIds, seed));
       setSpinning(false);
@@ -910,6 +1196,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
       seasonAdvanceLockRef.current = false;
       activeSeasonIdRef.current = null;
       pendingSeasonCompletionRef.current = null;
+      setSeasonCompletionPending(false);
       try {
         attemptId = await createInvincibleAttempt();
       } catch {
@@ -1108,7 +1395,9 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
         wins: human.wins,
         draws: human.draws,
         losses: human.losses,
-        goalDifference: human.goalDifference
+        goalDifference: human.goalDifference,
+        goalsFor: human.goalsFor,
+        finalPosition: completedStandings.findIndex((standing) => standing.managerId === "human") + 1
       })
     });
     if (!response.ok) {
@@ -1130,7 +1419,14 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     };
     recordGuestPlayIfNeeded();
     saveCommunitySquad(finalizedSeason.managers.find((manager) => manager.id === "human"));
+    recordCompletedCompetition({
+      managers: finalizedSeason.managers,
+      standings: finalStandings,
+      competitionMode: "invincible",
+      runId: finalizedSeason.attemptId || finalizedSeason.id
+    });
     pendingSeasonCompletionRef.current = null;
+    setSeasonCompletionPending(false);
     setSeason(finalizedSeason);
     setSeasonDecision(null);
     setSeasonAutoplayError("");
@@ -1156,7 +1452,8 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
           fixture,
           home,
           away,
-          seed: `${season.id}:${fixture.id}:${nextResults.length}`
+          seed: `${season.id}:${fixture.id}:${nextResults.length}`,
+          ...invincibleContenderModifiers(fixture, season.managers)
         })
       );
     });
@@ -1189,6 +1486,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
 
     if (nextMatchday >= season.rounds.length) {
       pendingSeasonCompletionRef.current = nextSeason;
+      setSeasonCompletionPending(true);
       await finalizeInvincibleSeason(nextSeason);
       return;
     }
@@ -1285,36 +1583,71 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     })();
   }
 
+  function retryCompletedResultSync() {
+    const pending = pendingResultSyncRef.current;
+    if (pending) {
+      void syncCompletedResult(pending);
+    }
+  }
+
+  function recordCompletedCompetition(params: {
+    managers: ManagerSquad[];
+    standings: ReturnType<typeof computeStandings>;
+    competitionMode: CompetitionMode;
+    runId: string;
+  }) {
+    const runKey = `${params.competitionMode}:${params.runId}`;
+    if (recordedRunIdsRef.current.has(runKey)) {
+      setResultSyncStatus("saved");
+      setResultSyncMessage("This completed run is already in your progress.");
+      return;
+    }
+
+    const completedAt = new Date().toISOString();
+    const canonicalProfile = profile && !profile.demo ? profile : null;
+    const records = recordsFromLeague({
+      managers: params.managers,
+      standings: params.standings,
+      completedAt,
+      competitionMode: params.competitionMode,
+      runId: params.runId
+    }).map((record) =>
+      canonicalProfile
+        ? {
+            ...record,
+            id: `${canonicalProfile.id}-${params.runId}`,
+            userId: canonicalProfile.id,
+            displayName: canonicalProfile.displayName
+          }
+        : record
+    );
+    recordedRunIdsRef.current.add(runKey);
+    setLeaderboardRecords((current) => {
+      const merged = mergeRunRecords(current, records);
+      leaderboardRecordsRef.current = merged;
+      window.localStorage.setItem(recordsStorageKey(profile), JSON.stringify(merged));
+      return merged;
+    });
+    void syncCompletedResult({ records, completedAt });
+  }
+
   function completeLeague(completedLeague: LeagueState) {
     const finalStandings = computeStandings(completedLeague.managers, completedLeague.results);
-    const completedAt = new Date().toISOString();
-    const newRecords = recordsFromLeague({
+    recordCompletedCompetition({
       managers: completedLeague.managers,
       standings: finalStandings,
-      completedAt
+      competitionMode: "minileague",
+      runId: completedLeague.id
     });
-    const mergedRecords = [...leaderboardRecords, ...newRecords];
-    setLeaderboardRecords(mergedRecords);
-    window.localStorage.setItem(recordsKey, JSON.stringify(mergedRecords));
-
-    // Best-effort: persist to the cross-user leaderboard. The server derives the
-    // identity from the verified token, so guests/demo profiles stay local-only.
-    if (profile && !profile.demo) {
-      void (async () => {
-        await fetch("/api/results", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", ...(await authHeaders()) },
-          body: JSON.stringify({ records: newRecords, completedAt })
-        });
-      })().catch(() => undefined);
-    }
     const nextCompletedLeagues = completedLeagues + 1;
     setCompletedLeagues(nextCompletedLeagues);
-    window.localStorage.setItem(completedLeaguesKey, String(nextCompletedLeagues));
+    window.localStorage.setItem(profileStorageKey(completedLeaguesKey, profile), String(nextCompletedLeagues));
 
     const human = finalStandings.find((standing) => standing.managerId === "human");
     if (human) {
-      const currentScore = Number(window.localStorage.getItem(managerScoreKey) ?? managerScore);
+      const currentScore = Number(
+        window.localStorage.getItem(profileStorageKey(managerScoreKey, profile)) ?? managerScore
+      );
       const wonTitle = finalStandings[0]?.managerId === "human";
       const delta = scoreDeltaForStanding(human, wonTitle);
       const nextScore = Math.max(MIN_MANAGER_SCORE, currentScore + delta);
@@ -1324,8 +1657,8 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
       setLastScoreDelta(delta);
       setExpertUnlockedEarned(nextExpert);
       setExpertUnlockedThisRun(!wasExpert && nextExpert);
-      window.localStorage.setItem(managerScoreKey, String(nextScore));
-      window.localStorage.setItem(expertUnlockedKey, String(nextExpert));
+      window.localStorage.setItem(profileStorageKey(managerScoreKey, profile), String(nextScore));
+      window.localStorage.setItem(profileStorageKey(expertUnlockedKey, profile), String(nextExpert));
     }
 
     recordGuestPlayIfNeeded();
@@ -1490,7 +1823,11 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     if (!human || !opponent) {
       return;
     }
-    playExhibition(human, opponent, "invincible_complete");
+    playExhibition(
+      { ...human, managerRating: selectedManager?.rating ?? human.managerRating },
+      opponent,
+      "invincible_complete"
+    );
   }
 
   function finishExhibitionNow() {
@@ -1600,6 +1937,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     const supabase = getSupabaseBrowserClient();
     await supabase?.auth.signOut();
     setProfile(null);
+    hydrateLocalProgress(null);
     setIsAdmin(false);
     window.localStorage.removeItem(profileKey);
     setAuthEmail("");
@@ -1816,6 +2154,15 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
           entries={leaderboard}
           period={leaderboardPeriod}
           setPeriod={setLeaderboardPeriod}
+          metric={leaderboardMetric}
+          competitionMode={leaderboardCompetitionMode}
+          setCompetitionMode={setLeaderboardCompetitionMode}
+          setMetric={(metric) => {
+            setLeaderboardMetric(metric);
+            if (metric === "titles") {
+              setLeaderboardPeriod("all_time");
+            }
+          }}
           copy={copy}
           profileId={profile && !profile.demo ? profile.id : null}
         />
@@ -1825,7 +2172,6 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
         <PersonalProgressScreen
           records={leaderboardRecords}
           managerScore={managerScore}
-          completedLeagues={completedLeagues}
           expertUnlocked={expertUnlocked}
         />
       )}
@@ -2364,7 +2710,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                     }}
                     onStart={playSeasonMatchAndAdvance}
                     onToggleAutoplay={() => setSeasonAutoplayPaused((paused) => !paused)}
-                    canStart={(pendingSeasonCompletionRef.current !== null || canKickOffSeasonMatch()) && seasonAutoplayStatus !== "saving"}
+                    canStart={(seasonCompletionPending || canKickOffSeasonMatch()) && seasonAutoplayStatus !== "saving"}
                   />
                 )}
               </div>
@@ -2407,7 +2753,12 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
           <div className="panel intro-panel">
             <p className="eyebrow">League complete</p>
             <h2>{humanStanding ? `${humanStanding.points} points from five games` : "Final whistle"}</h2>
-            <p>Your cumulative leaderboard score has been recorded for daily, weekly and monthly tables.</p>
+            <p>Your Mini League points and any league win now count toward separate leaderboards.</p>
+            <ResultSyncNotice
+              status={resultSyncStatus}
+              message={resultSyncMessage}
+              onRetry={retryCompletedResultSync}
+            />
             <div className={`score-change-card${expertUnlockedThisRun ? " unlocked" : ""}`}>
               <div>
                 <span>Manager score</span>
@@ -2466,6 +2817,11 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
               Final record: {seasonHumanStanding?.wins ?? 0}W-{seasonHumanStanding?.draws ?? 0}D-{seasonHumanStanding?.losses ?? 0}L,
               {" "}{seasonHumanStanding?.points ?? 0} points, GD {seasonHumanStanding?.goalDifference ?? 0}.
             </p>
+            <ResultSyncNotice
+              status={resultSyncStatus}
+              message={resultSyncMessage}
+              onRetry={retryCompletedResultSync}
+            />
             <div className={`score-change-card${season.officialAward && season.awardProduction !== false ? " unlocked" : ""}`}>
               <div>
                 <span>Unbeaten</span>
@@ -3507,18 +3863,50 @@ function SeasonStatusPanel({ season }: { season: InvincibleSeason }) {
   );
 }
 
+function ResultSyncNotice({
+  status,
+  message,
+  onRetry
+}: {
+  status: ResultSyncStatus;
+  message: string;
+  onRetry: () => void;
+}) {
+  if (status === "idle") {
+    return null;
+  }
+  return (
+    <div className={`result-sync-notice ${status}`} role="status" aria-live="polite">
+      <span>{message}</span>
+      {status === "failed" && (
+        <button className="secondary-button" type="button" onClick={onRetry}>
+          Retry account sync
+        </button>
+      )}
+    </div>
+  );
+}
+
 const VISIBLE_LEADERBOARD_ROWS = 15;
 
 function LeaderboardsScreen({
   entries,
   period,
   setPeriod,
+  metric,
+  setMetric,
+  competitionMode,
+  setCompetitionMode,
   copy,
   profileId
 }: {
   entries: ReturnType<typeof aggregateLeaderboard>;
   period: Period;
   setPeriod: (period: Period) => void;
+  metric: LeaderboardMetric;
+  setMetric: (metric: LeaderboardMetric) => void;
+  competitionMode: CompetitionMode;
+  setCompetitionMode: (mode: CompetitionMode) => void;
   copy: Copy;
   profileId: string | null;
 }) {
@@ -3532,7 +3920,8 @@ function LeaderboardsScreen({
     ? playerEntries.reduce((best, entry) => (entry.rank < best.rank ? entry : best))
     : null;
   const playerVisible = playerBest ? playerBest.rank <= VISIBLE_LEADERBOARD_ROWS : false;
-  const periodLabel = period[0].toUpperCase() + period.slice(1);
+  const periodLabel = copy[period];
+  const pointsLabel = competitionMode === "invincible" ? copy.invinciblePoints : copy.pointsRace;
 
   return (
     <section className="leaderboards-screen">
@@ -3540,13 +3929,39 @@ function LeaderboardsScreen({
         <div className="panel-header">
           <div>
             <p className="eyebrow">{copy.leaderboard}</p>
-            <h2>{periodLabel} rankings</h2>
+            <h2>{periodLabel} {metric === "titles" ? copy.leagueWins : pointsLabel}</h2>
           </div>
           <Trophy size={22} />
         </div>
 
-        <div className="segmented segmented-lg">
-          {(["daily", "weekly", "monthly"] as Period[]).map((item) => (
+        <div className="segmented segmented-lg leaderboard-metric-switch" aria-label="Leaderboard type">
+          <button
+            className={metric === "points" && competitionMode === "minileague" ? "active" : ""}
+            type="button"
+            onClick={() => {
+              setCompetitionMode("minileague");
+              setMetric("points");
+            }}
+          >
+            {copy.pointsRace}
+          </button>
+          <button
+            className={metric === "points" && competitionMode === "invincible" ? "active" : ""}
+            type="button"
+            onClick={() => {
+              setCompetitionMode("invincible");
+              setMetric("points");
+            }}
+          >
+            {copy.invinciblePoints}
+          </button>
+          <button className={metric === "titles" ? "active" : ""} type="button" onClick={() => setMetric("titles")}>
+            {copy.leagueWins}
+          </button>
+        </div>
+
+        <div className="segmented leaderboard-period-switch" aria-label="Leaderboard period">
+          {(["daily", "weekly", "monthly", "all_time"] as Period[]).map((item) => (
             <button className={period === item ? "active" : ""} key={item} type="button" onClick={() => setPeriod(item)}>
               {copy[item]}
             </button>
@@ -3561,9 +3976,19 @@ function LeaderboardsScreen({
               <strong>{playerBest.displayName}</strong>
             </div>
             <div className="your-rank-stats">
-              <div><span>Pts</span><strong>{playerBest.matchPoints}</strong></div>
-              <div><span>GD</span><strong>{playerBest.goalDifference}</strong></div>
-              <div><span>GF</span><strong>{playerBest.goalsFor}</strong></div>
+              {metric === "titles" ? (
+                <>
+                  <div><span>Wins</span><strong>{playerBest.leagueTitles}</strong></div>
+                  <div><span>Invincible</span><strong>{playerBest.invincibleTitles}</strong></div>
+                  <div><span>Mini</span><strong>{playerBest.miniLeagueTitles}</strong></div>
+                </>
+              ) : (
+                <>
+                  <div><span>Pts</span><strong>{playerBest.matchPoints}</strong></div>
+                  <div><span>GD</span><strong>{playerBest.goalDifference}</strong></div>
+                  <div><span>GF</span><strong>{playerBest.goalsFor}</strong></div>
+                </>
+              )}
             </div>
           </div>
         )}
@@ -3575,17 +4000,17 @@ function LeaderboardsScreen({
             <div className="lb-row lb-head" role="row">
               <span role="columnheader">#</span>
               <span role="columnheader">Manager</span>
-              <span role="columnheader">Pts</span>
-              <span role="columnheader">GD</span>
-              <span role="columnheader">GF</span>
+              <span role="columnheader">{metric === "titles" ? "Wins" : "Pts"}</span>
+              <span role="columnheader">{metric === "titles" ? "Inv" : "GD"}</span>
+              <span role="columnheader">{metric === "titles" ? "Mini" : "GF"}</span>
             </div>
             {visible.map((entry) => (
               <div className={`lb-row${isPlayer(entry) ? " is-you" : ""}${entry.rank <= 3 ? ` podium p${entry.rank}` : ""}`} role="row" key={entry.id}>
                 <span className="lb-rank" role="cell">{entry.rank <= 3 ? ["🥇", "🥈", "🥉"][entry.rank - 1] : entry.rank}</span>
                 <strong role="cell">{entry.displayName}{isPlayer(entry) ? <span className="you-tag">YOU</span> : null}</strong>
-                <span role="cell">{entry.matchPoints}</span>
-                <span role="cell">{entry.goalDifference}</span>
-                <span role="cell">{entry.goalsFor}</span>
+                <span role="cell">{metric === "titles" ? entry.leagueTitles : entry.matchPoints}</span>
+                <span role="cell">{metric === "titles" ? entry.invincibleTitles : entry.goalDifference}</span>
+                <span role="cell">{metric === "titles" ? entry.miniLeagueTitles : entry.goalsFor}</span>
               </div>
             ))}
             {playerBest && !playerVisible && (
@@ -3594,49 +4019,59 @@ function LeaderboardsScreen({
                 <div className="lb-row is-you" role="row" key={`you-${playerBest.id}`}>
                   <span className="lb-rank" role="cell">{playerBest.rank}</span>
                   <strong role="cell">{playerBest.displayName}<span className="you-tag">YOU</span></strong>
-                  <span role="cell">{playerBest.matchPoints}</span>
-                  <span role="cell">{playerBest.goalDifference}</span>
-                  <span role="cell">{playerBest.goalsFor}</span>
+                  <span role="cell">{metric === "titles" ? playerBest.leagueTitles : playerBest.matchPoints}</span>
+                  <span role="cell">{metric === "titles" ? playerBest.invincibleTitles : playerBest.goalDifference}</span>
+                  <span role="cell">{metric === "titles" ? playerBest.miniLeagueTitles : playerBest.goalsFor}</span>
                 </div>
               </>
             )}
           </div>
         )}
-        <p className="fine-print">Ranked by points, then goal difference, goals scored, titles and strength of schedule. Tables reset {period === "daily" ? "every day" : period === "weekly" ? "every Monday" : "on the 1st"}.</p>
+        <p className="fine-print">
+          {metric === "titles"
+            ? "League wins combine Mini League and Invincible championships; the split is shown in the final columns."
+            : competitionMode === "invincible"
+              ? "Invincible seasons are ranked separately by their 38-match points, goal difference and goals scored."
+              : "Mini League points are ranked separately by points, goal difference and goals scored."}
+          {period !== "all_time" ? ` This table resets ${period === "daily" ? "every day" : period === "weekly" ? "every Monday" : "on the 1st"}.` : ""}
+        </p>
       </div>
     </section>
   );
 }
 
-const PERSONAL_PERIODS: Period[] = ["daily", "weekly", "monthly"];
-
 function PersonalProgressScreen({
   records,
   managerScore,
-  completedLeagues,
   expertUnlocked
 }: {
   records: LeaderboardRecord[];
   managerScore: number;
-  completedLeagues: number;
   expertUnlocked: boolean;
 }) {
   const personalRecords = records.filter((record) => record.kind === "human");
-  const totalPoints = personalRecords.reduce((sum, record) => sum + record.matchPoints, 0);
+  const miniRecords = personalRecords.filter((record) => record.competitionMode !== "invincible");
+  const invincibleRecords = personalRecords.filter((record) => record.competitionMode === "invincible");
+  const miniPoints = miniRecords.reduce((sum, record) => sum + record.matchPoints, 0);
+  const invinciblePoints = invincibleRecords.reduce((sum, record) => sum + record.matchPoints, 0);
   const totalGoalDifference = personalRecords.reduce((sum, record) => sum + record.goalDifference, 0);
   const totalGoalsFor = personalRecords.reduce((sum, record) => sum + record.goalsFor, 0);
   const totalTitles = personalRecords.reduce((sum, record) => sum + record.leagueTitles, 0);
-  const averagePoints = personalRecords.length ? (totalPoints / personalRecords.length).toFixed(1) : "0.0";
-  const bestPoints = bestRecordBy(personalRecords, (record) => record.matchPoints);
+  const miniTitles = miniRecords.reduce((sum, record) => sum + record.leagueTitles, 0);
+  const invincibleTitles = invincibleRecords.reduce((sum, record) => sum + record.leagueTitles, 0);
+  const bestMiniPoints = bestRecordBy(miniRecords, (record) => record.matchPoints);
+  const bestSeasonPoints = bestRecordBy(invincibleRecords, (record) => record.matchPoints);
   const bestGoalDifference = bestRecordBy(personalRecords, (record) => record.goalDifference);
-  const bestGoalsFor = bestRecordBy(personalRecords, (record) => record.goalsFor);
+  const bestFinish = personalRecords.reduce<LeaderboardRecord | null>(
+    (best, record) =>
+      record.finalPosition !== null && (!best || best.finalPosition === null || record.finalPosition < best.finalPosition)
+        ? record
+        : best,
+    null
+  );
   const recentRuns = [...personalRecords]
     .sort((first, second) => new Date(second.completedAt).getTime() - new Date(first.completedAt).getTime())
     .slice(0, 5);
-  const periodRanks = PERSONAL_PERIODS.map((period) => ({
-    period,
-    entry: aggregateLeaderboard(personalRecords, period).find((entry) => entry.kind === "human")
-  }));
 
   return (
     <section className="personal-screen">
@@ -3651,56 +4086,55 @@ function PersonalProgressScreen({
 
         <div className="personal-hero">
           <div>
-            <span>Manager score</span>
+            <span>Device draft rating</span>
             <strong>{managerScore}</strong>
-            <p>{expertUnlocked ? "Expert drafting unlocked." : `${Math.max(0, EXPERT_SCORE_THRESHOLD - managerScore)} score to expert mode.`}</p>
+            <p>{expertUnlocked ? "Expert drafting unlocked on this device." : `${Math.max(0, EXPERT_SCORE_THRESHOLD - managerScore)} rating to expert mode on this device.`}</p>
           </div>
           <div>
             <span>Mini leagues</span>
-            <strong>{completedLeagues}</strong>
-            <p>{personalRecords.length} recorded run{personalRecords.length === 1 ? "" : "s"} in your history.</p>
+            <strong>{miniRecords.length}</strong>
+            <p>{miniTitles} league win{miniTitles === 1 ? "" : "s"} recorded.</p>
+          </div>
+          <div>
+            <span>Invincible seasons</span>
+            <strong>{invincibleRecords.length}</strong>
+            <p>{invincibleTitles} league title{invincibleTitles === 1 ? "" : "s"} won.</p>
           </div>
         </div>
 
         <div className="personal-stat-grid">
-          <PersonalStat label="All-time points" value={totalPoints} />
+          <PersonalStat label="Mini league points" value={miniPoints} />
+          <PersonalStat label="Invincible points" value={invinciblePoints} />
+          <PersonalStat label="League wins" value={totalTitles} />
+          <PersonalStat label="Completed runs" value={personalRecords.length} />
           <PersonalStat label="Goal difference" value={signedNumber(totalGoalDifference)} />
           <PersonalStat label="Goals scored" value={totalGoalsFor} />
-          <PersonalStat label="Titles" value={totalTitles} />
-          <PersonalStat label="Average points" value={averagePoints} />
-          <PersonalStat label="Best points" value={bestPoints?.matchPoints ?? "-"} />
         </div>
 
         <div className="personal-grid">
           <div className="personal-card">
             <p className="eyebrow">Best of all time</p>
             <div className="personal-best-grid">
-              <PersonalBest label="Best run" value={bestPoints ? `${bestPoints.matchPoints} pts` : "-"} note={bestPoints ? formatShortDate(bestPoints.completedAt) : "No run yet"} />
-              <PersonalBest label="Best GD" value={bestGoalDifference ? signedNumber(bestGoalDifference.goalDifference) : "-"} note={bestGoalDifference ? `${bestGoalDifference.matchPoints} pts` : "No run yet"} />
-              <PersonalBest label="Most goals" value={bestGoalsFor?.goalsFor ?? "-"} note={bestGoalsFor ? `${bestGoalsFor.matchPoints} pts` : "No run yet"} />
-              <PersonalBest label="Best finish" value={totalTitles > 0 ? `${totalTitles} title${totalTitles === 1 ? "" : "s"}` : "-"} note={totalTitles > 0 ? "Champion run recorded" : "No title yet"} />
+              <PersonalBest label="Best Mini League" value={bestMiniPoints ? `${bestMiniPoints.matchPoints} pts` : "-"} note={bestMiniPoints ? formatShortDate(bestMiniPoints.completedAt) : "No Mini League yet"} />
+              <PersonalBest label="Best Invincible season" value={bestSeasonPoints ? `${bestSeasonPoints.matchPoints} pts` : "-"} note={bestSeasonPoints ? formatShortDate(bestSeasonPoints.completedAt) : "No season yet"} />
+              <PersonalBest label="Best GD" value={bestGoalDifference ? signedNumber(bestGoalDifference.goalDifference) : "-"} note={bestGoalDifference ? `${bestGoalDifference.competitionMode === "invincible" ? "Invincible" : "Mini League"}` : "No run yet"} />
+              <PersonalBest label="Best finish" value={bestFinish?.finalPosition ? ordinal(bestFinish.finalPosition) : "-"} note={bestFinish?.leagueTitles ? "Champion" : bestFinish ? "Recorded finish" : "No finish yet"} />
             </div>
           </div>
 
           <div className="personal-card">
-            <p className="eyebrow">Current ranks</p>
+            <p className="eyebrow">Competition record</p>
             <div className="period-rank-grid">
-              {periodRanks.map(({ period, entry }) => (
-                <div className="period-rank-row" key={period}>
-                  <span>{period}</span>
-                  {entry ? (
-                    <>
-                      <strong>#{entry.rank}</strong>
-                      <small>{entry.matchPoints} pts / GD {signedNumber(entry.goalDifference)}</small>
-                    </>
-                  ) : (
-                    <>
-                      <strong>-</strong>
-                      <small>No run in this period</small>
-                    </>
-                  )}
-                </div>
-              ))}
+              <div className="period-rank-row">
+                <span>Mini League</span>
+                <strong>{miniTitles}</strong>
+                <small>{miniRecords.length} run{miniRecords.length === 1 ? "" : "s"} · {miniPoints} pts</small>
+              </div>
+              <div className="period-rank-row">
+                <span>Invincible</span>
+                <strong>{invincibleTitles}</strong>
+                <small>{invincibleRecords.length} season{invincibleRecords.length === 1 ? "" : "s"} · {invinciblePoints} pts</small>
+              </div>
             </div>
           </div>
         </div>
@@ -3708,15 +4142,16 @@ function PersonalProgressScreen({
         <div className="personal-card">
           <p className="eyebrow">Recent runs</p>
           {recentRuns.length === 0 ? (
-            <p className="muted personal-empty">Complete a mini league to start building your personal history.</p>
+            <p className="muted personal-empty">Complete a Mini League or Invincible season to start building your history.</p>
           ) : (
             <div className="recent-run-list">
               {recentRuns.map((record) => (
                 <div className="recent-run-row" key={record.id}>
-                  <strong>{record.matchPoints} pts</strong>
+                  <strong>{record.competitionMode === "invincible" ? "Invincible" : "Mini League"}</strong>
+                  <span>{record.matchPoints} pts</span>
                   <span>GD {signedNumber(record.goalDifference)}</span>
-                  <span>GF {record.goalsFor}</span>
-                  <span>{record.leagueTitles ? "Title" : "Run"}</span>
+                  <span>{record.finalPosition ? ordinal(record.finalPosition) : "Finished"}</span>
+                  <span>{record.leagueTitles ? "Champion" : `${record.gamesPlayed || "—"} games`}</span>
                   <small>{formatShortDate(record.completedAt)}</small>
                 </div>
               ))}

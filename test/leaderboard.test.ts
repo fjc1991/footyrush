@@ -10,6 +10,10 @@ describe("leaderboards", () => {
       userId: "a",
       displayName: "A",
       kind: "human",
+      competitionMode: "minileague",
+      runId: "run-a",
+      gamesPlayed: 5,
+      finalPosition: 2,
       periodAt: now.toISOString(),
       matchPoints: 9,
       goalDifference: 2,
@@ -23,6 +27,10 @@ describe("leaderboards", () => {
       userId: "b",
       displayName: "B",
       kind: "human",
+      competitionMode: "minileague",
+      runId: "run-b",
+      gamesPlayed: 5,
+      finalPosition: 3,
       periodAt: now.toISOString(),
       matchPoints: 9,
       goalDifference: 5,
@@ -37,6 +45,7 @@ describe("leaderboards", () => {
     expect(periodStart(now, "daily").toISOString()).toBe("2026-06-08T00:00:00.000Z");
     expect(periodStart(now, "weekly").toISOString()).toBe("2026-06-08T00:00:00.000Z");
     expect(periodStart(now, "monthly").toISOString()).toBe("2026-06-01T00:00:00.000Z");
+    expect(periodStart(now, "all_time").toISOString()).toBe("1970-01-01T00:00:00.000Z");
   });
 
   it("ranks cumulative points with goal difference tiebreak", () => {
@@ -68,8 +77,79 @@ describe("leaderboards", () => {
       matchPoints: 13,
       goalDifference: 3,
       goalsFor: 10,
+      gamesPlayed: 10,
+      runsCompleted: 2,
       rank: 1
     });
+  });
+
+  it("ranks championships before points on a title leaderboard", () => {
+    const leaderboard = aggregateLeaderboard(
+      [
+        { ...records[0], matchPoints: 15, leagueTitles: 0 },
+        { ...records[1], matchPoints: 4, leagueTitles: 1 }
+      ],
+      "all_time",
+      now,
+      "titles"
+    );
+
+    expect(leaderboard.map((entry) => entry.userId)).toEqual(["b", "a"]);
+  });
+
+  it("combines titles across formats while preserving the mode split", () => {
+    const leaderboard = aggregateLeaderboard(
+      [
+        { ...records[0], leagueTitles: 1 },
+        {
+          ...records[0],
+          id: "a-invincible",
+          runId: "run-a-invincible",
+          competitionMode: "invincible",
+          gamesPlayed: 38,
+          finalPosition: 1,
+          leagueTitles: 1
+        }
+      ],
+      "all_time",
+      now,
+      "titles"
+    );
+
+    expect(leaderboard[0]).toMatchObject({
+      leagueTitles: 2,
+      miniLeagueTitles: 1,
+      invincibleTitles: 1,
+      gamesPlayed: 43,
+      finalPosition: 1,
+      runsCompleted: 2
+    });
+  });
+
+  it("does not compare five-match and 38-match points when title totals tie", () => {
+    const leaderboard = aggregateLeaderboard(
+      [
+        { ...records[0], matchPoints: 15, leagueTitles: 1 },
+        {
+          ...records[1],
+          competitionMode: "invincible",
+          gamesPlayed: 38,
+          matchPoints: 95,
+          leagueTitles: 1
+        }
+      ],
+      "all_time",
+      now,
+      "titles"
+    );
+
+    expect(leaderboard.map((entry) => entry.userId)).toEqual(["a", "b"]);
+  });
+
+  it("includes old records throughout an all-time window", () => {
+    const old = { ...records[0], periodAt: "2020-01-01T00:00:00.000Z", completedAt: "2020-01-01T00:00:00.000Z" };
+    expect(aggregateLeaderboard([old], "daily", now)).toHaveLength(0);
+    expect(aggregateLeaderboard([old], "all_time", now)).toHaveLength(1);
   });
 
   it("creates records only for human managers", () => {
@@ -106,9 +186,22 @@ describe("leaderboards", () => {
       }
     ] as Standing[];
 
-    const leagueRecords = recordsFromLeague({ managers, standings, completedAt: now.toISOString() });
+    const leagueRecords = recordsFromLeague({
+      managers,
+      standings,
+      completedAt: now.toISOString(),
+      competitionMode: "invincible",
+      runId: "season-1"
+    });
 
     expect(leagueRecords).toHaveLength(1);
-    expect(leagueRecords[0]).toMatchObject({ userId: "human", leagueTitles: 0 });
+    expect(leagueRecords[0]).toMatchObject({
+      userId: "human",
+      leagueTitles: 0,
+      competitionMode: "invincible",
+      runId: "season-1",
+      gamesPlayed: 5,
+      finalPosition: 2
+    });
   });
 });

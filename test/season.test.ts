@@ -2,8 +2,11 @@ import { beforeAll, describe, expect, it } from "vitest";
 import rawData from "../data.json";
 import { seedFootballData } from "@/lib/game/data";
 import { autoDraftManager } from "@/lib/game/draft";
+import { createMinileague } from "@/lib/game/matchmaking";
 import {
   TEAM_TALK_EXPECTED_GOALS_BONUS,
+  INVINCIBLE_CONTENDER_XG_BONUS,
+  INVINCIBLE_MANAGER_RATING_CAP,
   applySeasonFixtureInjuries,
   applySeasonFixtureSuspensions,
   availableSeasonBench,
@@ -13,12 +16,13 @@ import {
   createSeasonPregame,
   decrementSeasonAbsences,
   decrementSeasonInjuries,
+  invincibleContenderModifiers,
   markSeasonTeamTalkUsed,
   managerForSeasonMatch,
   remainingSeasonTeamTalks,
   seasonMissingRequiredSubstitutions
 } from "@/lib/game/season";
-import { computeStandings, simulateFixture } from "@/lib/game/simulation";
+import { calculateSquadStrength, computeStandings, simulateFixture } from "@/lib/game/simulation";
 import type { FixtureResult, ManagerSquad, RawFootballData } from "@/lib/game/types";
 
 beforeAll(() => {
@@ -45,6 +49,7 @@ describe("Be Invincible season", () => {
     });
 
     expect(season.managers).toHaveLength(20);
+    expect(season.managers[0].managerRating).toBe(55);
     expect(season.rounds).toHaveLength(38);
     expect(season.rounds.every((round) => round.length === 10)).toBe(true);
     expect(season.rounds.filter((round) => round.some((fixture) => fixture.homeId === "human" || fixture.awayId === "human"))).toHaveLength(38);
@@ -157,6 +162,100 @@ describe("Be Invincible season", () => {
     expect(stale.map((pick) => pick.player.i)).toContain(starter.player.i);
     expect(duplicate).toHaveLength(1);
     expect(duplicate[0].player.i).toBe(secondStarter.player.i);
+  });
+
+  it("caps the appointed-manager advantage for the full-season challenge", () => {
+    const base = human("manager-cap-human");
+    const season = createInvincibleSeason({
+      humanPicks: base.picks,
+      humanName: "Tester",
+      formationId: base.formationId,
+      mode: "classic",
+      completedLeagues: 0,
+      mmr: 200,
+      managerRating: 100,
+      attemptId: "attempt-manager-cap",
+      seed: "season-manager-cap"
+    });
+
+    expect(season.managers[0].managerRating).toBe(INVINCIBLE_MANAGER_RATING_CAP);
+
+    const miniLeague = createMinileague({
+      humanPicks: base.picks,
+      humanName: "Tester",
+      formationId: base.formationId,
+      mode: "classic",
+      completedLeagues: 0,
+      mmr: 200,
+      managerRating: 100,
+      seed: "mini-manager-uncapped"
+    });
+    expect(miniLeague.managers[0].managerRating).toBe(100);
+  });
+
+  it("backs the two strongest title challengers only against the AI field", () => {
+    const base = human("contender-human");
+    const eliteHuman = {
+      ...base,
+      picks: base.picks.map((pick) => ({ ...pick, effectiveRating: Math.max(pick.effectiveRating, 96) }))
+    };
+    const opponents = Array.from({ length: 4 }, (_, index) =>
+      autoDraftManager({
+        id: `contender-${index + 1}`,
+        displayName: `Contender ${index + 1}`,
+        formationId: "4-3-3",
+        seed: `contender-opponent-${index}`
+      })
+    );
+    const managers = [eliteHuman, ...opponents];
+    const ranked = [...opponents].sort(
+      (first, second) =>
+        calculateSquadStrength(second).overall - calculateSquadStrength(first).overall || first.id.localeCompare(second.id)
+    );
+    const contender = ranked[0];
+    const other = ranked[2];
+
+    expect(
+      invincibleContenderModifiers(
+        { id: "human-fixture", round: 1, homeId: "human", awayId: contender.id },
+        managers
+      )
+    ).toEqual({ homeExpectedGoalsModifier: 0, awayExpectedGoalsModifier: 0 });
+    expect(
+      invincibleContenderModifiers(
+        { id: "contender-fixture", round: 1, homeId: contender.id, awayId: ranked[1].id },
+        managers
+      )
+    ).toEqual({ homeExpectedGoalsModifier: 0, awayExpectedGoalsModifier: 0 });
+    expect(
+      invincibleContenderModifiers(
+        { id: "field-fixture", round: 1, homeId: contender.id, awayId: other.id },
+        managers
+      )
+    ).toEqual({ homeExpectedGoalsModifier: INVINCIBLE_CONTENDER_XG_BONUS, awayExpectedGoalsModifier: 0 });
+    expect(
+      invincibleContenderModifiers(
+        { id: "away-contender", round: 1, homeId: other.id, awayId: contender.id },
+        managers
+      )
+    ).toEqual({ homeExpectedGoalsModifier: 0, awayExpectedGoalsModifier: INVINCIBLE_CONTENDER_XG_BONUS });
+    expect(
+      invincibleContenderModifiers(
+        { id: "field-only", round: 1, homeId: ranked[2].id, awayId: ranked[3].id },
+        managers
+      )
+    ).toEqual({ homeExpectedGoalsModifier: 0, awayExpectedGoalsModifier: 0 });
+
+    const outmatchedHuman = {
+      ...base,
+      picks: base.picks.map((pick) => ({ ...pick, effectiveRating: Math.min(pick.effectiveRating, 60) }))
+    };
+    expect(
+      invincibleContenderModifiers(
+        { id: "natural-pressure", round: 1, homeId: contender.id, awayId: other.id },
+        [outmatchedHuman, ...opponents]
+      )
+    ).toEqual({ homeExpectedGoalsModifier: 0, awayExpectedGoalsModifier: 0 });
   });
 
   it("limits team talks to one per half of the season", () => {

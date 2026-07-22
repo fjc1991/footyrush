@@ -3759,7 +3759,7 @@ p {
 
 .personal-hero {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
   margin-bottom: 14px;
 }
@@ -3861,7 +3861,7 @@ p {
 
 .period-rank-row {
   display: grid;
-  grid-template-columns: 76px 56px 1fr;
+  grid-template-columns: 110px 56px 1fr;
   align-items: center;
   gap: 10px;
   padding: 10px 12px;
@@ -3879,7 +3879,7 @@ p {
 
 .recent-run-row {
   display: grid;
-  grid-template-columns: 90px repeat(3, minmax(56px, 1fr)) 80px;
+  grid-template-columns: minmax(104px, 1.25fr) repeat(4, minmax(64px, 1fr)) 80px;
   align-items: center;
   gap: 8px;
   padding: 10px 12px;
@@ -3911,6 +3911,37 @@ p {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+.leaderboard-metric-switch {
+  margin-bottom: 10px;
+}
+
+.leaderboard-period-switch {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-bottom: 16px;
+}
+
+.result-sync-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--accent) 44%, transparent);
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--accent) 10%, var(--panel));
+  color: var(--text);
+  font-weight: 750;
+}
+
+.result-sync-notice.failed {
+  border-color: color-mix(in srgb, var(--danger) 56%, transparent);
+  background: color-mix(in srgb, var(--danger) 10%, var(--panel));
+}
+
+.result-sync-notice .secondary-button {
+  flex: 0 0 auto;
 }
 
 @media (max-width: 1120px) {

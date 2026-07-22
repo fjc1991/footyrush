@@ -18,6 +18,8 @@ interface CompletionBody {
   draws?: number;
   losses?: number;
   goalDifference?: number;
+  goalsFor?: number;
+  finalPosition?: number;
 }
 
 interface NormalizedResult {
@@ -26,6 +28,8 @@ interface NormalizedResult {
   losses: number;
   points: number;
   goalDifference: number;
+  goalsFor: number | null;
+  finalPosition: number | null;
   /** Server-recomputed: a genuine, complete, loss-free season. */
   unbeaten: boolean;
 }
@@ -35,19 +39,39 @@ interface NormalizedResult {
  * and only honour it when the figures describe a *complete* 38-game season with
  * internally consistent points (W*3 + D). Anything else cannot earn an award.
  */
-function normalizeResult(body: CompletionBody): NormalizedResult {
-  const wins = Math.max(0, Math.round(body.wins ?? 0));
-  const draws = Math.max(0, Math.round(body.draws ?? 0));
-  const losses = Math.max(0, Math.round(body.losses ?? 0));
-  const goalDifference = Math.round(body.goalDifference ?? 0);
-  const points = Math.max(0, Math.round(body.points ?? 0));
+function integerInRange(value: unknown, minimum: number, maximum: number): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= minimum && value <= maximum;
+}
+
+function normalizeResult(body: CompletionBody): NormalizedResult | null {
+  const legacyShape = body.goalsFor === undefined && body.finalPosition === undefined;
+  if (
+    !integerInRange(body.wins, 0, SEASON_GAMES) ||
+    !integerInRange(body.draws, 0, SEASON_GAMES) ||
+    !integerInRange(body.losses, 0, SEASON_GAMES) ||
+    !integerInRange(body.points, 0, SEASON_GAMES * 3) ||
+    !integerInRange(body.goalDifference, -300, 300) ||
+    (!legacyShape && !integerInRange(body.goalsFor, 0, 300)) ||
+    (!legacyShape && !integerInRange(body.finalPosition, 1, 20))
+  ) {
+    return null;
+  }
+
+  const { wins, draws, losses, points, goalDifference } = body;
+  const goalsFor = legacyShape ? null : body.goalsFor as number;
+  const finalPosition = legacyShape ? null : body.finalPosition as number;
 
   const totalGames = wins + draws + losses;
   const pointsConsistent = points === wins * 3 + draws;
   const seasonComplete = totalGames === SEASON_GAMES;
+  const goalDifferenceConsistent = goalsFor === null || goalsFor - goalDifference >= 0;
+  const championPointsPlausible = finalPosition !== 1 || points >= SEASON_GAMES;
+  if (!seasonComplete || !pointsConsistent || !goalDifferenceConsistent || !championPointsPlausible) {
+    return null;
+  }
   const unbeaten = seasonComplete && losses === 0 && pointsConsistent;
 
-  return { wins, draws, losses, points, goalDifference, unbeaten };
+  return { wins, draws, losses, points, goalDifference, goalsFor, finalPosition, unbeaten };
 }
 
 export async function POST(request: NextRequest, context: { params: Promise<{ attemptId: string }> }) {
@@ -59,6 +83,9 @@ export async function POST(request: NextRequest, context: { params: Promise<{ at
   const { attemptId } = await context.params;
   const body = (await request.json().catch(() => ({}))) as CompletionBody;
   const result = normalizeResult(body);
+  if (!result) {
+    return NextResponse.json({ error: "A complete, internally consistent 38-match result is required." }, { status: 400 });
+  }
   const completedAt = new Date().toISOString();
   const supabase = getSupabaseServiceClient();
   const userId = await getAuthenticatedUserId(request);
@@ -76,7 +103,14 @@ export async function POST(request: NextRequest, context: { params: Promise<{ at
       return NextResponse.json({ officialAward: Boolean(attempt.officialAward), production: false, alreadyCompleted: true });
     }
     const officialAward = officialInvincibleAward(attempt.eligible, result.unbeaten);
-    store.attempts.set(attemptId, { ...attempt, completedAt, unbeaten: result.unbeaten, officialAward });
+    store.attempts.set(attemptId, {
+      ...attempt,
+      completedAt,
+      unbeaten: result.unbeaten,
+      officialAward,
+      goalsFor: result.goalsFor ?? undefined,
+      finalPosition: result.finalPosition ?? undefined
+    });
     return NextResponse.json({ officialAward, unbeaten: result.unbeaten, production: false });
   }
 
@@ -124,7 +158,9 @@ export async function POST(request: NextRequest, context: { params: Promise<{ at
       wins: result.wins,
       draws: result.draws,
       losses: result.losses,
-      goal_difference: result.goalDifference
+      goal_difference: result.goalDifference,
+      goals_for: result.goalsFor,
+      final_position: result.finalPosition
     })
     .eq("id", attemptId)
     .is("completed_at", null) // guard against a concurrent double-complete race

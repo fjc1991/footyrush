@@ -9,6 +9,8 @@ export interface LocalInvincibleAttempt {
   completedAt?: string;
   unbeaten?: boolean;
   officialAward?: boolean;
+  goalsFor?: number;
+  finalPosition?: number;
 }
 
 interface LocalInvincibleStore {

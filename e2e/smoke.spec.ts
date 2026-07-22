@@ -32,5 +32,19 @@ test("home renders without runtime errors and both modes are selectable", async 
   // Setup chrome is present (manager shuffle is part of the draft setup flow).
   await expect(page.getByRole("button", { name: /Shuffle manager/i })).toBeVisible();
 
+  // Competition history surfaces mount and the new title board stays separate
+  // from the five-match points ranking.
+  await page.getByRole("button", { name: "Leaderboards", exact: true }).click();
+  await expect(page.getByRole("heading", { name: /Daily Mini league points/i })).toBeVisible();
+  await page.getByRole("button", { name: "League wins", exact: true }).click();
+  await expect(page.getByRole("heading", { name: /All time League wins/i })).toBeVisible();
+  await expect(page.getByRole("button", { name: "All time", exact: true })).toHaveClass(/active/);
+  await page.getByRole("button", { name: "Invincible points", exact: true }).click();
+  await expect(page.getByRole("heading", { name: /All time Invincible points/i })).toBeVisible();
+
+  await page.getByRole("button", { name: "My progress", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Your progress", exact: true })).toBeVisible();
+  await expect(page.getByText("Invincible seasons", { exact: true })).toBeVisible();
+
   expect(pageErrors, `Unexpected runtime errors: ${pageErrors.join("; ")}`).toEqual([]);
 });

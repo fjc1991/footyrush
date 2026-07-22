@@ -22,6 +22,10 @@ the last deploy:
   `manager_id` and updates the signup trigger to use the display-name fallback
   order `display_name` → `full_name` → `name` → email local-part. An explicit
   `manager_id` supplied by password registration is still preserved.
+- `0009_competition_progress.sql` — adds mode-aware, idempotent completed-run
+  history for Mini League and Invincible, plus title-board fields. It also
+  recovers points/GD for older authenticated Invincible attempts without
+  guessing historical league titles that were never stored.
 
 ```bash
 # via Supabase CLI (or paste into the SQL editor in order)
@@ -83,11 +87,14 @@ Defined per route via `lib/server/rate-limit.ts`:
 - **Invincible awards** are recomputed server-side: an award requires a complete
   38-game season with `losses === 0` and internally consistent points. The
   client's `unbeaten` flag is ignored. Completion is replay-safe (idempotent) and
-  bound to the participant (guest IP / profile id).
+  bound to the participant (guest IP / profile id). The validated attempt also
+  stores its reported goals and final table position so progress and league wins are
+  written durably without a second unbound title claim.
 - **Security headers** (CSP, HSTS, X-Frame-Options, X-Content-Type-Options,
   Referrer-Policy, Permissions-Policy) are set in `next.config.mjs`.
-- **Leaderboards** read `leaderboard_entries` and aggregate by period; completed
-  Mini-League runs by registered users persist via `POST /api/results`.
+- **Leaderboards** read immutable, mode-aware `leaderboard_entries`; Mini League
+  points stay separate from 38-match totals, while the League Wins board combines
+  only championship runs and shows the Mini/Invincible split.
 - **/api/health** now pings the database (503 when down).
 
 ## 5. Identity & trust model
@@ -133,7 +140,7 @@ otherwise Supabase returns `Unsupported provider: provider is not enabled`.
 Set `NEXT_PUBLIC_SUPABASE_URL` to exactly
 `https://gqiafshqonbhirtuzesp.supabase.co` with no leading/trailing whitespace.
 Check `SUPABASE_URL` too if it is set separately. Keep the existing anon and
-service-role keys in their matching variables, apply migration `0008`, then
+service-role keys in their matching variables, apply migrations `0008` and `0009`, then
 redeploy so the corrected environment is included in the client bundle.
 
 Smoke-test Google sign-in once in each locale. A first-time Google user should
@@ -149,9 +156,10 @@ be sent to manager-ID onboarding; a returning user should load the canonical
 - **CSP uses `'unsafe-inline'` in `script-src`** (required by the inline theme
   bootstrap in `app/layout.tsx`). Tightening to a nonce/hash-based policy via
   middleware is a defense-in-depth follow-up.
-- **Mini-League results are client-simulated**, so reported figures are clamped
-  but not cryptographically trustworthy — inherent to the client-side engine.
-  A server-authoritative simulation would be a larger redesign.
+- **Match and table simulation is client-side**, so reported Mini League and
+  Invincible standings are validated and bound to an account/attempt but are not
+  cryptographically trustworthy. A server-authoritative simulation and fixture
+  store would be a larger redesign.
 - The repo lives on an exFAT drive that regenerates macOS `._*` AppleDouble files
   (they break `git fsck` and were picked up by Playwright). Cleaning is temporary;
   cloning to an APFS volume is the durable fix.

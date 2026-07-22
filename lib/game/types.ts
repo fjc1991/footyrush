@@ -18,7 +18,9 @@ export type Position =
 export type DraftMode = "classic" | "expert";
 export type ManagerKind = "human" | "reserve";
 export type ManagerSource = "human" | "reserve" | "historical" | "snapshot";
-export type Period = "daily" | "weekly" | "monthly";
+export type CompetitionMode = "minileague" | "invincible";
+export type LeaderboardMetric = "points" | "titles";
+export type Period = "daily" | "weekly" | "monthly" | "all_time";
 export type BenchRole = "GK" | "DEF" | "MID" | "ATT";
 export type PlayerBoostId = "talisman" | "playmaker" | "poacher" | "engine" | "stopper" | "sweeper_keeper";
 
@@ -211,6 +213,14 @@ export interface LeaderboardRecord {
   userId: string;
   displayName: string;
   kind: ManagerKind;
+  competitionMode: CompetitionMode;
+  /** Stable identifier for one completed competition; used for idempotent persistence. */
+  runId: string;
+  /** Marks a pre-account-scoping browser record whose finishing position may be unavailable. */
+  legacy?: boolean;
+  gamesPlayed: number;
+  /** One-based finishing position, or null when a legacy result cannot be reconstructed. */
+  finalPosition: number | null;
   periodAt: string;
   matchPoints: number;
   goalDifference: number;
@@ -222,4 +232,7 @@ export interface LeaderboardRecord {
 
 export interface LeaderboardEntry extends LeaderboardRecord {
   rank: number;
+  runsCompleted: number;
+  miniLeagueTitles: number;
+  invincibleTitles: number;
 }

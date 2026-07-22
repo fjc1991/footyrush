@@ -1,11 +1,16 @@
 import { getStarterSlots } from "./formations";
 import { buildRoundRobin, createHistoricalOpponent, getSkillBand } from "./matchmaking";
 import { createRng, pickOne, shuffle } from "./rng";
+import { calculateSquadStrength } from "./simulation";
 import type { DraftMode, DraftPick, Fixture, FixtureResult, ManagerSquad, MatchEvent, SeasonCasualtyKind } from "./types";
 
 export const INVINCIBLE_TEAM_TALK_LIMIT = 2;
 export const TEAM_TALK_EXPECTED_GOALS_BONUS = 0.18;
 export const OUT_OF_FORM_EXPECTED_GOALS_PENALTY = 0.12;
+/** Calibrated to a 54.8% elite-human title rate across 500 full deterministic seasons. */
+export const INVINCIBLE_CONTENDER_XG_BONUS = 0.53;
+/** Keeps elite appointed managers valuable without letting their edge trivialize a 38-match title race. */
+export const INVINCIBLE_MANAGER_RATING_CAP = 75;
 export const SEASON_RED_CARD_SUSPENSION_GAMES = 3;
 /** Whole-season ceiling on human injuries + red cards combined; the actual count is a random 0..N. */
 export const INVINCIBLE_MAX_SEASON_CASUALTIES = 5;
@@ -78,7 +83,7 @@ export function createInvincibleSeason(params: {
     mode: params.mode,
     picks: params.humanPicks,
     mmr: params.mmr,
-    managerRating: params.managerRating ?? 50,
+    managerRating: Math.min(INVINCIBLE_MANAGER_RATING_CAP, params.managerRating ?? 50),
     completedLeagues: params.completedLeagues,
     injuredPlayerIds: [],
     suspendedPlayerIds: [],
@@ -140,6 +145,50 @@ export function buildDoubleRoundRobin(managers: ManagerSquad[]): Fixture[][] {
     }))
   );
   return [...firstLeg, ...secondLeg];
+}
+
+/**
+ * Strengthens the two best historical challengers only when the generated field
+ * does not already contain two sides stronger than the human squad. The bonus is
+ * deliberately limited to contender-v-field AI fixtures: human results and the
+ * head-to-head between contenders remain untouched.
+ */
+export function invincibleContenderModifiers(
+  fixture: Fixture,
+  managers: ManagerSquad[]
+): { homeExpectedGoalsModifier: number; awayExpectedGoalsModifier: number } {
+  const none = { homeExpectedGoalsModifier: 0, awayExpectedGoalsModifier: 0 };
+  if (fixture.homeId === "human" || fixture.awayId === "human") {
+    return none;
+  }
+
+  const human = managers.find((manager) => manager.id === "human");
+  if (!human) {
+    return none;
+  }
+  const humanOverall = calculateSquadStrength(human).overall;
+  const opponents = managers
+    .filter((manager) => manager.id !== "human")
+    .map((manager) => ({ manager, overall: calculateSquadStrength(manager).overall }));
+  if (opponents.filter(({ overall }) => overall > humanOverall).length >= 2) {
+    return none;
+  }
+
+  const contenders = new Set(
+    opponents
+      .sort((first, second) => second.overall - first.overall || first.manager.id.localeCompare(second.manager.id))
+      .slice(0, 2)
+      .map(({ manager }) => manager.id)
+  );
+  const homeIsContender = contenders.has(fixture.homeId);
+  const awayIsContender = contenders.has(fixture.awayId);
+  if (homeIsContender === awayIsContender) {
+    return none;
+  }
+  return {
+    homeExpectedGoalsModifier: homeIsContender ? INVINCIBLE_CONTENDER_XG_BONUS : 0,
+    awayExpectedGoalsModifier: awayIsContender ? INVINCIBLE_CONTENDER_XG_BONUS : 0
+  };
 }
 
 /**
