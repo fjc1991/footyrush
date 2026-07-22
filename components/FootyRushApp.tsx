@@ -3,6 +3,7 @@
 import { Activity, BarChart3, ChevronRight, Globe, Goal, HeartPulse, LogIn, Mail, Moon, Pause, Play, Shirt, Shuffle, Sparkles, Sun, Timer, Trophy, Users, X } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { en } from "@/lib/i18n/en";
+import { createXOAuthCredentials } from "@/lib/auth/x-oauth";
 import { FORMATION_LIST, getStarterSlots } from "@/lib/game/formations";
 import { autoDraftManager, getDraftSlots, getOpenDraftSlots, makeDraftPick } from "@/lib/game/draft";
 import { loadFootballData, spinForOpenSlots, getFootballData } from "@/lib/game/data";
@@ -87,6 +88,18 @@ interface LocalProfile {
   displayName: string;
   email?: string;
   demo: boolean;
+}
+
+interface CanonicalProfileResponse {
+  ok?: boolean;
+  profile?: {
+    id: string;
+    managerId: string | null;
+    displayName: string;
+    email: string | null;
+    demo: false;
+  };
+  admin?: boolean;
 }
 
 // Authorization header carrying the verified Supabase access token. Competitive
@@ -690,16 +703,18 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
 
     const callbackUrl = new URL(window.location.href);
     const callbackError = callbackUrl.searchParams.get("error");
+    const callbackErrorCode = callbackUrl.searchParams.get("error_code") ?? "";
     const callbackDescription = callbackUrl.searchParams.get("error_description") ?? "";
-    if (callbackError || callbackDescription) {
-      const normalizedError = `${callbackError ?? ""} ${callbackDescription}`.toLowerCase();
+    if (callbackError || callbackErrorCode || callbackDescription) {
+      const normalizedError = `${callbackError ?? ""} ${callbackErrorCode} ${callbackDescription}`.toLowerCase();
       setAuthMessage(
         normalizedError.includes("access_denied") || normalizedError.includes("cancel")
-          ? "Google sign-in was cancelled. Your account was not changed."
+          ? copy.xLoginCancelled
           : normalizedError.includes("unsupported provider") || normalizedError.includes("provider is not enabled")
-            ? "Google sign-in is temporarily unavailable. Please use email sign-in while the provider is being enabled."
-            : "We couldn't finish Google sign-in. Please try again."
+            ? copy.xLoginUnavailable
+            : copy.xLoginFailed
       );
+      setShowAuthGate(true);
       callbackUrl.searchParams.delete("error");
       callbackUrl.searchParams.delete("error_code");
       callbackUrl.searchParams.delete("error_description");
@@ -712,14 +727,18 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     }
 
     let disposed = false;
-    const clearAuthenticatedProfile = () => {
-      let storedProfileIsDemo = false;
+    let authEventSeen = false;
+    let authRequestGeneration = 0;
+    const readStoredProfile = (): LocalProfile | null => {
       try {
         const stored = window.localStorage.getItem(profileKey);
-        storedProfileIsDemo = stored ? Boolean((JSON.parse(stored) as LocalProfile).demo) : false;
+        return stored ? (JSON.parse(stored) as LocalProfile) : null;
       } catch {
-        storedProfileIsDemo = false;
+        return null;
       }
+    };
+    const clearAuthenticatedProfile = () => {
+      const storedProfileIsDemo = Boolean(readStoredProfile()?.demo);
       if (!storedProfileIsDemo) {
         window.localStorage.removeItem(profileKey);
         setProfile((current) => (current?.demo ? current : null));
@@ -729,50 +748,94 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     };
 
     const applySession = async (session: Session | null) => {
+      const requestGeneration = ++authRequestGeneration;
       if (!session?.user) {
         clearAuthenticatedProfile();
         return;
       }
       // A confirmed link produces a session: clear the pending-confirmation prompt.
       setPendingConfirmEmail("");
-      const admin = session.user.app_metadata?.role === "admin";
-      const { data: canonicalProfile, error } = await supabase
-        .from("profiles")
-        .select("id, manager_id, display_name, email")
-        .eq("id", session.user.id)
-        .maybeSingle();
-      if (disposed) {
+
+      const cachedProfile = readStoredProfile();
+      const matchingCachedProfile = cachedProfile && !cachedProfile.demo && cachedProfile.id === session.user.id
+        ? cachedProfile
+        : null;
+      if (cachedProfile && cachedProfile.id !== session.user.id) {
+        window.localStorage.removeItem(profileKey);
+        setProfile(null);
+        hydrateLocalProgress(null);
+        setIsAdmin(false);
+      }
+
+      let response: Response;
+      try {
+        response = await fetch("/api/profile", {
+          headers: { Authorization: `Bearer ${session.access_token}` }
+        });
+      } catch {
+        if (disposed || requestGeneration !== authRequestGeneration) {
+          return;
+        }
+        if (matchingCachedProfile) {
+          setProfile(matchingCachedProfile);
+          hydrateLocalProgress(matchingCachedProfile);
+          setIsAdmin(session.user.app_metadata?.role === "admin");
+        }
+        setAuthMessage(copy.profileLoadFailed);
+        setShowAuthGate(true);
         return;
       }
-      if (error || !canonicalProfile) {
-        clearAuthenticatedProfile();
-        setAuthMessage("We couldn't load your manager profile. Please refresh and try again.");
+
+      const payload = (await response.json().catch(() => null)) as CanonicalProfileResponse | null;
+      if (disposed || requestGeneration !== authRequestGeneration) {
         return;
       }
-      if (!canonicalProfile.manager_id) {
-        clearAuthenticatedProfile();
+      if (!response.ok || !payload?.ok || !payload.profile) {
+        if (response.status === 401) {
+          clearAuthenticatedProfile();
+        } else if (matchingCachedProfile) {
+          setProfile(matchingCachedProfile);
+          hydrateLocalProgress(matchingCachedProfile);
+          setIsAdmin(session.user.app_metadata?.role === "admin");
+        }
+        setAuthMessage(copy.profileLoadFailed);
+        setShowAuthGate(true);
+        return;
+      }
+      if (!payload.profile.managerId) {
+        window.localStorage.removeItem(profileKey);
+        setProfile(null);
+        hydrateLocalProgress(null);
+        setIsAdmin(Boolean(payload.admin));
         window.location.assign(`/${locale}/register`);
         return;
       }
-      setIsAdmin(admin);
+      setIsAdmin(Boolean(payload.admin));
+      setAuthMessage("");
       persistProfile({
-        id: canonicalProfile.id,
-        managerId: canonicalProfile.manager_id,
-        displayName: canonicalProfile.display_name,
-        email: canonicalProfile.email ?? session.user.email ?? "",
+        id: payload.profile.id,
+        managerId: payload.profile.managerId,
+        displayName: payload.profile.displayName,
+        email: payload.profile.email ?? session.user.email ?? "",
         demo: false
       });
     };
 
-    supabase.auth.getSession().then(({ data }) => void applySession(data.session));
     const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
+      authEventSeen = true;
       window.setTimeout(() => void applySession(session), 0);
+    });
+    supabase.auth.getSession().then(({ data }) => {
+      if (!authEventSeen) {
+        void applySession(data.session);
+      }
     });
     return () => {
       disposed = true;
+      authRequestGeneration += 1;
       authListener.subscription.unsubscribe();
     };
-  }, [hydrateLocalProgress, locale, persistProfile]);
+  }, [copy, hydrateLocalProgress, locale, persistProfile]);
 
   // Result history follows the signed-in account. Guests keep a separate device-only
   // history, while authenticated managers merge their private server history with
@@ -1842,20 +1905,22 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     setPhase(exhibitionReturnPhase);
   }
 
-  async function signInWithGoogle() {
+  async function signInWithX() {
     const supabase = getSupabaseBrowserClient();
     if (!supabase) {
-      setAuthMessage("Add Supabase environment variables to enable Google login. Email demo login is available locally.");
+      setAuthMessage(copy.authConfigMissing);
       return;
     }
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: {
-        redirectTo: `${window.location.origin}/${locale}`
-      }
-    });
+    const { error } = await supabase.auth.signInWithOAuth(
+      createXOAuthCredentials(window.location.origin, locale)
+    );
     if (error) {
-      setAuthMessage(error.message);
+      const message = error.message.toLowerCase();
+      setAuthMessage(
+        message.includes("unsupported provider") || message.includes("provider is not enabled")
+          ? copy.xLoginUnavailable
+          : copy.xLoginFailed
+      );
     }
   }
 
@@ -2314,6 +2379,8 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
               <span>© 2026 FootyRush. All rights reserved.</span>
             </div>
             <nav aria-label="Footer">
+              <a href={`/${locale}/privacy`}>{copy.privacy}</a>
+              <a href={`/${locale}/terms`}>{copy.terms}</a>
               <a href="mailto:hello@footyrush.app">Contact</a>
               <a href="mailto:support@footyrush.app">Support</a>
             </nav>
@@ -3035,9 +3102,9 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                   </button>
                 </form>
                 <p className="auth-divider">or</p>
-                <button className="secondary-button wide" type="button" onClick={signInWithGoogle}>
-                  <LogIn size={16} />
-                  {copy.google}
+                <button className="secondary-button wide" type="button" onClick={signInWithX}>
+                  <XLogo size={16} />
+                  {copy.xLogin}
                 </button>
                 <form className="email-form" onSubmit={signInWithEmail}>
                   <button className="secondary-button wide" type="submit">
@@ -3045,6 +3112,12 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                     {copy.email}
                   </button>
                 </form>
+                <p className="auth-legal">
+                  {copy.legalConsent}{" "}
+                  <a href={`/${locale}/terms`}>{copy.terms}</a>
+                  {" · "}
+                  <a href={`/${locale}/privacy`}>{copy.privacy}</a>.
+                </p>
                 {pendingConfirmEmail && (
                   <div className="auth-pending" role="status">
                     <Mail size={16} aria-hidden="true" />

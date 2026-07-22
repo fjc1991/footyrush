@@ -23,6 +23,12 @@ test("home renders without runtime errors and both modes are selectable", async 
   await expect(miniLeague).toBeVisible();
   await expect(beInvincible).toBeVisible();
 
+  // X is the only social sign-in offered; the retired Google action is absent.
+  await page.locator(".profile-pill").click();
+  await expect(page.getByRole("button", { name: "Continue with X", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Continue with Google/i })).toHaveCount(0);
+  await page.getByRole("button", { name: "Close sign-in", exact: true }).click();
+
   // Both modes are selectable.
   await beInvincible.click();
   await expect(beInvincible).toHaveClass(/active/);
@@ -47,4 +53,15 @@ test("home renders without runtime errors and both modes are selectable", async 
   await expect(page.getByText("Invincible seasons", { exact: true })).toBeVisible();
 
   expect(pageErrors, `Unexpected runtime errors: ${pageErrors.join("; ")}`).toEqual([]);
+});
+
+test("X account legal pages are public and connected", async ({ page }) => {
+  await page.goto("/en/privacy");
+  await expect(page.getByRole("heading", { name: "Privacy Policy", exact: true })).toBeVisible();
+  const termsLink = page.getByLabel("Legal", { exact: true }).getByRole("link", { name: "Terms", exact: true });
+  await expect(termsLink).toHaveAttribute("href", "/en/terms");
+
+  await termsLink.click();
+  await expect(page).toHaveURL(/\/en\/terms\/?$/);
+  await expect(page.getByRole("heading", { name: "Terms of Use", exact: true })).toBeVisible();
 });

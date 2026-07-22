@@ -105,34 +105,39 @@ attaches this automatically for signed-in users. So:
 - Official Invincible awards and leaderboard persistence require a valid session.
 - Guests (no token) use a hashed-IP identity and stay on local-only history.
 
-## 6. Google sign-in and redirect configuration
+## 6. X sign-in and redirect configuration
 
-Google sign-in has two separate configuration layers. Both must be completed;
-otherwise Supabase returns `Unsupported provider: provider is not enabled`.
+The app now uses Supabase's **X / Twitter OAuth 2.0** provider. Google is no
+longer offered in the FootyRush interface and should be disabled in Supabase.
 
-### Google Cloud Console
+### X Developer Dashboard
 
-1. Configure an OAuth consent screen for the production app.
-2. Create an **OAuth client ID** with application type **Web application**.
-3. Add this authorised JavaScript origin:
-   - `https://footyrush-bay.vercel.app`
-4. Add this exact authorised redirect URI (the Supabase callback, not a locale page):
+1. Create an X Project and App at `https://developer.x.com`.
+2. Under **User authentication settings**, enable OAuth 2.0, select **Web App**,
+   and turn on **Request email from users**.
+3. Use this exact callback URL (the Supabase callback, not a locale page):
    - `https://gqiafshqonbhirtuzesp.supabase.co/auth/v1/callback`
-5. Copy the generated client ID and client secret into Supabase. Never place the
-   Google client secret in source control or a `NEXT_PUBLIC_*` variable.
+4. Use this website URL:
+   - `https://footyrush-bay.vercel.app`
+5. Add the production legal URLs required by X:
+   - Privacy Policy: `https://footyrush-bay.vercel.app/en/privacy`
+   - Terms of Service: `https://footyrush-bay.vercel.app/en/terms`
+6. Copy the OAuth 2.0 Client ID and Client Secret. Never put the secret in source
+   control or a `NEXT_PUBLIC_*` variable.
 
 ### Supabase Dashboard
 
-1. Open **Authentication → Providers → Google**, enable the provider, enter the
-   Google client ID and client secret, and save.
-2. Open **Authentication → URL Configuration** and set the Site URL to:
+1. Open **Authentication → Providers → X / Twitter (OAuth 2.0)**, enable it,
+   enter the X OAuth 2.0 Client ID and Client Secret, and save.
+2. Open **Authentication → Providers → Google** and disable it.
+3. Open **Authentication → URL Configuration** and set the Site URL to:
    - `https://footyrush-bay.vercel.app`
-3. Add all four production Redirect URLs:
+4. Allow all four production return URLs:
    - `https://footyrush-bay.vercel.app/en`
    - `https://footyrush-bay.vercel.app/es`
    - `https://footyrush-bay.vercel.app/fr`
    - `https://footyrush-bay.vercel.app/pt`
-4. Keep local redirect URLs separate for development; do not use a wildcard for
+5. Keep local redirect URLs separate for development; do not use a wildcard for
    the production origin.
 
 ### Vercel
@@ -140,12 +145,12 @@ otherwise Supabase returns `Unsupported provider: provider is not enabled`.
 Set `NEXT_PUBLIC_SUPABASE_URL` to exactly
 `https://gqiafshqonbhirtuzesp.supabase.co` with no leading/trailing whitespace.
 Check `SUPABASE_URL` too if it is set separately. Keep the existing anon and
-service-role keys in their matching variables, apply migrations `0008` and `0009`, then
-redeploy so the corrected environment is included in the client bundle.
+service-role keys in their matching variables, apply migrations `0008` and
+`0009`, then redeploy.
 
-Smoke-test Google sign-in once in each locale. A first-time Google user should
-be sent to manager-ID onboarding; a returning user should load the canonical
-`profiles` row and enter the app without onboarding again.
+Smoke-test X sign-in once in each locale. A first-time X user should be sent to
+manager-ID onboarding; a returning user should load the canonical `profiles`
+row and enter the app without onboarding again.
 
 ## 7. Known limitations / follow-ups
 - **Turnstile widget is not yet rendered client-side.** Server verification is
