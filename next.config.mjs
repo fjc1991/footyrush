@@ -34,6 +34,7 @@ const securityHeaders = [
 ];
 
 const nextConfig = {
+  allowedDevOrigins: ["127.0.0.1"],
   async headers() {
     return [{ source: "/(.*)", headers: securityHeaders }];
   }

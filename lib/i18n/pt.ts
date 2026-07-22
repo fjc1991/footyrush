@@ -27,6 +27,14 @@ export const pt = {
   tabProgress: "Meu progresso",
   tabLive: "ao vivo",
   tabLockedHint: "Termine a partida em andamento para abrir as classificações.",
+  nextGame: "Próximo jogo",
+  nextGameCountdown: "Próximo jogo em {seconds}s",
+  autoplayPaused: "Reprodução automática pausada",
+  actionRequired: "Ação necessária",
+  startNow: "Começar agora",
+  pauseAutoplay: "Pausar reprodução automática",
+  resumeAutoplay: "Retomar reprodução automática",
+  retry: "Tentar novamente",
   yourRank: "Sua posição",
   leaderboardEmpty: "Ainda não há managers neste período. Termine uma liga para aparecer aqui."
 };

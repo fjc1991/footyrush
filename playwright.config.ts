@@ -3,6 +3,7 @@ import { defineConfig, devices } from "@playwright/test";
 const PORT = Number(process.env.PW_PORT ?? process.env.PORT ?? 3000);
 const baseURL = `http://127.0.0.1:${PORT}`;
 const isCI = Boolean(process.env.CI);
+const browserChannel = process.env.PW_BROWSER_CHANNEL;
 
 export default defineConfig({
   testDir: "./e2e",
@@ -17,7 +18,12 @@ export default defineConfig({
     baseURL,
     trace: "on-first-retry"
   },
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+  projects: [
+    {
+      name: "chromium",
+      use: { ...devices["Desktop Chrome"], ...(browserChannel ? { channel: browserChannel } : {}) }
+    }
+  ],
   // In CI the workflow builds first, so we serve the production build; locally we
   // reuse a running dev server (or start one) to avoid a slow rebuild per run.
   webServer: {

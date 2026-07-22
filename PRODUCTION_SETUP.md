@@ -18,6 +18,10 @@ the last deploy:
   per-day allowance (3 free plays/day, resets at UTC midnight).
 - `0007_community_squads.sql` — **new.** `community_squads` table for the cross-user
   end-of-season one-off (stores a completed squad as jsonb; public read).
+- `0008_oauth_profile_onboarding.sql` — allows OAuth profiles to start without a
+  `manager_id` and updates the signup trigger to use the display-name fallback
+  order `display_name` → `full_name` → `name` → email local-part. An explicit
+  `manager_id` supplied by password registration is still preserved.
 
 ```bash
 # via Supabase CLI (or paste into the SQL editor in order)
@@ -66,6 +70,7 @@ Defined per route via `lib/server/rate-limit.ts`:
 | --- | --- |
 | `POST /api/auth/email` | 5 / min |
 | `POST /api/registration` | 5 / min |
+| `PATCH /api/registration` | 5 / min |
 | `GET /api/registration` (availability) | 60 / min |
 | `POST /api/guest-plays` | 10 / min |
 | `POST /api/invincible-attempts` | 20 / hour |
@@ -93,7 +98,49 @@ attaches this automatically for signed-in users. So:
 - Official Invincible awards and leaderboard persistence require a valid session.
 - Guests (no token) use a hashed-IP identity and stay on local-only history.
 
-## 6. Known limitations / follow-ups
+## 6. Google sign-in and redirect configuration
+
+Google sign-in has two separate configuration layers. Both must be completed;
+otherwise Supabase returns `Unsupported provider: provider is not enabled`.
+
+### Google Cloud Console
+
+1. Configure an OAuth consent screen for the production app.
+2. Create an **OAuth client ID** with application type **Web application**.
+3. Add this authorised JavaScript origin:
+   - `https://footyrush-bay.vercel.app`
+4. Add this exact authorised redirect URI (the Supabase callback, not a locale page):
+   - `https://gqiafshqonbhirtuzesp.supabase.co/auth/v1/callback`
+5. Copy the generated client ID and client secret into Supabase. Never place the
+   Google client secret in source control or a `NEXT_PUBLIC_*` variable.
+
+### Supabase Dashboard
+
+1. Open **Authentication → Providers → Google**, enable the provider, enter the
+   Google client ID and client secret, and save.
+2. Open **Authentication → URL Configuration** and set the Site URL to:
+   - `https://footyrush-bay.vercel.app`
+3. Add all four production Redirect URLs:
+   - `https://footyrush-bay.vercel.app/en`
+   - `https://footyrush-bay.vercel.app/es`
+   - `https://footyrush-bay.vercel.app/fr`
+   - `https://footyrush-bay.vercel.app/pt`
+4. Keep local redirect URLs separate for development; do not use a wildcard for
+   the production origin.
+
+### Vercel
+
+Set `NEXT_PUBLIC_SUPABASE_URL` to exactly
+`https://gqiafshqonbhirtuzesp.supabase.co` with no leading/trailing whitespace.
+Check `SUPABASE_URL` too if it is set separately. Keep the existing anon and
+service-role keys in their matching variables, apply migration `0008`, then
+redeploy so the corrected environment is included in the client bundle.
+
+Smoke-test Google sign-in once in each locale. A first-time Google user should
+be sent to manager-ID onboarding; a returning user should load the canonical
+`profiles` row and enter the app without onboarding again.
+
+## 7. Known limitations / follow-ups
 - **Turnstile widget is not yet rendered client-side.** Server verification is
   wired, but the client does not yet show the Cloudflare widget or send a token.
   ⚠️ **Do not set `TURNSTILE_SECRET_KEY` in production until the widget exists**,

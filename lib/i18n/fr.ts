@@ -27,6 +27,14 @@ export const fr = {
   tabProgress: "Ma progression",
   tabLive: "en direct",
   tabLockedHint: "Termine le match en cours pour ouvrir les classements.",
+  nextGame: "Prochain match",
+  nextGameCountdown: "Prochain match dans {seconds} s",
+  autoplayPaused: "Lecture automatique en pause",
+  actionRequired: "Action requise",
+  startNow: "Commencer maintenant",
+  pauseAutoplay: "Mettre la lecture automatique en pause",
+  resumeAutoplay: "Reprendre la lecture automatique",
+  retry: "Réessayer",
   yourRank: "Ton rang",
   leaderboardEmpty: "Aucun manager classé sur cette période. Termine une ligue pour apparaître ici."
 };

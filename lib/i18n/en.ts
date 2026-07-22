@@ -27,6 +27,14 @@ export const en = {
   tabProgress: "My progress",
   tabLive: "live",
   tabLockedHint: "Finish the match in progress to open the leaderboards.",
+  nextGame: "Next game",
+  nextGameCountdown: "Next game in {seconds}s",
+  autoplayPaused: "Auto-play paused",
+  actionRequired: "Action required",
+  startNow: "Start now",
+  pauseAutoplay: "Pause auto-play",
+  resumeAutoplay: "Resume auto-play",
+  retry: "Retry",
   yourRank: "Your rank",
   leaderboardEmpty: "No managers ranked in this window yet. Finish a league to appear here."
 };

@@ -122,9 +122,11 @@ describe("Be Invincible season", () => {
     expect(decrementSeasonAbsences(decrementSeasonAbsences(decrementSeasonAbsences(applied.suspensionGamesByPlayerId)))[starter.player.i]).toBeUndefined();
   });
 
-  it("blocks the next game until unavailable starters have substitutes", () => {
+  it("blocks the next game until unavailable starters have valid distinct substitutes", () => {
     const base = human("blocked-sub-human");
-    const starter = base.picks.find((pick) => pick.target !== "SUB")!;
+    const starters = base.picks.filter((pick) => pick.target !== "SUB");
+    const starter = starters[0];
+    const secondStarter = starters[1];
     const sub = base.picks.find((pick) => pick.target === "SUB")!;
     const missing = seasonMissingRequiredSubstitutions({
       human: base,
@@ -136,9 +138,25 @@ describe("Be Invincible season", () => {
       injuryGamesByPlayerId: { [starter.player.i]: 4 },
       suspensionGamesByPlayerId: {}
     });
+    const stale = seasonMissingRequiredSubstitutions({
+      human: { ...base, substitutions: { [starter.player.i]: sub.player.i } },
+      injuryGamesByPlayerId: { [starter.player.i]: 4, [sub.player.i]: 1 },
+      suspensionGamesByPlayerId: {}
+    });
+    const duplicate = seasonMissingRequiredSubstitutions({
+      human: {
+        ...base,
+        substitutions: { [starter.player.i]: sub.player.i, [secondStarter.player.i]: sub.player.i }
+      },
+      injuryGamesByPlayerId: { [starter.player.i]: 4 },
+      suspensionGamesByPlayerId: { [secondStarter.player.i]: 2 }
+    });
 
     expect(missing.map((pick) => pick.player.i)).toContain(starter.player.i);
     expect(resolved).toHaveLength(0);
+    expect(stale.map((pick) => pick.player.i)).toContain(starter.player.i);
+    expect(duplicate).toHaveLength(1);
+    expect(duplicate[0].player.i).toBe(secondStarter.player.i);
   });
 
   it("limits team talks to one per half of the season", () => {

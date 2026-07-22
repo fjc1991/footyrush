@@ -1,7 +1,7 @@
 "use client";
 
-import { Activity, BarChart3, ChevronRight, Globe, Goal, HeartPulse, LogIn, Mail, Moon, Play, Shirt, Shuffle, Sparkles, Sun, Timer, Trophy, Users, X } from "lucide-react";
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { Activity, BarChart3, ChevronRight, Globe, Goal, HeartPulse, LogIn, Mail, Moon, Pause, Play, Shirt, Shuffle, Sparkles, Sun, Timer, Trophy, Users, X } from "lucide-react";
+import { FormEvent, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { en } from "@/lib/i18n/en";
 import { FORMATION_LIST, getStarterSlots } from "@/lib/game/formations";
 import { autoDraftManager, getDraftSlots, getOpenDraftSlots, makeDraftPick } from "@/lib/game/draft";
@@ -34,6 +34,15 @@ import {
   type SeasonPregameDecision
 } from "@/lib/game/season";
 import { aggregateLeaderboard, recordsFromLeague } from "@/lib/game/leaderboard";
+import {
+  INVINCIBLE_AUTOPLAY_SECONDS,
+  getInvincibleAttentionReason,
+  getInvincibleAutoplayStatus,
+  invincibleAutoplayTimerKey,
+  scheduleInvincibleCountdown,
+  type InvincibleAutoplayStatus
+} from "@/lib/game/invincible-autoplay";
+import { getTeamMonogram, getTeamVisualStyle } from "@/lib/game/team-visuals";
 import {
   EXPERT_SCORE_THRESHOLD,
   MIN_MANAGER_SCORE,
@@ -244,6 +253,14 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
   const [seasonOutOfFormSubId, setSeasonOutOfFormSubId] = useState<number | null>(null);
   const [seasonTeamTalkActive, setSeasonTeamTalkActive] = useState(false);
   const [seasonAttemptMessage, setSeasonAttemptMessage] = useState("");
+  const [seasonAutoplayPaused, setSeasonAutoplayPaused] = useState(false);
+  const [seasonAutoplayCountdown, setSeasonAutoplayCountdown] = useState(INVINCIBLE_AUTOPLAY_SECONDS);
+  const [seasonAutoplayPending, setSeasonAutoplayPending] = useState(false);
+  const [seasonAutoplayError, setSeasonAutoplayError] = useState("");
+  const seasonAdvanceLockRef = useRef(false);
+  const activeSeasonIdRef = useRef<string | null>(null);
+  const pendingSeasonCompletionRef = useRef<InvincibleSeason | null>(null);
+  const seasonAdvanceRef = useRef<() => Promise<void>>(async () => undefined);
   const leagueCommentaryRef = useRef<HTMLDivElement | null>(null);
   const exhibitionCommentaryRef = useRef<HTMLDivElement | null>(null);
 
@@ -365,6 +382,21 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
         : [],
     [season, seasonHumanManager]
   );
+  const seasonAttentionReason = getInvincibleAttentionReason({
+    missingReplacementCount: seasonMissingSubstitutions.length,
+    hasOutOfFormDecision: Boolean(seasonDecision?.outOfForm),
+    outOfFormChoice: seasonOutOfFormChoice,
+    outOfFormSubstituteId: seasonOutOfFormSubId
+  });
+  const seasonAutoplayKey = season ? invincibleAutoplayTimerKey(season.id, season.currentMatchday) : "";
+  const seasonAutoplayStatus = getInvincibleAutoplayStatus({
+    complete: phase === "invincible_complete",
+    hasNextMatch: Boolean(currentSeasonFixture),
+    paused: seasonAutoplayPaused,
+    attentionReason: seasonAttentionReason,
+    pending: seasonAutoplayPending,
+    error: seasonAutoplayError
+  });
   const pendingCandidate = spin?.candidates.find((candidate) => candidate.player.i === slotPickerCandidateId) ?? null;
   const latestHumanInjury = [...visibleEvents]
     .reverse()
@@ -468,38 +500,90 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
         .catch(() => undefined);
     }
 
+    const callbackUrl = new URL(window.location.href);
+    const callbackError = callbackUrl.searchParams.get("error");
+    const callbackDescription = callbackUrl.searchParams.get("error_description") ?? "";
+    if (callbackError || callbackDescription) {
+      const normalizedError = `${callbackError ?? ""} ${callbackDescription}`.toLowerCase();
+      setAuthMessage(
+        normalizedError.includes("access_denied") || normalizedError.includes("cancel")
+          ? "Google sign-in was cancelled. Your account was not changed."
+          : normalizedError.includes("unsupported provider") || normalizedError.includes("provider is not enabled")
+            ? "Google sign-in is temporarily unavailable. Please use email sign-in while the provider is being enabled."
+            : "We couldn't finish Google sign-in. Please try again."
+      );
+      callbackUrl.searchParams.delete("error");
+      callbackUrl.searchParams.delete("error_code");
+      callbackUrl.searchParams.delete("error_description");
+      window.history.replaceState({}, "", `${callbackUrl.pathname}${callbackUrl.search}${callbackUrl.hash}`);
+    }
+
     const supabase = getSupabaseBrowserClient();
     if (!supabase) {
       return;
     }
 
-    const applySession = (session: Session | null) => {
+    let disposed = false;
+    const clearAuthenticatedProfile = () => {
+      let storedProfileIsDemo = false;
+      try {
+        const stored = window.localStorage.getItem(profileKey);
+        storedProfileIsDemo = stored ? Boolean((JSON.parse(stored) as LocalProfile).demo) : false;
+      } catch {
+        storedProfileIsDemo = false;
+      }
+      if (!storedProfileIsDemo) {
+        window.localStorage.removeItem(profileKey);
+        setProfile((current) => (current?.demo ? current : null));
+      }
+      setIsAdmin(false);
+    };
+
+    const applySession = async (session: Session | null) => {
       if (!session?.user) {
+        clearAuthenticatedProfile();
         return;
       }
       // A confirmed link produces a session: clear the pending-confirmation prompt.
       setPendingConfirmEmail("");
-      const email = session.user.email ?? "";
       const admin = session.user.app_metadata?.role === "admin";
+      const { data: canonicalProfile, error } = await supabase
+        .from("profiles")
+        .select("id, manager_id, display_name, email")
+        .eq("id", session.user.id)
+        .maybeSingle();
+      if (disposed) {
+        return;
+      }
+      if (error || !canonicalProfile) {
+        clearAuthenticatedProfile();
+        setAuthMessage("We couldn't load your manager profile. Please refresh and try again.");
+        return;
+      }
+      if (!canonicalProfile.manager_id) {
+        clearAuthenticatedProfile();
+        window.location.assign(`/${locale}/register`);
+        return;
+      }
       setIsAdmin(admin);
-      // Preserve the registered identity: RegistrationPage stores manager_id / display_name in the
-      // signup metadata, so read it back here instead of always falling back to the email prefix.
-      const meta = session.user.user_metadata ?? {};
-      const managerId = typeof meta.manager_id === "string" ? meta.manager_id : undefined;
-      const metaName = typeof meta.display_name === "string" ? meta.display_name : undefined;
       persistProfile({
-        id: session.user.id,
-        managerId,
-        displayName: admin ? "Admin (tester)" : metaName || managerId || email.split("@")[0] || "Manager",
-        email,
+        id: canonicalProfile.id,
+        managerId: canonicalProfile.manager_id,
+        displayName: canonicalProfile.display_name,
+        email: canonicalProfile.email ?? session.user.email ?? "",
         demo: false
       });
     };
 
-    supabase.auth.getSession().then(({ data }) => applySession(data.session));
-    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => applySession(session));
-    return () => authListener.subscription.unsubscribe();
-  }, []);
+    supabase.auth.getSession().then(({ data }) => void applySession(data.session));
+    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
+      window.setTimeout(() => void applySession(session), 0);
+    });
+    return () => {
+      disposed = true;
+      authListener.subscription.unsubscribe();
+    };
+  }, [locale]);
 
   // Tick down the "resend confirmation" cooldown so users can't spam the (rate-limited) email sender.
   useEffect(() => {
@@ -660,6 +744,13 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     setSeasonOutOfFormSubId(null);
     setSeasonTeamTalkActive(false);
     setSeasonAttemptMessage("");
+    setSeasonAutoplayPaused(false);
+    setSeasonAutoplayCountdown(INVINCIBLE_AUTOPLAY_SECONDS);
+    setSeasonAutoplayPending(false);
+    setSeasonAutoplayError("");
+    seasonAdvanceLockRef.current = false;
+    activeSeasonIdRef.current = null;
+    pendingSeasonCompletionRef.current = null;
     setExpertUnlockedThisRun(false);
     setPhase(nextPhase);
   }
@@ -812,6 +903,13 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     if (gameMode === "be_invincible") {
       let attemptId = `local-${Date.now()}`;
       setSeasonAttemptMessage("");
+      setSeasonAutoplayPaused(false);
+      setSeasonAutoplayCountdown(INVINCIBLE_AUTOPLAY_SECONDS);
+      setSeasonAutoplayPending(false);
+      setSeasonAutoplayError("");
+      seasonAdvanceLockRef.current = false;
+      activeSeasonIdRef.current = null;
+      pendingSeasonCompletionRef.current = null;
       try {
         attemptId = await createInvincibleAttempt();
       } catch {
@@ -829,6 +927,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
         seed: `${Date.now()}:${profile?.id ?? "guest"}:invincible`
       });
       const preparedSeason = prepareSeasonMatch(nextSeason);
+      activeSeasonIdRef.current = preparedSeason.id;
       setSeason(preparedSeason);
       setCurrentResult(null);
       setPhase("season");
@@ -914,51 +1013,90 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
   }
 
   async function playSeasonMatchAndAdvance() {
-    if (!season || !currentSeasonFixture || !canKickOffSeasonMatch()) {
+    const pendingCompletion = pendingSeasonCompletionRef.current;
+    const advancingSeasonId = pendingCompletion?.id ?? season?.id ?? null;
+    if (!pendingCompletion && (!season || !currentSeasonFixture || !canKickOffSeasonMatch())) {
       return;
     }
-    const baseHome = season.managers.find((manager) => manager.id === currentSeasonFixture.homeId);
-    const baseAway = season.managers.find((manager) => manager.id === currentSeasonFixture.awayId);
-    const human = season.managers.find((manager) => manager.id === "human");
-    if (!baseHome || !baseAway || !human) {
+    // State updates are intentionally not the lock: two click/timeout callbacks can
+    // run before React commits. This ref closes that gap synchronously.
+    if (seasonAdvanceLockRef.current) {
       return;
     }
+    seasonAdvanceLockRef.current = true;
+    setSeasonAutoplayPending(true);
+    setSeasonAutoplayError("");
 
-    const matchHuman = managerForSeasonMatch({
-      human,
-      injuryGamesByPlayerId: season.injuryGamesByPlayerId,
-      suspensionGamesByPlayerId: season.suspensionGamesByPlayerId,
-      outOfFormPlayerId: seasonOutOfFormChoice === "bench" ? seasonDecision?.outOfForm?.playerId : undefined,
-      outOfFormSubstituteId: seasonOutOfFormChoice === "bench" ? seasonOutOfFormSubId ?? undefined : undefined
-    });
-    const home = currentSeasonFixture.homeId === "human" ? matchHuman : baseHome;
-    const away = currentSeasonFixture.awayId === "human" ? matchHuman : baseAway;
-    const humanModifier =
-      (seasonTeamTalkActive ? TEAM_TALK_EXPECTED_GOALS_BONUS : 0) -
-      (seasonOutOfFormChoice === "keep" ? OUT_OF_FORM_EXPECTED_GOALS_PENALTY : 0);
-    // The human's only injuries/red cards come from the whole-season casualty budget. If this matchday
-    // is scheduled to strike, force it on the human's side (victim weighted by season contribution);
-    // otherwise pass `null` so no random casualty can occur.
-    const scheduledCasualty = season.casualtySchedule[season.currentMatchday];
-    const humanCasualty = scheduledCasualty
-      ? { kind: scheduledCasualty, weightByPlayerId: seasonCasualtyWeights({ human, results: season.results }) }
-      : null;
-    const result = simulateFixture({
-      fixture: currentSeasonFixture,
-      home,
-      away,
-      seed: `${season.id}:${currentSeasonFixture.id}:${season.results.length}`,
-      homeExpectedGoalsModifier: currentSeasonFixture.homeId === "human" ? humanModifier : 0,
-      awayExpectedGoalsModifier: currentSeasonFixture.awayId === "human" ? humanModifier : 0,
-      homeCasualty: currentSeasonFixture.homeId === "human" ? humanCasualty : undefined,
-      awayCasualty: currentSeasonFixture.awayId === "human" ? humanCasualty : undefined
-    });
-    await recordSeasonMatchAndAdvance(result);
+    try {
+      // A failed final verification keeps the already-simulated season here. Retry
+      // only repeats the replay-safe completion request, never match 38 itself.
+      if (pendingCompletion) {
+        await finalizeInvincibleSeason(pendingCompletion);
+        return;
+      }
+      if (!season || !currentSeasonFixture) {
+        return;
+      }
+
+      const baseHome = season.managers.find((manager) => manager.id === currentSeasonFixture.homeId);
+      const baseAway = season.managers.find((manager) => manager.id === currentSeasonFixture.awayId);
+      const human = season.managers.find((manager) => manager.id === "human");
+      if (!baseHome || !baseAway || !human) {
+        return;
+      }
+
+      const matchHuman = managerForSeasonMatch({
+        human,
+        injuryGamesByPlayerId: season.injuryGamesByPlayerId,
+        suspensionGamesByPlayerId: season.suspensionGamesByPlayerId,
+        outOfFormPlayerId: seasonOutOfFormChoice === "bench" ? seasonDecision?.outOfForm?.playerId : undefined,
+        outOfFormSubstituteId: seasonOutOfFormChoice === "bench" ? seasonOutOfFormSubId ?? undefined : undefined
+      });
+      const home = currentSeasonFixture.homeId === "human" ? matchHuman : baseHome;
+      const away = currentSeasonFixture.awayId === "human" ? matchHuman : baseAway;
+      const humanModifier =
+        (seasonTeamTalkActive ? TEAM_TALK_EXPECTED_GOALS_BONUS : 0) -
+        (seasonOutOfFormChoice === "keep" ? OUT_OF_FORM_EXPECTED_GOALS_PENALTY : 0);
+      // The human's only injuries/red cards come from the whole-season casualty budget. If this matchday
+      // is scheduled to strike, force it on the human's side (victim weighted by season contribution);
+      // otherwise pass `null` so no random casualty can occur.
+      const scheduledCasualty = season.casualtySchedule[season.currentMatchday];
+      const humanCasualty = scheduledCasualty
+        ? { kind: scheduledCasualty, weightByPlayerId: seasonCasualtyWeights({ human, results: season.results }) }
+        : null;
+      const result = simulateFixture({
+        fixture: currentSeasonFixture,
+        home,
+        away,
+        seed: `${season.id}:${currentSeasonFixture.id}:${season.results.length}`,
+        homeExpectedGoalsModifier: currentSeasonFixture.homeId === "human" ? humanModifier : 0,
+        awayExpectedGoalsModifier: currentSeasonFixture.awayId === "human" ? humanModifier : 0,
+        homeCasualty: currentSeasonFixture.homeId === "human" ? humanCasualty : undefined,
+        awayCasualty: currentSeasonFixture.awayId === "human" ? humanCasualty : undefined
+      });
+      await recordSeasonMatchAndAdvance(result);
+    } catch (error) {
+      if (activeSeasonIdRef.current === advancingSeasonId) {
+        setSeasonAutoplayError(
+          error instanceof Error && error.message
+            ? error.message
+            : "The match could not be saved. Auto-play has stopped; select Retry to continue."
+        );
+      }
+    } finally {
+      if (activeSeasonIdRef.current === advancingSeasonId) {
+        seasonAdvanceLockRef.current = false;
+        setSeasonAutoplayPending(false);
+      }
+    }
   }
 
   async function completeInvincibleAttempt(completedSeason: InvincibleSeason, completedStandings: ReturnType<typeof computeStandings>) {
     const human = completedStandings.find((standing) => standing.managerId === "human");
     if (!human) {
+      return { officialAward: false, production: false };
+    }
+    if (completedSeason.attemptId.startsWith("local-")) {
       return { officialAward: false, production: false };
     }
     const response = await fetch(`/api/invincible-attempts/${completedSeason.attemptId}/complete`, {
@@ -974,9 +1112,29 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
       })
     });
     if (!response.ok) {
-      return { officialAward: false, production: false };
+      throw new Error("We couldn't verify the completed season. Your result is safe; select Retry to continue.");
     }
     return (await response.json()) as { officialAward: boolean; production: boolean };
+  }
+
+  async function finalizeInvincibleSeason(completedSeason: InvincibleSeason) {
+    const finalStandings = computeStandings(completedSeason.managers, completedSeason.results);
+    const completion = await completeInvincibleAttempt(completedSeason, finalStandings);
+    if (activeSeasonIdRef.current !== completedSeason.id) {
+      return;
+    }
+    const finalizedSeason = {
+      ...completedSeason,
+      officialAward: completion.officialAward,
+      awardProduction: completion.production
+    };
+    recordGuestPlayIfNeeded();
+    saveCommunitySquad(finalizedSeason.managers.find((manager) => manager.id === "human"));
+    pendingSeasonCompletionRef.current = null;
+    setSeason(finalizedSeason);
+    setSeasonDecision(null);
+    setSeasonAutoplayError("");
+    setPhase("invincible_complete");
   }
 
   async function recordSeasonMatchAndAdvance(humanResult: FixtureResult) {
@@ -1030,20 +1188,35 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     setSeasonTeamTalkActive(false);
 
     if (nextMatchday >= season.rounds.length) {
-      const finalStandings = computeStandings(nextSeason.managers, nextSeason.results);
-      const completion = await completeInvincibleAttempt(nextSeason, finalStandings);
-      nextSeason = { ...nextSeason, officialAward: completion.officialAward, awardProduction: completion.production };
-      recordGuestPlayIfNeeded();
-      saveCommunitySquad(nextSeason.managers.find((manager) => manager.id === "human"));
-      setSeason(nextSeason);
-      setSeasonDecision(null);
-      setPhase("invincible_complete");
+      pendingSeasonCompletionRef.current = nextSeason;
+      await finalizeInvincibleSeason(nextSeason);
       return;
     }
 
     nextSeason = prepareSeasonMatch(nextSeason);
     setSeason(nextSeason);
   }
+
+  // Keep the timer callback current without making the timer restart for every
+  // render/state closure used by match simulation.
+  useEffect(() => {
+    seasonAdvanceRef.current = playSeasonMatchAndAdvance;
+  });
+
+  // One countdown belongs to exactly one season/matchday. Any key/status change
+  // disposes it, so pause, required decisions, reset, completion, and unmount all
+  // cancel the pending automatic start. Resuming creates a fresh three seconds.
+  useEffect(() => {
+    if (phase !== "season" || !seasonAutoplayKey || seasonAutoplayStatus !== "running") {
+      return;
+    }
+    return scheduleInvincibleCountdown({
+      onTick: setSeasonAutoplayCountdown,
+      onElapsed: () => {
+        void seasonAdvanceRef.current();
+      }
+    });
+  }, [phase, seasonAutoplayKey, seasonAutoplayStatus]);
 
   function recordRoundAndAdvance() {
     if (!league || !currentResult) {
@@ -1508,20 +1681,21 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
             : "Season recorded. Try the community exhibition or build another squad.";
 
   return (
-    <main className="app-shell">
+    <main className="app-shell" data-app-ready={dataReady ? "true" : "false"}>
       <header className="topbar">
-        <div className="brand-lockup">
+        <a className="brand-lockup" href={`/${locale}`} aria-label={`${copy.appName} home`}>
           <FootyRushLogo />
           <div>
             <p className="eyebrow">{copy.appName}</p>
             <h1>{copy.tagline}</h1>
           </div>
-        </div>
+        </a>
         <nav className="banner-nav" aria-label="Primary">
           <button
             type="button"
             className={`banner-tab${view === "play" ? " active" : ""}`}
             onClick={() => switchView("play")}
+            aria-current={view === "play" ? "page" : undefined}
           >
             {copy.tabPlay}
           </button>
@@ -1531,6 +1705,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
             onClick={() => !isPlaying && !exhibitionPlaying && switchView("leaderboards")}
             disabled={isPlaying || exhibitionPlaying}
             title={isPlaying || exhibitionPlaying ? copy.tabLockedHint : undefined}
+            aria-current={view === "leaderboards" ? "page" : undefined}
           >
             {copy.tabLeaderboards}
             {(isPlaying || exhibitionPlaying) && <span className="tab-lock">· {copy.tabLive}</span>}
@@ -1541,6 +1716,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
             onClick={() => !isPlaying && !exhibitionPlaying && switchView("personal")}
             disabled={isPlaying || exhibitionPlaying}
             title={isPlaying || exhibitionPlaying ? copy.tabLockedHint : undefined}
+            aria-current={view === "personal" ? "page" : undefined}
           >
             {copy.tabProgress}
           </button>
@@ -1904,7 +2080,11 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                         ) : (
                           <span className="fm-row-ovr hidden">?</span>
                         )}
-                        <span className="fm-row-kit" aria-hidden="true">
+                        <span
+                          className="fm-row-kit team-kit"
+                          style={getTeamVisualStyle(spin.teamCode) as CSSProperties}
+                          aria-hidden="true"
+                        >
                           <Shirt size={30} strokeWidth={1.5} className="kit-icon" />
                           <span className="fm-row-kit-num">{candidate.player.num}</span>
                         </span>
@@ -2148,28 +2328,11 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
           <div className="season-dashboard-grid">
             <div className="season-main-stack">
               <div className="panel match-panel season-control-panel">
-                <div className="panel-header">
-                  <div>
-                    <p className="eyebrow">Be Invincible · {season.skillBand}</p>
-                    <h2>Match {season.currentMatchday + 1} of 38</h2>
-                  </div>
-                  <div className="timer season-stage-chip">Stage {season.currentMatchday + 1}</div>
-                </div>
-
                 {seasonAttemptMessage && <p className="fine-print compact-note">{seasonAttemptMessage}</p>}
-
-                {currentSeasonFixture && (
-                  <MatchHeader
-                    home={seasonManagerById.get(currentSeasonFixture.homeId)}
-                    away={seasonManagerById.get(currentSeasonFixture.awayId)}
-                    started={false}
-                    homeGoals={0}
-                    awayGoals={0}
-                  />
-                )}
 
                 {currentSeasonFixture && seasonHumanManager && (
                   <SeasonPreMatchPanel
+                    copy={copy}
                     opponent={currentSeasonFixture.homeId === "human"
                       ? seasonManagerById.get(currentSeasonFixture.awayId)
                       : seasonManagerById.get(currentSeasonFixture.homeId)}
@@ -2183,6 +2346,11 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                     availableSubs={seasonOutOfFormSubs}
                     unavailableStarters={seasonUnavailableStartersList}
                     missingSubstitutions={seasonMissingSubstitutions}
+                    humanIsHome={currentSeasonFixture.homeId === "human"}
+                    autoplayStatus={seasonAutoplayStatus}
+                    autoplayPaused={seasonAutoplayPaused}
+                    autoplayCountdown={seasonAutoplayCountdown}
+                    autoplayError={seasonAutoplayError}
                     onChooseSub={handleSeasonSubSelection}
                     onUseTeamTalk={() => canUseSeasonTeamTalk(season) && setSeasonTeamTalkActive(true)}
                     onSkipTeamTalk={() => setSeasonTeamTalkActive(false)}
@@ -2195,7 +2363,8 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                       setSeasonOutOfFormSubId(subId);
                     }}
                     onStart={playSeasonMatchAndAdvance}
-                    canStart={canKickOffSeasonMatch()}
+                    onToggleAutoplay={() => setSeasonAutoplayPaused((paused) => !paused)}
+                    canStart={(pendingSeasonCompletionRef.current !== null || canKickOffSeasonMatch()) && seasonAutoplayStatus !== "saving"}
                   />
                 )}
               </div>
@@ -2563,6 +2732,29 @@ function FootyRushLogo() {
   );
 }
 
+function TeamBadge({
+  teamCode,
+  teamName,
+  monogram,
+  small = false
+}: {
+  teamCode: string;
+  teamName?: string;
+  monogram?: string;
+  small?: boolean;
+}) {
+  return (
+    <span
+      className={`team-badge${small ? " team-badge--sm" : ""}`}
+      style={getTeamVisualStyle(teamCode) as CSSProperties}
+      role="img"
+      aria-label={`${teamName ?? teamCode} colours`}
+    >
+      {monogram ?? getTeamMonogram(teamCode, teamName)}
+    </span>
+  );
+}
+
 function ProgressionPanel({
   score,
   completedLeagues,
@@ -2711,7 +2903,7 @@ function FormationPitch({
             }
             const isInjured = injuredPlayerIds.includes(pick.player.i);
             const isSuspended = suspendedPlayerIds.includes(pick.player.i);
-            const tokenClass = `pitch-token${isInjured ? " injured" : isSuspended ? " suspended" : ""}`;
+            const tokenClass = `pitch-token team-kit${isInjured ? " injured" : isSuspended ? " suspended" : ""}`;
             const lastName = pick.player.n.split(/[\s.]+/).filter(Boolean).slice(-1)[0] ?? pick.player.n;
             return (
               <div
@@ -2720,7 +2912,7 @@ function FormationPitch({
                 style={{ left: `${xPct}%`, top: `${yPct}%` }}
                 title={`${pick.player.n} · ${pick.slotLabel} · ${pick.teamCode} '${String(pick.year).slice(2)}${pick.boostActive && pick.boost ? ` · ${pick.boost.label}` : ""}`}
               >
-                <span className={tokenClass}>
+                <span className={tokenClass} style={getTeamVisualStyle(pick.teamCode) as CSSProperties}>
                   <Shirt size={34} strokeWidth={1.5} className="kit-icon" />
                   <span className="kit-num">{pick.player.num}</span>
                   {isInjured && <span className="token-flag injury">＋</span>}
@@ -2987,6 +3179,7 @@ function PreMatchPanel({
 }
 
 function SeasonPreMatchPanel({
+  copy,
   opponent,
   human,
   humanStanding,
@@ -2998,14 +3191,21 @@ function SeasonPreMatchPanel({
   availableSubs,
   unavailableStarters,
   missingSubstitutions,
+  humanIsHome,
+  autoplayStatus,
+  autoplayPaused,
+  autoplayCountdown,
+  autoplayError,
   canStart,
   onChooseSub,
   onUseTeamTalk,
   onSkipTeamTalk,
   onKeepOutOfForm,
   onBenchOutOfForm,
-  onStart
+  onStart,
+  onToggleAutoplay
 }: {
+  copy: Copy;
   opponent?: ManagerSquad;
   human: ManagerSquad;
   humanStanding?: ReturnType<typeof computeStandings>[number];
@@ -3017,13 +3217,19 @@ function SeasonPreMatchPanel({
   availableSubs: DraftPick[];
   unavailableStarters: DraftPick[];
   missingSubstitutions: DraftPick[];
+  humanIsHome: boolean;
+  autoplayStatus: InvincibleAutoplayStatus;
+  autoplayPaused: boolean;
+  autoplayCountdown: number;
+  autoplayError: string;
   canStart: boolean;
   onChooseSub: (unavailablePlayerId: number, subPlayerId: number) => void;
   onUseTeamTalk: () => void;
   onSkipTeamTalk: () => void;
   onKeepOutOfForm: () => void;
   onBenchOutOfForm: (subId: number) => void;
-  onStart: () => void;
+  onStart: () => void | Promise<void>;
+  onToggleAutoplay: () => void;
 }) {
   const oppStrength = opponent ? calculateSquadStrength(opponent) : null;
   const talkHalf = teamTalkHalfForMatchday(season.currentMatchday);
@@ -3060,29 +3266,66 @@ function SeasonPreMatchPanel({
         opponentGoals: latestHumanResult.homeId === "human" ? latestHumanResult.awayGoals : latestHumanResult.homeGoals
       }
     : null;
+  const opponentName = opponent?.displayName ?? "Opponent";
+  const opponentTeamCode = opponent?.picks[0]?.teamCode ?? opponent?.id ?? "OPP";
+  const humanTeamCode = human.picks[0]?.teamCode ?? "FR";
+  const homeName = humanIsHome ? human.displayName : opponentName;
+  const awayName = humanIsHome ? opponentName : human.displayName;
+  const [countdownPrefix, countdownSuffix = ""] = copy.nextGameCountdown.split("{seconds}");
+  const autoplayMessage =
+    autoplayStatus === "paused"
+      ? copy.autoplayPaused
+        : autoplayStatus === "attention"
+          ? copy.actionRequired
+          : autoplayStatus === "saving"
+            ? "Playing and saving this match…"
+            : autoplayStatus === "failed"
+              ? autoplayError
+              : "Season complete.";
   return (
     <div className="prematch-panel season-pregame">
-      <div className="season-primary-action">
-        <div>
-          <span>Next up</span>
-          <strong>{opponent?.displayName ?? "Opponent"}</strong>
-          <small>{missingSubstitutions.length > 0 ? "Choose replacements to continue" : "Ready for the next fixture"}</small>
+      <div className="next-game-hero" data-autoplay-state={autoplayStatus}>
+        <div className="next-game-copy">
+          <span className="next-game-kicker">
+            {copy.nextGame} · Match {season.currentMatchday + 1} of {season.rounds.length} · {season.skillBand}
+          </span>
+          <div className="next-game-matchup-row">
+            <TeamBadge teamCode={humanTeamCode} teamName={human.displayName} monogram="YOU" />
+            <div className="next-game-matchup" aria-label={`${homeName} versus ${awayName}`}>
+              <span className={humanIsHome ? "next-game-human" : "next-game-opponent"}>{homeName}</span>
+              <span className="next-game-vs" aria-hidden="true">v</span>
+              <span className={humanIsHome ? "next-game-opponent" : "next-game-human"}>{awayName}</span>
+            </div>
+            <TeamBadge teamCode={opponentTeamCode} teamName={opponentName} />
+          </div>
+          {latestSummary && (
+            <small className="next-game-last-result">
+              Last result · {latestSummary.humanGoals}–{latestSummary.opponentGoals} · {season.managers.find((manager) => manager.id === latestSummary.opponentId)?.displayName ?? latestSummary.opponentId}
+            </small>
+          )}
+          <div className="next-game-status" role="status" aria-live="polite">
+            {autoplayStatus === "running" ? (
+              <span className="next-game-countdown">
+                <span>{countdownPrefix}</span>
+                <strong>{autoplayCountdown}</strong>
+                <span>{countdownSuffix}</span>
+              </span>
+            ) : autoplayMessage}
+          </div>
         </div>
-        <button className="primary-button season-next-button" type="button" onClick={onStart} disabled={!canStart}>
-          <Play size={18} />
-          Next game
-        </button>
+        <div className="next-game-actions">
+          <button className="primary-button season-next-button" type="button" onClick={onStart} disabled={!canStart}>
+            <Play size={18} />
+            {autoplayStatus === "failed" ? copy.retry : autoplayStatus === "saving" ? "Saving…" : copy.startNow}
+          </button>
+          {autoplayStatus !== "failed" && autoplayStatus !== "saving" && autoplayStatus !== "complete" && (
+            <button className="secondary-button" type="button" onClick={onToggleAutoplay}>
+              {autoplayPaused ? <Play size={16} /> : <Pause size={16} />}
+              {autoplayPaused ? copy.resumeAutoplay : copy.pauseAutoplay}
+            </button>
+          )}
+        </div>
       </div>
-
-      {latestSummary && (
-        <div className="season-last-result">
-          <span>Last result</span>
-          <strong>
-            {latestSummary.humanGoals} – {latestSummary.opponentGoals}
-          </strong>
-          <small>{season.managers.find((manager) => manager.id === latestSummary.opponentId)?.displayName ?? latestSummary.opponentId}</small>
-        </div>
-      )}
 
       <div className="prematch-stats">
         {oppStrength && (
@@ -3516,29 +3759,6 @@ function formatShortDate(value: string): string {
   return new Date(value).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
-const MANAGER_MOOD: Record<string, { brow: string; mouth: string; arm: string }> = {
-  ready: {
-    brow: "M 42 21 L 49 21 M 51 21 L 58 21",
-    mouth: "M 46 30 Q 50 31.5 54 30",
-    arm: "manager-arm-ready"
-  },
-  thinking: {
-    brow: "M 42 21.5 L 49 20 M 51 20 L 58 21.5",
-    mouth: "M 47 30.5 L 53 30.5",
-    arm: "manager-arm-think"
-  },
-  happy: {
-    brow: "M 42 20 Q 45.5 18 49 20 M 51 20 Q 54.5 18 58 20",
-    mouth: "M 45 29 Q 50 34.5 55 29",
-    arm: "manager-arm-happy"
-  },
-  sad: {
-    brow: "M 42 22 L 49 19 M 51 19 L 58 22",
-    mouth: "M 45 31.5 Q 50 27 55 31.5",
-    arm: "manager-arm-sad"
-  }
-};
-
 function ManagerAvatar({
   mood = "ready",
   line,
@@ -3548,72 +3768,13 @@ function ManagerAvatar({
   line: string;
   compact?: boolean;
 }) {
-  const config = MANAGER_MOOD[mood] ?? MANAGER_MOOD.ready;
   return (
-    <div className={`manager-avatar${compact ? " compact" : ""}`}>
-      <div className={`manager-figure ${config.arm}`}>
-        <svg viewBox="0 0 100 120" width="76" height="92" role="img" aria-label="Team manager">
-          {/* ground shadow */}
-          <ellipse className="manager-shadow" cx="50" cy="116" rx="22" ry="3" fill="rgba(0,0,0,0.24)" />
-
-          {/* legs + boots */}
-          <rect x="39" y="83" width="9" height="24" rx="4" fill="#1c2226" />
-          <rect x="52" y="83" width="9" height="24" rx="4" fill="#1c2226" />
-          <rect x="36" y="103" width="15" height="7" rx="3" fill="#0c1112" />
-          <rect x="49" y="103" width="15" height="7" rx="3" fill="#0c1112" />
-
-          {/* tracksuit jacket */}
-          <path d="M 34 42 Q 50 35 66 42 L 71 87 Q 50 95 29 87 Z" fill="#232b30" />
-          {/* slim accent piping */}
-          <path d="M 35.5 43 L 31 87 L 33.5 87 L 38 44 Z" fill="var(--accent)" />
-          <path d="M 64.5 43 L 69 87 L 66.5 87 L 62 44 Z" fill="var(--accent)" />
-          {/* zip */}
-          <rect x="49" y="40" width="2" height="49" rx="1" fill="#11171a" />
-          {/* collar */}
-          <path d="M 42 40 L 50 47.5 L 58 40 L 55.5 37.5 L 50 42.5 L 44.5 37.5 Z" fill="var(--accent)" />
-
-          {/* static arm holding tactics board */}
-          <g>
-            <path d="M 34 45 Q 23 51 22 63 L 31 66 Q 32 55 40 49 Z" fill="#232b30" />
-            <circle cx="24" cy="67" r="5.5" fill="#e7c39c" />
-            <g transform="rotate(-6 24 75)">
-              <rect x="14" y="63" width="20" height="24" rx="2" fill="#e9e1cf" stroke="#9c8a6b" strokeWidth="1" />
-              <line x1="17" y1="69" x2="31" y2="69" stroke="#a9986f" strokeWidth="1.4" />
-              <line x1="17" y1="74" x2="31" y2="74" stroke="#a9986f" strokeWidth="1.4" />
-              <line x1="17" y1="79" x2="27" y2="79" stroke="#a9986f" strokeWidth="1.4" />
-            </g>
-          </g>
-
-          {/* animated arm */}
-          <g className="manager-arm">
-            <path d="M 66 45 Q 77 51 78 63 L 69 66 Q 68 55 61 49 Z" fill="#232b30" />
-            <circle cx="76" cy="65" r="6" fill="#e7c39c" />
-          </g>
-
-          {/* neck + head */}
-          <rect x="46" y="33" width="8" height="9" fill="#e7c39c" />
-          <g className="manager-head">
-            <circle cx="50" cy="24" r="12.5" fill="#f0d3ac" />
-            {/* ears */}
-            <circle cx="38.3" cy="25" r="2.2" fill="#e7c39c" />
-            <circle cx="61.7" cy="25" r="2.2" fill="#e7c39c" />
-            {/* hair */}
-            <path d="M 37 23 Q 35 10 50 10 Q 65 10 63 23 Q 63 16.5 50 16.5 Q 37 16.5 37 23 Z" fill="#3a2e23" />
-            {/* blush */}
-            <ellipse cx="43" cy="28" rx="2.6" ry="1.5" fill="#e8a98b" opacity="0.5" />
-            <ellipse cx="57" cy="28" rx="2.6" ry="1.5" fill="#e8a98b" opacity="0.5" />
-            {/* eyes */}
-            <g className="manager-eyes">
-              <circle cx="45.5" cy="24" r="1.6" fill="#1c1c1c" />
-              <circle cx="54.5" cy="24" r="1.6" fill="#1c1c1c" />
-            </g>
-            {/* brow + mouth (mood) */}
-            <path d={config.brow} stroke="#3a2e23" strokeWidth="1.6" fill="none" strokeLinecap="round" />
-            <path d={config.mouth} stroke="#9c5b3c" strokeWidth="1.4" fill="none" strokeLinecap="round" />
-          </g>
-        </svg>
+    <div className={`manager-avatar tactical-assistant${compact ? " compact" : ""}`} data-mood={mood}>
+      <div className="tactical-assistant-icon" aria-hidden="true">
+        <BarChart3 size={22} />
       </div>
       <div className="manager-speech">
+        <span className="tactical-assistant-label">Tactical assistant</span>
         <p>{line}</p>
       </div>
     </div>

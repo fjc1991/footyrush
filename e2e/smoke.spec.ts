@@ -19,6 +19,7 @@ test("home renders without runtime errors and both modes are selectable", async 
   // crashed when the leaderboard useMemo threw on the missing export).
   const miniLeague = page.getByRole("button", { name: /Mini league/i });
   const beInvincible = page.getByRole("button", { name: /Be Invincible/i });
+  await expect(page.locator("[data-app-ready='true']")).toBeVisible({ timeout: 15_000 });
   await expect(miniLeague).toBeVisible();
   await expect(beInvincible).toBeVisible();
 
