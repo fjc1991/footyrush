@@ -23,6 +23,8 @@ export const en = {
   signInTitle: "Create your manager ID",
   signInCopy: "Guest runs are temporary. Register to save results, join leaderboards, and track personal progress.",
   xLogin: "Continue with X",
+  xLoginRecommended: "Recommended",
+  emailLoginDivider: "Or use email",
   xLoginCancelled: "X sign-in was cancelled. Your account was not changed.",
   xLoginUnavailable: "X sign-in is temporarily unavailable. Please use email sign-in for now.",
   xLoginFailed: "We couldn't finish X sign-in. Please try again.",

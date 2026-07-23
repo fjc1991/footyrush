@@ -3720,6 +3720,14 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                   </p>
                 ) : null}
                 <p>{copy.signInCopy}</p>
+                <div className="auth-x-choice">
+                  <span>{copy.xLoginRecommended}</span>
+                  <button className="primary-button wide auth-x-primary" type="button" onClick={signInWithX}>
+                    <XLogo size={18} />
+                    {copy.xLogin}
+                  </button>
+                </div>
+                <p className="auth-divider"><span>{copy.emailLoginDivider}</span></p>
                 <form className="auth-stack" onSubmit={signInWithPassword}>
                   <input
                     value={authEmail}
@@ -3735,7 +3743,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                     type="password"
                     autoComplete="current-password"
                   />
-                  <button className="primary-button wide" type="submit">
+                  <button className="secondary-button wide" type="submit">
                     <LogIn size={18} />
                     Sign in
                   </button>
@@ -3743,11 +3751,6 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                     Create account
                   </button>
                 </form>
-                <p className="auth-divider">or</p>
-                <button className="secondary-button wide" type="button" onClick={signInWithX}>
-                  <XLogo size={16} />
-                  {copy.xLogin}
-                </button>
                 <form className="email-form" onSubmit={signInWithEmail}>
                   <button className="secondary-button wide" type="submit">
                     <Mail size={16} />

@@ -23,6 +23,8 @@ export const es = {
   signInTitle: "Crea tu ID de manager",
   signInCopy: "Las partidas de invitado son temporales. Regístrate para guardar resultados, entrar en clasificaciones y seguir tu progreso.",
   xLogin: "Continuar con X",
+  xLoginRecommended: "Recomendado",
+  emailLoginDivider: "O usa el email",
   xLoginCancelled: "Se canceló el acceso con X. Tu cuenta no cambió.",
   xLoginUnavailable: "El acceso con X no está disponible temporalmente. Usa el acceso por email por ahora.",
   xLoginFailed: "No pudimos completar el acceso con X. Inténtalo de nuevo.",

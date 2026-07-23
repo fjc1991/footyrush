@@ -23,6 +23,8 @@ export const pt = {
   signInTitle: "Crie seu ID de manager",
   signInCopy: "Partidas como convidado são temporárias. Cadastre-se para salvar resultados, entrar nas classificações e acompanhar seu progresso.",
   xLogin: "Continuar com o X",
+  xLoginRecommended: "Recomendado",
+  emailLoginDivider: "Ou use o e-mail",
   xLoginCancelled: "O login com o X foi cancelado. Sua conta não foi alterada.",
   xLoginUnavailable: "O login com o X está temporariamente indisponível. Use o email por enquanto.",
   xLoginFailed: "Não foi possível concluir o login com o X. Tente novamente.",

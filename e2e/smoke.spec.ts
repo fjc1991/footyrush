@@ -26,7 +26,16 @@ test("home renders without runtime errors and both modes are selectable", async 
 
   // X is the only social sign-in offered; the retired Google action is absent.
   await page.locator(".profile-pill").click();
-  await expect(page.getByRole("button", { name: "Continue with X", exact: true })).toBeVisible();
+  const authDialog = page.getByRole("dialog", { name: "Create your manager ID", exact: true });
+  const xLogin = authDialog.getByRole("button", { name: "Continue with X", exact: true });
+  const emailInput = authDialog.getByPlaceholder("you@example.com");
+  await expect(xLogin).toBeVisible();
+  await expect(xLogin).toHaveClass(/primary-button/);
+  await expect(authDialog.getByText("Recommended", { exact: true })).toBeVisible();
+  await expect(authDialog.getByText("Or use email", { exact: true })).toBeVisible();
+  const authOrder = await Promise.all([xLogin.boundingBox(), emailInput.boundingBox()]);
+  expect(authOrder[0]?.y ?? Number.POSITIVE_INFINITY).toBeLessThan(authOrder[1]?.y ?? 0);
+  await expect(authDialog.getByRole("button", { name: "Sign in", exact: true })).toHaveClass(/secondary-button/);
   await expect(page.getByRole("button", { name: /Continue with Google/i })).toHaveCount(0);
   await page.getByRole("button", { name: "Close sign-in", exact: true }).click();
 

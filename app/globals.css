@@ -1376,12 +1376,55 @@ p {
   color: var(--text);
 }
 
+.auth-x-choice {
+  display: grid;
+  gap: 7px;
+  margin-top: 16px;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 54%, var(--line));
+  border-radius: var(--r-md);
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--accent) 16%, transparent), transparent 72%),
+    var(--panel-strong);
+  box-shadow: 0 12px 30px color-mix(in srgb, var(--accent) 9%, transparent);
+}
+
+.auth-x-choice > span {
+  padding-inline: 3px;
+  color: var(--accent);
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.auth-x-primary {
+  min-height: 52px;
+  font-size: 1rem;
+  box-shadow: 0 8px 22px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
 .auth-divider {
-  margin: 14px 0 6px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 16px 0 0;
   font-size: 0.78rem;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--muted);
+}
+
+.auth-divider::before,
+.auth-divider::after {
+  content: "";
+  flex: 1 1 auto;
+  height: 1px;
+  background: var(--line);
+}
+
+.auth-divider span {
+  flex: 0 0 auto;
 }
 
 .fine-print {
