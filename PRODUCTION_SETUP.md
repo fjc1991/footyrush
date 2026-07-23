@@ -30,6 +30,17 @@ the last deploy:
   `product_events` store for consented, allowlisted gameplay analytics. It stores
   a random browser ID and optional account ID, but no raw IP, email, X profile,
   post content, player names, user agent, or free-form text.
+- `0011_user_identity_activity_preferences.sql` — adds one-time manager-ID
+  confirmation/rename, signed-in visits and mode lifecycles, optional profile
+  preferences, independent communication/audience consent, administrator export
+  auditing, and the atomic `claim_manager_id` function.
+
+Apply `0009`, then `0010`, then `0011` before releasing the matching application
+code. `0011` marks every existing account as requiring one manager-ID
+confirmation or change, clears only deterministic generated `mgr_…` IDs, and
+starts every future account with `manager_id = null`. The atomic claim updates
+the profile and existing leaderboard, community-squad, and league-member public
+names together.
 
 The application includes an idempotent compatibility path that can still save
 and read authenticated **Mini League** results through the pre-`0009` table
@@ -68,12 +79,32 @@ order by 1 desc, 2;
 | Shared end-of-run squads | `public.community_squads` | Table Editor |
 | Guest free-play enforcement | `public.guest_play_allowances` using a salted IP hash, not the raw IP | Table Editor |
 | Opt-in, allowlisted gameplay events | `public.product_events` after migration `0010` | Prefer aggregate SQL; raw rows are service-role-only |
-| Active setup/draft state, preferences and unsynced fallback progress | The player's browser storage | Not centrally visible; it stays on that device unless a completed result is synced |
+| Signed-in visits and visible/recently-active time | `public.user_visits` after migration `0011` | My home and administrator aggregates; no raw IP or exact fingerprint |
+| Mode starts, completions, abandoned runs and matches | `public.user_mode_runs` after migration `0011` | My home and administrator aggregates |
+| Optional football preferences and separate audience-insight consent | `public.profile_preferences` after migration `0011` | My home; advertiser view is aggregate-only and suppresses groups below 10 |
+| FootyRush promotional-email consent | `public.marketing_preferences` after migration `0011` | My home and verified-email administrator export only |
+| Active setup/draft state and unsynced fallback progress | The player's browser storage | Not centrally visible; it stays on that device unless a completed result is synced |
 
 X credentials and tokens are handled by X and Supabase Auth. FootyRush does not
 store the user's X password, scrape their posts, or copy their X profile into
 `product_events`. Product analytics remains off until the player explicitly
 opts in.
+
+### Administrator user database
+
+Grant access only with verified Supabase Auth app metadata:
+
+```json
+{ "role": "admin" }
+```
+
+Never infer administrator access from an email or client-editable
+`user_metadata`. Verified administrators can open `/{locale}/admin/users`; every
+API behind that screen re-verifies the bearer token and `app_metadata.role`.
+The advertiser report contains opted-in aggregates only and suppresses segments
+with fewer than ten people. CSV export contains only explicit FootyRush email
+opt-ins with a Supabase-verified email, and each export is written to
+`admin_export_audit`. There is no advertiser contact-list export.
 
 ## 2. Environment variables
 

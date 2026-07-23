@@ -24,6 +24,8 @@ import {
 import { createMinileague } from "@/lib/game/matchmaking";
 import { canonicalAccountRunId } from "@/lib/game/result-id";
 import { renderCommentary } from "@/lib/game/commentary";
+import { type MatchSpeed } from "@/lib/game/match-clock";
+import { useMatchClock } from "@/lib/game/use-match-clock";
 import {
   INVINCIBLE_TEAM_TALK_LIMIT,
   OUT_OF_FORM_EXPECTED_GOALS_PENALTY,
@@ -75,6 +77,8 @@ import {
   simulateFixture
 } from "@/lib/game/simulation";
 import { getSupabaseBrowserClient, hasSupabaseConfig } from "@/lib/supabase/client";
+import { useAccountActivity } from "@/lib/user/account-activity";
+import MyHomeAccount from "@/components/MyHomeAccount";
 import type { Session } from "@supabase/supabase-js";
 import type {
   CompetitionMode,
@@ -101,6 +105,8 @@ interface LocalProfile {
   displayName: string;
   email?: string;
   demo: boolean;
+  requiresManagerIdConfirmation?: boolean;
+  renameAvailable?: boolean;
 }
 
 interface CanonicalProfileResponse {
@@ -111,8 +117,16 @@ interface CanonicalProfileResponse {
     displayName: string;
     email: string | null;
     demo: false;
+    requiresManagerIdConfirmation?: boolean;
+    renameAvailable?: boolean;
   };
   admin?: boolean;
+}
+
+function publicLocalProfile(profile: LocalProfile): LocalProfile {
+  return !profile.demo && profile.managerId
+    ? { ...profile, displayName: `@${profile.managerId}` }
+    : profile;
 }
 
 // Authorization header carrying the verified Supabase access token. Competitive
@@ -233,6 +247,10 @@ const TESTING_MODE = process.env.NEXT_PUBLIC_TESTING_MODE === "true";
 const DRAFT_RESHUFFLE_LIMIT = 5;
 const MANAGER_SPIN_LIMIT = 3;
 
+function activeRunStorageKey(profileId: string): string {
+  return `footyrush.activeRun.v1.${profileId}`;
+}
+
 function recordsStorageKey(profile: LocalProfile | null): string {
   return profileStorageKey(recordsKey, profile);
 }
@@ -322,6 +340,35 @@ function ShareOnXButton({
   );
 }
 
+function BroadcastClock({ minute, running }: { minute: number; running: boolean }) {
+  const label = minute >= 90 ? "Full time" : running ? "Match live" : "Ready";
+  const announcement =
+    minute >= 90
+      ? "Full time"
+      : minute >= 45
+        ? "Second half underway"
+        : running
+          ? "Match underway"
+          : "Match ready";
+  return (
+    <div
+      className={`broadcast-clock${running ? " live" : minute >= 90 ? " complete" : ""}`}
+      role="timer"
+      aria-label={`${label}, ${minute} minutes`}
+    >
+      <span className="visually-hidden" aria-live="polite">{announcement}</span>
+      <span className="broadcast-clock-state">
+        <span aria-hidden="true" className="broadcast-clock-dot" />
+        {label}
+      </span>
+      <strong>{minute}&apos;</strong>
+      <span className="broadcast-clock-half">
+        {minute >= 90 ? "FT" : minute >= 45 ? "2ND HALF" : "1ST HALF"}
+      </span>
+    </div>
+  );
+}
+
 export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: string }) {
   const [view, setView] = useState<MainView>("play");
   const [phase, setPhase] = useState<Phase>("setup");
@@ -331,6 +378,17 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
   const [picks, setPicks] = useState<DraftPick[]>([]);
   const [spin, setSpin] = useState<SpinResult | null>(null);
   const [profile, setProfile] = useState<LocalProfile | null>(null);
+  const recordAccountActivity = useAccountActivity(
+    profile && !profile.demo ? profile.id : null,
+    locale
+  );
+  const activeRunRef = useRef<{
+    id: string;
+    mode: "minileague" | "invincible";
+    matches: number;
+    completed: boolean;
+  } | null>(null);
+  const exhibitionRunRef = useRef<string | null>(null);
   const [guestStatus, setGuestStatus] = useState<GuestStatus>({ allowed: true, played: false });
   const [showAuthGate, setShowAuthGate] = useState(false);
   const authCloseRef = useRef<HTMLButtonElement | null>(null);
@@ -352,9 +410,15 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
   const [resultSyncMessage, setResultSyncMessage] = useState("");
   const [league, setLeague] = useState<LeagueState | null>(null);
   const [currentResult, setCurrentResult] = useState<FixtureResult | null>(null);
-  const [liveSecond, setLiveSecond] = useState(0);
-  const [isPlaying, setIsPlaying] = useState(false);
   const [readyToRecord, setReadyToRecord] = useState(false);
+  const [matchSpeed, setMatchSpeed] = useState<MatchSpeed>(1);
+  const {
+    minute: liveSecond,
+    running: isPlaying,
+    start: startLeagueClock,
+    reset: resetLeagueClock,
+    finish: finishLeagueClock
+  } = useMatchClock(matchSpeed, () => setReadyToRecord(true));
   const [selectedSub, setSelectedSub] = useState<string | null>(null);
   const [spinning, setSpinning] = useState(false);
   const [slotPickerCandidateId, setSlotPickerCandidateId] = useState<number | null>(null);
@@ -369,13 +433,24 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
   const [expertUnlockedEarned, setExpertUnlockedEarned] = useState(false);
   const [lastScoreDelta, setLastScoreDelta] = useState<number | null>(null);
   const [expertUnlockedThisRun, setExpertUnlockedThisRun] = useState(false);
-  const [matchSpeed, setMatchSpeed] = useState<1 | 2 | 4>(1);
   const [scoreFlashing, setScoreFlashing] = useState(false);
   const [lastFlashedGoalCount, setLastFlashedGoalCount] = useState(0);
   const [roundSummaryData, setRoundSummaryData] = useState<{ round: number; fixtures: FixtureResult[]; managers: ManagerSquad[] } | null>(null);
   const [exhibition, setExhibition] = useState<ExhibitionState | null>(null);
-  const [exhibitionSecond, setExhibitionSecond] = useState(0);
-  const [exhibitionPlaying, setExhibitionPlaying] = useState(false);
+  const {
+    minute: exhibitionSecond,
+    running: exhibitionPlaying,
+    start: startExhibitionClock,
+    reset: resetExhibitionClock,
+    finish: finishExhibitionClock
+  } = useMatchClock(matchSpeed, () => {
+    if (exhibitionRunRef.current) {
+      recordAccountActivity("run_completed", "exhibition", exhibitionRunRef.current, {
+        outcome: exhibition ? humanFixtureOutcome(exhibition.result) : "completed"
+      });
+      exhibitionRunRef.current = null;
+    }
+  });
   const [exhibitionReturnPhase, setExhibitionReturnPhase] = useState<Phase>("complete");
   const [season, setSeason] = useState<InvincibleSeason | null>(null);
   const [seasonDecision, setSeasonDecision] = useState<SeasonPregameDecision | null>(null);
@@ -428,6 +503,28 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     },
     [locale]
   );
+
+  useEffect(() => {
+    if (!profile || profile.demo) return;
+    const storageKey = activeRunStorageKey(profile.id);
+    if (activeRunRef.current && !activeRunRef.current.completed) {
+      recordAccountActivity("run_started", activeRunRef.current.mode, activeRunRef.current.id);
+      window.localStorage.setItem(storageKey, JSON.stringify(activeRunRef.current));
+      return;
+    }
+    try {
+      const stale = JSON.parse(window.localStorage.getItem(storageKey) ?? "null") as {
+        id?: string;
+        mode?: "minileague" | "invincible";
+      } | null;
+      if (stale?.id && (stale.mode === "minileague" || stale.mode === "invincible")) {
+        recordAccountActivity("run_abandoned", stale.mode, stale.id);
+        window.localStorage.removeItem(storageKey);
+      }
+    } catch {
+      window.localStorage.removeItem(storageKey);
+    }
+  }, [profile, recordAccountActivity]);
 
   const chooseAnalyticsConsent = useCallback(
     (value: Exclude<AnalyticsConsent, "unknown">) => {
@@ -916,7 +1013,9 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
 
     let initialProfile: LocalProfile | null = null;
     try {
-      initialProfile = storedProfile ? (JSON.parse(storedProfile) as LocalProfile) : null;
+      initialProfile = storedProfile
+        ? publicLocalProfile(JSON.parse(storedProfile) as LocalProfile)
+        : null;
     } catch {
       window.localStorage.removeItem(profileKey);
     }
@@ -968,7 +1067,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     const readStoredProfile = (): LocalProfile | null => {
       try {
         const stored = window.localStorage.getItem(profileKey);
-        return stored ? (JSON.parse(stored) as LocalProfile) : null;
+        return stored ? publicLocalProfile(JSON.parse(stored) as LocalProfile) : null;
       } catch {
         return null;
       }
@@ -1064,7 +1163,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
         setShowAuthGate(true);
         return;
       }
-      if (!payload.profile.managerId) {
+      if (!payload.profile.managerId || payload.profile.requiresManagerIdConfirmation) {
         window.localStorage.removeItem(profileKey);
         setProfile(null);
         hydrateLocalProgress(null);
@@ -1077,9 +1176,11 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
       const nextProfile: LocalProfile = {
         id: payload.profile.id,
         managerId: payload.profile.managerId,
-        displayName: payload.profile.displayName,
+        displayName: `@${payload.profile.managerId}`,
         email: payload.profile.email ?? session.user.email ?? "",
-        demo: false
+        demo: false,
+        requiresManagerIdConfirmation: false,
+        renameAvailable: Boolean(payload.profile.renameAvailable)
       };
       restoreOAuthResume(nextProfile);
       persistProfile(nextProfile);
@@ -1240,43 +1341,6 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
   }, [locale]);
 
   useEffect(() => {
-    if (!isPlaying) {
-      return;
-    }
-    const timer = window.setInterval(() => {
-      setLiveSecond((second) => {
-        if (second >= 90) {
-          window.clearInterval(timer);
-          setIsPlaying(false);
-          setReadyToRecord(true);
-          return 90;
-        }
-        return second + 1;
-      });
-    }, 1000 / matchSpeed);
-
-    return () => window.clearInterval(timer);
-  }, [isPlaying, matchSpeed]);
-
-  useEffect(() => {
-    if (!exhibitionPlaying) {
-      return;
-    }
-    const timer = window.setInterval(() => {
-      setExhibitionSecond((second) => {
-        if (second >= 90) {
-          window.clearInterval(timer);
-          setExhibitionPlaying(false);
-          return 90;
-        }
-        return second + 1;
-      });
-    }, 1000 / matchSpeed);
-
-    return () => window.clearInterval(timer);
-  }, [exhibitionPlaying, matchSpeed]);
-
-  useEffect(() => {
     if (leagueCommentaryRef.current) {
       leagueCommentaryRef.current.scrollTop = leagueCommentaryRef.current.scrollHeight;
     }
@@ -1339,19 +1403,28 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
   }
 
   function resetDraft(nextPhase: Phase = "setup") {
+    if (activeRunRef.current && !activeRunRef.current.completed) {
+      recordAccountActivity(
+        "run_abandoned",
+        activeRunRef.current.mode,
+        activeRunRef.current.id
+      );
+    }
+    if (profile && !profile.demo) {
+      window.localStorage.removeItem(activeRunStorageKey(profile.id));
+    }
+    activeRunRef.current = null;
     setPicks([]);
     setSpin(null);
     setLeague(null);
     setCurrentResult(null);
-    setLiveSecond(0);
-    setIsPlaying(false);
+    resetLeagueClock();
     setReadyToRecord(false);
     setSelectedSub(null);
     setSlotPickerCandidateId(null);
     setDraftReshufflesLeft(DRAFT_RESHUFFLE_LIMIT);
     setExhibition(null);
-    setExhibitionSecond(0);
-    setExhibitionPlaying(false);
+    resetExhibitionClock();
     setSeason(null);
     setSeasonDecision(null);
     setSeasonOutOfFormChoice(null);
@@ -1371,13 +1444,20 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
   }
 
   function startDraft() {
+    resetDraft("draft");
+    const mode = gameMode === "be_invincible" ? "invincible" : "minileague";
+    const runId = crypto.randomUUID();
+    activeRunRef.current = { id: runId, mode, matches: 0, completed: false };
+    if (profile && !profile.demo) {
+      window.localStorage.setItem(activeRunStorageKey(profile.id), JSON.stringify(activeRunRef.current));
+    }
+    recordAccountActivity("run_started", mode, runId);
     void trackProductEvent("draft_started", {
-      competitionMode: gameMode === "be_invincible" ? "invincible" : "minileague",
+      competitionMode: mode,
       draftMode,
       formationId,
       managerRating: selectedManager?.rating ?? managerScore
     });
-    resetDraft("draft");
   }
 
   function switchView(nextView: MainView) {
@@ -1520,6 +1600,13 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
       setShowAuthGate(true);
       return;
     }
+    if (activeRunRef.current) {
+      recordAccountActivity(
+        "draft_completed",
+        activeRunRef.current.mode,
+        activeRunRef.current.id
+      );
+    }
 
     void trackProductEvent("draft_completed", {
       competitionMode: gameMode === "be_invincible" ? "invincible" : "minileague",
@@ -1576,7 +1663,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
 
     setLeague({ ...nextLeague, currentRound: 0, results: [] });
     setCurrentResult(null);
-    setLiveSecond(0);
+    resetLeagueClock();
     setReadyToRecord(false);
     setPhase("league");
   }
@@ -1597,17 +1684,14 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
       seed: `${league.id}:${currentHumanFixture.id}:${league.results.length}`
     });
     setCurrentResult(result);
-    setLiveSecond(0);
-    setIsPlaying(true);
+    startLeagueClock();
     setReadyToRecord(false);
     setSelectedSub(null);
     setLastFlashedGoalCount(0);
   }
 
   function finishNow() {
-    setLiveSecond(90);
-    setIsPlaying(false);
-    setReadyToRecord(true);
+    finishLeagueClock();
   }
 
   function canKickOffSeasonMatch(): boolean {
@@ -1770,6 +1854,21 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     const human = finalStandings.find((standing) => standing.managerId === "human");
     if (human) {
       const finalPosition = finalStandings.findIndex((standing) => standing.managerId === "human") + 1;
+      if (activeRunRef.current?.mode === "invincible") {
+        activeRunRef.current.completed = true;
+        recordAccountActivity(
+          "run_completed",
+          "invincible",
+          activeRunRef.current.id,
+          {
+            outcome: human.losses === 0 ? "unbeaten" : "completed",
+            titleWon: finalPosition === 1
+          }
+        );
+        if (profile && !profile.demo) {
+          window.localStorage.removeItem(activeRunStorageKey(profile.id));
+        }
+      }
       void trackProductEvent("competition_completed", {
         competitionMode: "invincible",
         points: human.points,
@@ -1819,6 +1918,15 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
       matchday: season.currentMatchday + 1,
       outcome: humanFixtureOutcome(humanResult)
     });
+    if (activeRunRef.current?.mode === "invincible") {
+      activeRunRef.current.matches += 1;
+      recordAccountActivity(
+        "match_completed",
+        "invincible",
+        activeRunRef.current.id,
+        { matchesPlayed: activeRunRef.current.matches }
+      );
+    }
     const nextResults = [...season.results, humanResult];
     const otherFixtures = currentRound.filter((fixture) => fixture.id !== humanResult.fixtureId);
     otherFixtures.forEach((fixture) => {
@@ -1906,6 +2014,15 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
       matchday: league.currentRound + 1,
       outcome: humanFixtureOutcome(currentResult)
     });
+    if (activeRunRef.current?.mode === "minileague") {
+      activeRunRef.current.matches += 1;
+      recordAccountActivity(
+        "match_completed",
+        "minileague",
+        activeRunRef.current.id,
+        { matchesPlayed: activeRunRef.current.matches }
+      );
+    }
     let nextManagers = applyFixtureInjuries(league.managers, currentResult);
     const nextResults = [...league.results, currentResult];
     const otherFixtures = currentRoundFixtures.filter((fixture) => fixture.id !== currentResult.fixtureId);
@@ -1935,7 +2052,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     const nextLeague = { ...league, managers: nextManagers, results: nextResults, currentRound: nextRound };
     setLeague(nextLeague);
     setCurrentResult(null);
-    setLiveSecond(0);
+    resetLeagueClock();
     setReadyToRecord(false);
     setSelectedSub(null);
 
@@ -2056,6 +2173,18 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
       window.localStorage.setItem(profileStorageKey(expertUnlockedKey, profile), String(nextExpert));
 
       const finalPosition = finalStandings.findIndex((standing) => standing.managerId === "human") + 1;
+      if (activeRunRef.current?.mode === "minileague") {
+        activeRunRef.current.completed = true;
+        recordAccountActivity(
+          "run_completed",
+          "minileague",
+          activeRunRef.current.id,
+          { outcome: "completed", titleWon: finalPosition === 1 }
+        );
+        if (profile && !profile.demo) {
+          window.localStorage.removeItem(activeRunStorageKey(profile.id));
+        }
+      }
       void trackProductEvent("competition_completed", {
         competitionMode: "minileague",
         points: human.points,
@@ -2229,9 +2358,12 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
       away,
       seed: `${fixture.id}:${home.displayName}:${away.displayName}`
     });
+    const exhibitionRunId = crypto.randomUUID();
+    exhibitionRunRef.current = exhibitionRunId;
+    recordAccountActivity("run_started", "exhibition", exhibitionRunId);
+    recordAccountActivity("draft_completed", "exhibition", exhibitionRunId);
     setExhibition({ home, away, result });
-    setExhibitionSecond(0);
-    setExhibitionPlaying(true);
+    startExhibitionClock();
     setExhibitionReturnPhase(returnPhase);
     setPhase("exhibition");
   }
@@ -2265,14 +2397,12 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
   }
 
   function finishExhibitionNow() {
-    setExhibitionSecond(90);
-    setExhibitionPlaying(false);
+    finishExhibitionClock();
   }
 
   function returnFromExhibition() {
     setExhibition(null);
-    setExhibitionSecond(0);
-    setExhibitionPlaying(false);
+    resetExhibitionClock();
     setPhase(exhibitionReturnPhase);
   }
 
@@ -2572,7 +2702,12 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
           >
             {theme === "light" ? <Moon size={18} /> : <Sun size={18} />}
           </button>
-          <button className="profile-pill" type="button" onClick={() => setShowAuthGate(true)}>
+          <button
+            className="profile-pill"
+            type="button"
+            onClick={() => (profile ? switchView("personal") : setShowAuthGate(true))}
+            aria-label={profile ? `Open My home for ${profile.displayName}` : "Sign in"}
+          >
             <LogIn size={16} />
             <span>{profile?.displayName ?? "Sign in"}</span>
           </button>
@@ -2634,6 +2769,9 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
           records={leaderboardRecords}
           managerScore={managerScore}
           expertUnlocked={expertUnlocked}
+          profile={profile}
+          isAdmin={isAdmin}
+          locale={locale}
         />
       )}
 
@@ -2949,13 +3087,15 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                         <div className="fm-row-main">
                           <div className="fm-row-name">
                             <strong>{candidate.player.n}</strong>
-                            {candidate.boost && (
+                          </div>
+                          {candidate.boost && (
+                            <div className="fm-row-boost">
                               <span className={`boost-badge${boostWillActivate ? "" : " inactive"}`}>
                                 <Sparkles size={12} />
                                 {candidate.boost.label}{boostWillActivate ? "" : " (inactive)"}
                               </span>
-                            )}
-                          </div>
+                            </div>
+                          )}
                           <div className="fm-row-sub">
                             <span className="card-positions">{candidate.player.p.join(" / ")}</span>
                             <span className="role-targets">→ {roleTargets}</span>
@@ -3050,10 +3190,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                 <p className="eyebrow">Historical league · {league.skillBand}</p>
                 <h2>Round {league.currentRound + 1}</h2>
               </div>
-              <div className="timer">
-                <Timer size={18} />
-                {liveSecond}&apos;
-              </div>
+              <BroadcastClock minute={liveSecond} running={isPlaying} />
             </div>
 
             {currentHumanFixture && (
@@ -3386,10 +3523,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                 <p className="eyebrow">Community exhibition</p>
                 <h2>One-off match</h2>
               </div>
-              <div className="timer">
-                <Timer size={18} />
-                {exhibitionSecond}&apos;
-              </div>
+              <BroadcastClock minute={exhibitionSecond} running={exhibitionPlaying} />
             </div>
             <MatchHeader
               home={exhibition.home}
@@ -4641,11 +4775,17 @@ function LeaderboardsScreen({
 function PersonalProgressScreen({
   records,
   managerScore,
-  expertUnlocked
+  expertUnlocked,
+  profile,
+  isAdmin,
+  locale
 }: {
   records: LeaderboardRecord[];
   managerScore: number;
   expertUnlocked: boolean;
+  profile: LocalProfile | null;
+  isAdmin: boolean;
+  locale: string;
 }) {
   const personalRecords = records.filter((record) => record.kind === "human");
   const miniRecords = personalRecords.filter((record) => record.competitionMode !== "invincible");
@@ -4677,10 +4817,24 @@ function PersonalProgressScreen({
         <div className="panel-header">
           <div>
             <p className="eyebrow">Personal leaderboard</p>
-            <h2>Your progress</h2>
+            <h2>My home</h2>
           </div>
           <Activity size={22} />
         </div>
+
+        {profile && !profile.demo ? (
+          <MyHomeAccount
+            locale={locale}
+            isAdmin={isAdmin}
+            publicName={profile.displayName}
+            email={profile.email}
+          />
+        ) : (
+          <div className="personal-card">
+            <p className="eyebrow">Save your story</p>
+            <p className="muted">Sign in to track visits, active play time, mode history and optional football preferences across devices.</p>
+          </div>
+        )}
 
         <div className="personal-hero">
           <div>

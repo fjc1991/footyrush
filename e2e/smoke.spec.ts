@@ -49,8 +49,8 @@ test("home renders without runtime errors and both modes are selectable", async 
   await page.getByRole("button", { name: "Invincible points", exact: true }).click();
   await expect(page.getByRole("heading", { name: /All time Invincible points/i })).toBeVisible();
 
-  await page.getByRole("button", { name: "My progress", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Your progress", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "My home", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "My home", exact: true })).toBeVisible();
   await expect(page.getByText("Invincible seasons", { exact: true })).toBeVisible();
 
   expect(pageErrors, `Unexpected runtime errors: ${pageErrors.join("; ")}`).toEqual([]);
@@ -145,6 +145,13 @@ test("draft workspace gives the pitch and formation room on a wide screen", asyn
   await expect(page.locator(".draw-ticket-kit")).toBeVisible();
   await expect(page.locator(".fm-row-kit")).toHaveCount(0);
   expect(await page.locator(".fm-row-number").count()).toBeGreaterThan(0);
+  const playerNameStyle = await page.locator(".fm-row-name strong").first().evaluate((element) => {
+    const style = window.getComputedStyle(element);
+    return { whiteSpace: style.whiteSpace, textOverflow: style.textOverflow, overflow: style.overflow };
+  });
+  expect(playerNameStyle.whiteSpace).not.toBe("nowrap");
+  expect(playerNameStyle.textOverflow).not.toBe("ellipsis");
+  expect(playerNameStyle.overflow).not.toBe("hidden");
 
   const assistantGap = await page.locator(".manager-avatar.compact").evaluate((element) =>
     Number.parseFloat(window.getComputedStyle(element).columnGap)

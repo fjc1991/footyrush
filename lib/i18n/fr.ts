@@ -36,7 +36,7 @@ export const fr = {
   dark: "Sombre",
   tabPlay: "Jouer",
   tabLeaderboards: "Classements",
-  tabProgress: "Ma progression",
+  tabProgress: "Mon espace",
   tabLive: "en direct",
   tabLockedHint: "Termine le match en cours pour ouvrir les classements.",
   nextGame: "Prochain match",

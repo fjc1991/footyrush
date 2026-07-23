@@ -13,17 +13,48 @@ import type {
 
 let cached: RawFootballData | null = null;
 
+export function safePlayerName(value: unknown, playerId: number): string {
+  if (typeof value === "string") {
+    const normalized = value.replace(/\s+/g, " ").trim();
+    if (normalized.length > 0) return normalized;
+  }
+  return `Unknown player #${playerId}`;
+}
+
+function validateFootballData(data: RawFootballData): RawFootballData {
+  const diagnostics: string[] = [];
+  const squads = Object.fromEntries(
+    Object.entries(data.squads ?? {}).map(([key, squad]) => [
+      key,
+      (Array.isArray(squad) ? squad : []).map((player, index) => {
+        const playerId = Number.isFinite(player?.i) ? player.i : index + 1;
+        const name = safePlayerName(player?.n, playerId);
+        if (name !== player?.n) diagnostics.push(`${key}:${playerId}`);
+        return { ...player, i: playerId, n: name };
+      })
+    ])
+  );
+  if (diagnostics.length > 0) {
+    console.warn(
+      `[FootyRush data] Replaced ${diagnostics.length} empty or malformed player name(s): ${diagnostics
+        .slice(0, 10)
+        .join(", ")}${diagnostics.length > 10 ? "…" : ""}`
+    );
+  }
+  return { ...data, squads };
+}
+
 export async function loadFootballData(): Promise<RawFootballData> {
   if (cached) return cached;
   const res = await fetch("/data.json");
   if (!res.ok) throw new Error("Failed to load football data.");
-  cached = (await res.json()) as RawFootballData;
+  cached = validateFootballData((await res.json()) as RawFootballData);
   return cached;
 }
 
 /** Pre-seed the cache directly — used by tests and server-side code. */
 export function seedFootballData(data: RawFootballData): void {
-  cached = data;
+  cached = validateFootballData(data);
 }
 
 /** Synchronous accessor — only safe after loadFootballData() or seedFootballData() has been called. */

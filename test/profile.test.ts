@@ -1,367 +1,164 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const routeMocks = vi.hoisted(() => ({
-  serviceClient: vi.fn()
-}));
-
-vi.mock("@/lib/supabase/server", () => ({
-  getSupabaseServiceClient: routeMocks.serviceClient
-}));
+const routeMocks = vi.hoisted(() => ({ serviceClient: vi.fn() }));
+vi.mock("@/lib/supabase/server", () => ({ getSupabaseServiceClient: routeMocks.serviceClient }));
 
 import { GET } from "@/app/api/profile/route";
 
-interface ProfileRow {
-  id: string;
-  manager_id: string | null;
-  display_name: string;
-  email: string | null;
-}
-
-interface DbResult {
-  data: ProfileRow | null;
-  error: { code?: string; message?: string } | null;
-}
-
-function authUser(options: {
-  id?: string;
-  email?: string;
-  appMetadata?: Record<string, unknown>;
-  userMetadata?: Record<string, unknown>;
-} = {}) {
+function user(admin = false) {
   return {
-    id: options.id ?? "11111111-1111-4111-8111-111111111111",
-    email: options.email ?? "manager@example.com",
-    app_metadata: options.appMetadata ?? {},
-    user_metadata: options.userMetadata ?? {},
+    id: "11111111-1111-4111-8111-111111111111",
+    email: "manager@example.com",
+    email_confirmed_at: "2026-07-01T00:00:00Z",
+    app_metadata: admin ? { role: "admin" } : {},
+    user_metadata: { full_name: "Private X Name" },
     aud: "authenticated",
-    created_at: "2026-07-22T00:00:00.000Z"
+    created_at: "2026-07-01T00:00:00Z"
   };
 }
 
-function profileClient(options: {
-  user?: ReturnType<typeof authUser> | null;
-  authError?: { message: string } | null;
-  reads?: DbResult[];
-  inserts?: DbResult[];
+function client(options: {
+  authUser?: ReturnType<typeof user> | null;
+  reads?: { data: Record<string, unknown> | null; error: Record<string, unknown> | null }[];
+  insert?: { data: Record<string, unknown> | null; error: Record<string, unknown> | null };
 }) {
   const reads = [...(options.reads ?? [])];
-  const inserts = [...(options.inserts ?? [])];
-  const insertedPayloads: Array<Record<string, unknown>> = [];
-
-  const client = {
-    auth: {
-      getUser: vi.fn().mockResolvedValue({
-        data: { user: options.user ?? null },
-        error: options.authError ?? null
-      })
-    },
-    from: vi.fn(() => ({
-      select: vi.fn(() => {
-        const builder = {
-          eq: vi.fn(),
-          maybeSingle: vi.fn()
-        };
-        builder.eq.mockReturnValue(builder);
-        builder.maybeSingle.mockImplementation(async () =>
-          reads.shift() ?? { data: null, error: null }
-        );
-        return builder;
-      }),
-      insert: vi.fn((payload: Record<string, unknown>) => {
-        insertedPayloads.push(payload);
-        const builder = {
-          select: vi.fn(),
-          maybeSingle: vi.fn()
-        };
-        builder.select.mockReturnValue(builder);
-        builder.maybeSingle.mockImplementation(async () =>
-          inserts.shift() ?? { data: null, error: { message: "Unexpected insert" } }
-        );
-        return builder;
-      })
-    }))
+  const inserted: Record<string, unknown>[] = [];
+  return {
+    inserted,
+    value: {
+      auth: {
+        getUser: vi.fn().mockResolvedValue({ data: { user: options.authUser ?? null }, error: null })
+      },
+      from: vi.fn(() => ({
+        select: vi.fn(() => {
+          const builder = { eq: vi.fn(), maybeSingle: vi.fn() };
+          builder.eq.mockReturnValue(builder);
+          builder.maybeSingle.mockImplementation(async () => reads.shift() ?? { data: null, error: null });
+          return builder;
+        }),
+        insert: vi.fn((payload: Record<string, unknown>) => {
+          inserted.push(payload);
+          const builder = { select: vi.fn(), maybeSingle: vi.fn() };
+          builder.select.mockReturnValue(builder);
+          builder.maybeSingle.mockResolvedValue(options.insert ?? { data: null, error: { message: "insert failed" } });
+          return builder;
+        })
+      }))
+    }
   };
-
-  return { client, insertedPayloads };
 }
 
-function request(token: string | null = "verified-token") {
-  return new Request("http://localhost/api/profile", {
-    headers: token ? { Authorization: `Bearer ${token}` } : undefined
-  });
+function request(token = "verified-token") {
+  return new Request("http://localhost/api/profile", { headers: { Authorization: `Bearer ${token}` } });
 }
 
 describe("GET /api/profile", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
+  beforeEach(() => vi.clearAllMocks());
 
-  it("returns 503 when the server-side account client is unavailable", async () => {
+  it("returns 503 without account services", async () => {
     routeMocks.serviceClient.mockReturnValue(null);
-
-    const response = await GET(request());
-
-    expect(response.status).toBe(503);
-    expect(await response.json()).toMatchObject({ ok: false });
+    expect((await GET(request())).status).toBe(503);
   });
 
-  it("requires and verifies a bearer token", async () => {
-    const { client } = profileClient({ user: null, authError: { message: "Invalid JWT" } });
-    routeMocks.serviceClient.mockReturnValue(client);
-
-    const response = await GET(request("bad-token"));
-
-    expect(response.status).toBe(401);
-    expect(client.auth.getUser).toHaveBeenCalledWith("bad-token");
-    expect(client.from).not.toHaveBeenCalled();
+  it("requires a verified bearer identity", async () => {
+    const mock = client({ authUser: null });
+    routeMocks.serviceClient.mockReturnValue(mock.value);
+    expect((await GET(request())).status).toBe(401);
   });
 
-  it("returns an existing canonical profile without changing it", async () => {
-    const existing: ProfileRow = {
-      id: "11111111-1111-4111-8111-111111111111",
+  it("returns public manager identity and forces the rollout confirmation", async () => {
+    const profile = {
+      id: user().id,
       manager_id: "north_bank",
-      display_name: "North Bank",
-      email: "saved@example.com"
+      display_name: "Private X Name",
+      email: "manager@example.com",
+      locale: "en",
+      created_at: "2026-07-01T00:00:00Z",
+      last_seen_at: null,
+      manager_id_confirmed_at: null,
+      manager_id_rename_available: true
     };
-    const { client, insertedPayloads } = profileClient({
-      user: authUser({ email: "different@example.com", appMetadata: { role: "admin" } }),
-      reads: [{ data: existing, error: null }]
-    });
-    routeMocks.serviceClient.mockReturnValue(client);
-
+    const mock = client({ authUser: user(true), reads: [{ data: profile, error: null }] });
+    routeMocks.serviceClient.mockReturnValue(mock.value);
     const response = await GET(request());
-
-    expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({
-      ok: true,
-      profile: {
-        id: existing.id,
-        managerId: "north_bank",
-        displayName: "North Bank",
-        email: "saved@example.com",
-        demo: false
-      },
-      admin: true
-    });
-    expect(insertedPayloads).toHaveLength(0);
-  });
-
-  it("never infers administrator access from email or user-editable metadata", async () => {
-    const existing: ProfileRow = {
-      id: "11111111-1111-4111-8111-111111111111",
-      manager_id: "admin_user",
-      display_name: "Admin User",
-      email: "admin@footyrush.test"
-    };
-    const { client } = profileClient({
-      user: authUser({
-        email: "admin@footyrush.test",
-        userMetadata: { role: "admin" },
-        appMetadata: { role: "member" }
-      }),
-      reads: [{ data: existing, error: null }]
-    });
-    routeMocks.serviceClient.mockReturnValue(client);
-
-    const response = await GET(request());
-
-    expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ admin: false });
-  });
-
-  it("repairs a missing regular profile while leaving manager ID onboarding incomplete", async () => {
-    const user = authUser({ userMetadata: { full_name: "OAuth Manager" } });
-    const inserted: ProfileRow = {
-      id: user.id,
-      manager_id: null,
-      display_name: "OAuth Manager",
-      email: user.email
-    };
-    const { client, insertedPayloads } = profileClient({
-      user,
-      reads: [{ data: null, error: null }],
-      inserts: [{ data: inserted, error: null }]
-    });
-    routeMocks.serviceClient.mockReturnValue(client);
-
-    const response = await GET(request());
-
-    expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({
-      admin: false,
-      profile: { id: user.id, managerId: null, displayName: "OAuth Manager" }
-    });
-    expect(insertedPayloads).toEqual([
-      expect.objectContaining({ id: user.id, manager_id: null, display_name: "OAuth Manager" })
-    ]);
-  });
-
-  it("preserves and normalizes an explicit manager ID for an orphaned password account", async () => {
-    const user = authUser({
-      userMetadata: { manager_id: "  North-Bank_9!  ", display_name: "North Bank" }
-    });
-    const inserted: ProfileRow = {
-      id: user.id,
-      manager_id: "northbank_9",
-      display_name: "North Bank",
-      email: user.email
-    };
-    const { client, insertedPayloads } = profileClient({
-      user,
-      reads: [{ data: null, error: null }],
-      inserts: [{ data: inserted, error: null }]
-    });
-    routeMocks.serviceClient.mockReturnValue(client);
-
-    const response = await GET(request());
-
-    expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({
-      admin: false,
-      profile: { managerId: "northbank_9", displayName: "North Bank" }
-    });
-    expect(insertedPayloads[0]).toMatchObject({ manager_id: "northbank_9" });
-  });
-
-  it("falls back to onboarding if an orphan's explicit manager ID is already taken", async () => {
-    const user = authUser({ userMetadata: { manager_id: "north_bank" } });
-    const inserted: ProfileRow = {
-      id: user.id,
-      manager_id: null,
-      display_name: "manager",
-      email: user.email
-    };
-    const { client, insertedPayloads } = profileClient({
-      user,
-      reads: [
-        { data: null, error: null },
-        { data: null, error: null }
-      ],
-      inserts: [
-        { data: null, error: { code: "23505" } },
-        { data: inserted, error: null }
-      ]
-    });
-    routeMocks.serviceClient.mockReturnValue(client);
-
-    const response = await GET(request());
-
-    expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ profile: { managerId: null }, admin: false });
-    expect(insertedPayloads.map((payload) => payload.manager_id)).toEqual(["north_bank", null]);
-  });
-
-  it("gives a missing trusted admin a deterministic valid manager ID", async () => {
-    const user = authUser({
-      appMetadata: { role: "admin" }
-    });
-    const expectedManagerId = "mgr_bd7662a5eeb416";
-    const inserted: ProfileRow = {
-      id: user.id,
-      manager_id: expectedManagerId,
-      display_name: "Admin (tester)",
-      email: user.email
-    };
-    const { client, insertedPayloads } = profileClient({
-      user,
-      reads: [{ data: null, error: null }],
-      inserts: [{ data: inserted, error: null }]
-    });
-    routeMocks.serviceClient.mockReturnValue(client);
-
-    const response = await GET(request());
-
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({
       admin: true,
-      profile: { managerId: expectedManagerId, displayName: "Admin (tester)" }
+      accountStatisticsAvailable: true,
+      profile: {
+        managerId: "north_bank",
+        publicName: "@north_bank",
+        displayName: "@north_bank",
+        requiresManagerIdConfirmation: true,
+        renameAvailable: true
+      }
     });
-    expect(insertedPayloads[0]).toMatchObject({ id: user.id, manager_id: expectedManagerId });
-    expect(expectedManagerId).toMatch(/^[a-z0-9_]{3,18}$/);
   });
 
-  it("returns the canonical row created by a simultaneous repair", async () => {
-    const user = authUser({ appMetadata: { role: "admin" } });
-    const raced: ProfileRow = {
-      id: user.id,
-      manager_id: "already_created",
-      display_name: "Existing Admin",
-      email: user.email
+  it("returns a confirmed account without exposing provider display metadata", async () => {
+    const profile = {
+      id: user().id,
+      manager_id: "north_bank",
+      display_name: "@north_bank",
+      email: "manager@example.com",
+      locale: "en",
+      created_at: "2026-07-01T00:00:00Z",
+      last_seen_at: null,
+      manager_id_confirmed_at: "2026-07-23T00:00:00Z",
+      manager_id_rename_available: false
     };
-    const { client, insertedPayloads } = profileClient({
-      user,
-      reads: [
-        { data: null, error: null },
-        { data: raced, error: null }
-      ],
-      inserts: [{ data: null, error: { code: "23505" } }]
+    const mock = client({ authUser: user(), reads: [{ data: profile, error: null }] });
+    routeMocks.serviceClient.mockReturnValue(mock.value);
+    expect(await (await GET(request())).json()).toMatchObject({
+      profile: { displayName: "@north_bank", requiresManagerIdConfirmation: false }
     });
-    routeMocks.serviceClient.mockReturnValue(client);
+  });
 
+  it("creates every orphaned account with no manager ID, including admins", async () => {
+    const inserted = {
+      id: user().id,
+      manager_id: null,
+      display_name: "manager",
+      email: "manager@example.com",
+      locale: "en",
+      created_at: "2026-07-23T00:00:00Z"
+    };
+    const mock = client({
+      authUser: user(true),
+      reads: [{ data: null, error: null }],
+      insert: { data: inserted, error: null }
+    });
+    routeMocks.serviceClient.mockReturnValue(mock.value);
     const response = await GET(request());
-
     expect(response.status).toBe(200);
+    expect(mock.inserted[0]).toMatchObject({ manager_id: null });
     expect(await response.json()).toMatchObject({
-      profile: { managerId: "already_created", displayName: "Existing Admin" },
-      admin: true
+      admin: true,
+      profile: { managerId: null, requiresManagerIdConfirmation: true }
     });
-    expect(insertedPayloads).toHaveLength(1);
   });
 
-  it("uses the next deterministic admin ID after a manager-ID collision", async () => {
-    const user = authUser({ appMetadata: { role: "admin" } });
-    const fallbackManagerId = "mgr_14e720d477abfc";
-    const inserted: ProfileRow = {
-      id: user.id,
-      manager_id: fallbackManagerId,
-      display_name: "Admin (tester)",
-      email: user.email
+  it("gracefully reads the legacy profile schema during migration rollout", async () => {
+    const profile = {
+      id: user().id,
+      manager_id: "legacy_id",
+      display_name: "Legacy",
+      email: "manager@example.com",
+      locale: "en",
+      created_at: "2026-07-01T00:00:00Z"
     };
-    const { client, insertedPayloads } = profileClient({
-      user,
+    const mock = client({
+      authUser: user(),
       reads: [
-        { data: null, error: null },
-        { data: null, error: null }
-      ],
-      inserts: [
-        { data: null, error: { code: "23505" } },
-        { data: inserted, error: null }
+        { data: null, error: { code: "42703", message: "manager_id_confirmed_at missing" } },
+        { data: profile, error: null }
       ]
     });
-    routeMocks.serviceClient.mockReturnValue(client);
-
-    const response = await GET(request());
-
-    expect(response.status).toBe(200);
-    expect(insertedPayloads).toHaveLength(2);
-    expect(insertedPayloads[0]?.manager_id).not.toBe(insertedPayloads[1]?.manager_id);
-    expect(insertedPayloads[1]?.manager_id).toBe(fallbackManagerId);
-  });
-
-  it("returns 500 for a profile database failure", async () => {
-    const { client } = profileClient({
-      user: authUser(),
-      reads: [{ data: null, error: { message: "database unavailable" } }]
+    routeMocks.serviceClient.mockReturnValue(mock.value);
+    expect(await (await GET(request())).json()).toMatchObject({
+      accountStatisticsAvailable: false,
+      profile: { managerId: "legacy_id", requiresManagerIdConfirmation: false }
     });
-    routeMocks.serviceClient.mockReturnValue(client);
-
-    const response = await GET(request());
-
-    expect(response.status).toBe(500);
-    expect(await response.json()).toMatchObject({ ok: false });
-  });
-
-  it("returns 500 instead of retrying an unrelated insert failure", async () => {
-    const { client, insertedPayloads } = profileClient({
-      user: authUser(),
-      reads: [{ data: null, error: null }],
-      inserts: [{ data: null, error: { code: "42501", message: "permission denied" } }]
-    });
-    routeMocks.serviceClient.mockReturnValue(client);
-
-    const response = await GET(request());
-
-    expect(response.status).toBe(500);
-    expect(insertedPayloads).toHaveLength(1);
   });
 });

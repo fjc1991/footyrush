@@ -36,7 +36,7 @@ export const pt = {
   dark: "Escuro",
   tabPlay: "Jogar",
   tabLeaderboards: "Classificações",
-  tabProgress: "Meu progresso",
+  tabProgress: "Minha página",
   tabLive: "ao vivo",
   tabLockedHint: "Termine a partida em andamento para abrir as classificações.",
   nextGame: "Próximo jogo",

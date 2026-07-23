@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import rawData from "../data.json";
-import { getCandidates, seedFootballData, spinForOpenSlots, spinForSlot } from "@/lib/game/data";
+import { getCandidates, safePlayerName, seedFootballData, spinForOpenSlots, spinForSlot } from "@/lib/game/data";
 import { BOOST_LIMIT } from "@/lib/game/boosts";
 import { autoDraftManager, draftTeamSeasonSquad, getDraftSlots, hasDuplicatePlayers } from "@/lib/game/draft";
 import type { FormationSlot, RawFootballData } from "@/lib/game/types";
@@ -8,6 +8,12 @@ import type { FormationSlot, RawFootballData } from "@/lib/game/types";
 describe("draft rules", () => {
   beforeAll(() => {
     seedFootballData(rawData as unknown as RawFootballData);
+  });
+
+  it("never renders an empty imported player name", () => {
+    expect(safePlayerName("  João   Félix  ", 19)).toBe("João Félix");
+    expect(safePlayerName("   ", 91)).toBe("Unknown player #91");
+    expect(safePlayerName(null, 7)).toBe("Unknown player #7");
   });
 
   it("draws legal players for a target slot", () => {

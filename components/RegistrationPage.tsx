@@ -25,6 +25,8 @@ interface CanonicalProfileResponse {
     displayName: string;
     email: string | null;
     demo: false;
+    requiresManagerIdConfirmation?: boolean;
+    renameAvailable?: boolean;
   };
 }
 
@@ -105,7 +107,7 @@ export default function RegistrationPage({ locale }: { locale: string }) {
       setEmail(storedProfile.email);
       setSignedInProfile(storedProfile);
 
-      if (storedProfile.managerId) {
+      if (storedProfile.managerId && !result.profile.requiresManagerIdConfirmation) {
         reserveLocalManagerId(storedProfile.managerId, storedProfile.id);
         window.localStorage.setItem(profileKey, JSON.stringify(storedProfile));
         setManagerId(storedProfile.managerId);
@@ -114,6 +116,10 @@ export default function RegistrationPage({ locale }: { locale: string }) {
         return;
       }
 
+      setManagerId(
+        storedProfile.managerId ??
+          (typeof user.user_metadata?.manager_id === "string" ? normalizeManagerId(user.user_metadata.manager_id) : "")
+      );
       setSessionState("needs-manager-id");
     });
 
@@ -131,7 +137,8 @@ export default function RegistrationPage({ locale }: { locale: string }) {
       setMessage(validation);
       return false;
     }
-    if (readRegisteredManagerIds()[normalized]) {
+    const locallyRegisteredTo = readRegisteredManagerIds()[normalized];
+    if (locallyRegisteredTo && locallyRegisteredTo !== signedInProfile?.id) {
       setAvailable(false);
       setMessage("That manager ID is already taken on this device.");
       return false;
@@ -140,7 +147,13 @@ export default function RegistrationPage({ locale }: { locale: string }) {
     setChecking(true);
     setMessage("");
     try {
-      const response = await fetch(`/api/registration?managerId=${encodeURIComponent(normalized)}`);
+      const supabase = getSupabaseBrowserClient();
+      const { data } = (await supabase?.auth.getSession()) ?? { data: { session: null } };
+      const response = await fetch(`/api/registration?managerId=${encodeURIComponent(normalized)}`, {
+        headers: data.session?.access_token
+          ? { Authorization: `Bearer ${data.session.access_token}` }
+          : undefined
+      });
       const result = (await response.json()) as { available?: boolean; reason?: string };
       setAvailable(Boolean(result.available));
       setMessage(result.available ? "Manager ID is available." : result.reason ?? "That manager ID is already taken.");
@@ -393,7 +406,7 @@ export default function RegistrationPage({ locale }: { locale: string }) {
             {available && <CheckCircle2 size={17} />}
             <span>
               {message || (completingSignedInAccount
-                ? `Signed in${signedInProfile?.email ? ` as ${signedInProfile.email}` : ""}. Manager IDs cannot be changed after saving.`
+                  ? `Signed in${signedInProfile?.email ? ` as ${signedInProfile.email}` : ""}. Confirm this ID or use your one-time change.`
                 : hasSupabaseConfig()
                   ? "Manager IDs are checked against registered profiles."
                   : "Local prototype mode: IDs are reserved on this device.")}

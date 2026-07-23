@@ -7,7 +7,10 @@ import { rateLimit, tooManyRequests } from "@/lib/server/rate-limit";
 
 export const runtime = "nodejs";
 
-async function managerIdAvailable(managerId: string): Promise<{ available: boolean; production: boolean; reason?: string }> {
+async function managerIdAvailable(
+  managerId: string,
+  requestingProfileId?: string | null
+): Promise<{ available: boolean; production: boolean; reason?: string }> {
   const validation = managerIdValidationMessage(managerId);
   if (validation) {
     return { available: false, production: false, reason: validation };
@@ -18,11 +21,15 @@ async function managerIdAvailable(managerId: string): Promise<{ available: boole
     return { available: true, production: false };
   }
 
-  const { data, error } = await supabase
+  let query = supabase
     .from("profiles")
     .select("id")
     .eq("manager_id", managerId)
     .limit(1);
+  if (requestingProfileId) {
+    query = query.neq("id", requestingProfileId);
+  }
+  const { data, error } = await query;
 
   if (error) {
     return { available: false, production: true, reason: error.message };
@@ -39,7 +46,8 @@ export async function GET(request: NextRequest) {
   }
 
   const managerId = normalizeManagerId(request.nextUrl.searchParams.get("managerId") ?? "");
-  const result = await managerIdAvailable(managerId);
+  const profileId = await getAuthenticatedUserId(request);
+  const result = await managerIdAvailable(managerId, profileId);
   return NextResponse.json({
     ok: !result.reason,
     managerId,
@@ -98,14 +106,19 @@ interface ProfileRow {
   manager_id: string | null;
   display_name: string;
   email: string | null;
+  manager_id_confirmed_at?: string | null;
+  manager_id_rename_available?: boolean;
 }
 
 function completedProfile(profile: ProfileRow) {
   return {
     id: profile.id,
     managerId: profile.manager_id,
-    displayName: profile.display_name,
+    publicName: profile.manager_id ? `@${profile.manager_id}` : null,
+    displayName: profile.manager_id ? `@${profile.manager_id}` : profile.display_name,
     email: profile.email,
+    requiresManagerIdConfirmation: !profile.manager_id || !profile.manager_id_confirmed_at,
+    renameAvailable: Boolean(profile.manager_id_rename_available),
     demo: false
   };
 }
@@ -113,9 +126,8 @@ function completedProfile(profile: ProfileRow) {
 /**
  * Complete manager-ID onboarding for the authenticated Supabase identity.
  *
- * The update only matches a profile whose manager_id is still null. The unique
- * database index decides simultaneous claims atomically; the bearer token, not
- * a request-body user id, decides which profile may be changed.
+ * The database function serializes the profile row, enforces the one-time
+ * confirmation/rename entitlement, and updates all denormalized public names.
  */
 export async function PATCH(request: Request) {
   const limit = await rateLimit(request, "registration-complete", { limit: 5, window: "1 m" });
@@ -140,33 +152,41 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ ok: false, reason: "Account setup is temporarily unavailable." }, { status: 503 });
   }
 
-  const { data: updated, error: updateError } = await supabase
-    .from("profiles")
-    .update({ manager_id: managerId, updated_at: new Date().toISOString() })
-    .eq("id", profileId)
-    .is("manager_id", null)
-    .select("id, manager_id, display_name, email")
-    .maybeSingle<ProfileRow>();
+  const { data: claimed, error: claimError } = await supabase.rpc("claim_manager_id", {
+    p_profile_id: profileId,
+    p_manager_id: managerId
+  });
+  const updated = (Array.isArray(claimed) ? claimed[0] : claimed) as ProfileRow | null;
 
-  if (updateError?.code === "23505") {
+  if (claimError?.code === "23505") {
     return NextResponse.json(
       { ok: false, managerId, reason: "That manager ID is already taken." },
       { status: 409 }
     );
   }
-  if (updateError) {
+  if (claimError?.code === "P0001") {
+    return NextResponse.json(
+      { ok: false, managerId, reason: "This account has already used its manager ID confirmation." },
+      { status: 409 }
+    );
+  }
+  if (claimError && ["42883", "PGRST202"].includes(claimError.code ?? "")) {
+    return NextResponse.json(
+      { ok: false, reason: "Account setup is being upgraded. Please try again after the database migration." },
+      { status: 503 }
+    );
+  }
+  if (claimError) {
     return NextResponse.json({ ok: false, reason: "Could not save that manager ID." }, { status: 500 });
   }
   if (updated) {
     return NextResponse.json({ ok: true, profile: completedProfile(updated) });
   }
 
-  // A zero-row update means the profile was missing or an ID was already
-  // claimed (including by a concurrent request). Read it back for an idempotent
-  // response without allowing an existing ID to be renamed here.
+  // Defensive read-back for a replay after a successful atomic claim.
   const { data: existing, error: profileError } = await supabase
     .from("profiles")
-    .select("id, manager_id, display_name, email")
+    .select("id, manager_id, display_name, email, manager_id_confirmed_at, manager_id_rename_available")
     .eq("id", profileId)
     .maybeSingle<ProfileRow>();
 

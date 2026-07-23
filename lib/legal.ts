@@ -46,7 +46,7 @@ export const legalCopy: Record<LegalLocale, LegalCopy> = {
         title: "Privacy Policy",
         summary: "How FootyRush collects, uses, and protects information when you play or create an account.",
         updatedLabel: "Effective",
-        updatedDate: "23 July 2026",
+        updatedDate: "24 July 2026",
         sections: [
           {
             heading: "1. Information we collect",
@@ -96,7 +96,14 @@ export const legalCopy: Record<LegalLocale, LegalCopy> = {
             ]
           },
           {
-            heading: "7. Changes and contact",
+            heading: "7. Account activity, preferences and communications",
+            paragraphs: [
+              "For signed-in accounts, visits, active play time, modes started and completed, and matches played are core account data used to provide My home. Active time is counted only while the page is visible and recently used. We do not store a raw IP address, exact device fingerprint, X posts, or an X password for this purpose.",
+              "Country, age band, gender, clubs, players, leagues, discovery source, preferred mode, and kit style are optional. You can clear them in My home. FootyRush promotional email and use of optional preferences in anonymous aggregate audience reports are separate, explicit choices that are off by default and can be withdrawn. Advertisers receive aggregates only, never a contact list or your identity."
+            ]
+          },
+          {
+            heading: "8. Changes and contact",
             paragraphs: [
               "We may update this policy as FootyRush develops. The effective date above will change when we make material updates. Questions or privacy requests can be sent to support@footyrush.app."
             ]
@@ -172,7 +179,7 @@ export const legalCopy: Record<LegalLocale, LegalCopy> = {
         title: "Política de privacidad",
         summary: "Cómo FootyRush recopila, usa y protege la información cuando juegas o creas una cuenta.",
         updatedLabel: "En vigor desde",
-        updatedDate: "23 de julio de 2026",
+        updatedDate: "24 de julio de 2026",
         sections: [
           {
             heading: "1. Información que recopilamos",
@@ -222,7 +229,14 @@ export const legalCopy: Record<LegalLocale, LegalCopy> = {
             ]
           },
           {
-            heading: "7. Cambios y contacto",
+            heading: "7. Actividad de cuenta, preferencias y comunicaciones",
+            paragraphs: [
+              "En cuentas con sesión iniciada, las visitas, el tiempo de juego activo, los modos iniciados y completados y los partidos jugados son datos básicos usados para ofrecer Mi inicio. El tiempo solo cuenta cuando la página está visible y se ha usado recientemente. Para ello no guardamos la IP sin procesar, una huella exacta del dispositivo, publicaciones de X ni la contraseña de X.",
+              "El país, franja de edad, género, clubes, jugadores, ligas, origen, modo y estilo de equipación son opcionales y pueden borrarse. Los emails promocionales de FootyRush y el uso de preferencias opcionales en informes agregados anónimos son consentimientos separados, desactivados por defecto y revocables. Los anunciantes solo reciben agregados, nunca una lista de contactos ni tu identidad."
+            ]
+          },
+          {
+            heading: "8. Cambios y contacto",
             paragraphs: [
               "Podemos actualizar esta política a medida que FootyRush evoluciona. La fecha anterior cambiará cuando haya modificaciones importantes. Envía preguntas o solicitudes de privacidad a support@footyrush.app."
             ]
@@ -298,7 +312,7 @@ export const legalCopy: Record<LegalLocale, LegalCopy> = {
         title: "Politique de confidentialité",
         summary: "La manière dont FootyRush collecte, utilise et protège les informations lorsque vous jouez ou créez un compte.",
         updatedLabel: "En vigueur le",
-        updatedDate: "23 juillet 2026",
+        updatedDate: "24 juillet 2026",
         sections: [
           {
             heading: "1. Informations collectées",
@@ -348,7 +362,14 @@ export const legalCopy: Record<LegalLocale, LegalCopy> = {
             ]
           },
           {
-            heading: "7. Modifications et contact",
+            heading: "7. Activité du compte, préférences et communications",
+            paragraphs: [
+              "Pour les comptes connectés, les visites, le temps de jeu actif, les modes commencés et terminés et les matchs joués sont des données essentielles utilisées pour Mon espace. Le temps n’est compté que lorsque la page est visible et utilisée récemment. Nous ne conservons pour cela ni adresse IP brute, ni empreinte exacte de l’appareil, ni publications ou mot de passe X.",
+              "Le pays, la tranche d’âge, le genre, les clubs, les joueurs, les ligues, la source de découverte, le mode et le style de maillot sont facultatifs et peuvent être effacés. Les e-mails promotionnels FootyRush et l’utilisation des préférences facultatives dans des rapports d’audience agrégés anonymes sont deux consentements distincts, désactivés par défaut et révocables. Les annonceurs ne reçoivent que des agrégats, jamais une liste de contacts ni votre identité."
+            ]
+          },
+          {
+            heading: "8. Modifications et contact",
             paragraphs: [
               "Cette politique peut évoluer avec FootyRush. La date ci-dessus sera modifiée en cas de changement important. Envoyez vos questions ou demandes relatives à la confidentialité à support@footyrush.app."
             ]
@@ -424,7 +445,7 @@ export const legalCopy: Record<LegalLocale, LegalCopy> = {
         title: "Política de Privacidade",
         summary: "Como o FootyRush recolhe, utiliza e protege informações quando joga ou cria uma conta.",
         updatedLabel: "Em vigor desde",
-        updatedDate: "23 de julho de 2026",
+        updatedDate: "24 de julho de 2026",
         sections: [
           {
             heading: "1. Informações que recolhemos",
@@ -474,7 +495,14 @@ export const legalCopy: Record<LegalLocale, LegalCopy> = {
             ]
           },
           {
-            heading: "7. Alterações e contacto",
+            heading: "7. Atividade da conta, preferências e comunicações",
+            paragraphs: [
+              "Nas contas com sessão iniciada, visitas, tempo de jogo ativo, modos iniciados e concluídos e jogos disputados são dados essenciais usados para fornecer Minha página. O tempo só é contado quando a página está visível e foi utilizada recentemente. Para este fim não guardamos o IP sem tratamento, uma impressão digital exata do dispositivo, publicações do X nem a palavra-passe do X.",
+              "País, faixa etária, género, clubes, jogadores, ligas, origem da descoberta, modo e estilo de equipamento são opcionais e podem ser apagados. O email promocional da FootyRush e a utilização de preferências opcionais em relatórios de audiência agregados anónimos são escolhas separadas, desativadas por predefinição e revogáveis. Os anunciantes recebem apenas agregados, nunca uma lista de contactos nem a sua identidade."
+            ]
+          },
+          {
+            heading: "8. Alterações e contacto",
             paragraphs: [
               "Podemos atualizar esta política à medida que o FootyRush evolui. A data acima será alterada quando houver mudanças importantes. Envie perguntas ou pedidos de privacidade para support@footyrush.app."
             ]
