@@ -2749,7 +2749,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
         </section>
       )}
 
-      {view === "play" && phase !== "setup" && (
+      {view === "play" && phase !== "setup" && phase !== "draft" && (
         <section className="assistant-strip" aria-label="Assistant tip">
           <ManagerAvatar mood={assistantMood} line={assistantLine} compact />
         </section>
@@ -2975,7 +2975,12 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
 
       {view === "play" && phase === "draft" && (
         <section className="draft-grid">
-          <div className="panel draft-board">
+          <div className="draft-main">
+            <section className="assistant-strip draft-assistant" aria-label="Assistant tip">
+              <ManagerAvatar mood={assistantMood} line={assistantLine} compact />
+            </section>
+
+            <div className="panel draft-board">
             <div className="draft-bar">
               <p className="eyebrow draft-round-label">
                 {draftComplete
@@ -3147,6 +3152,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                 {gameMode === "be_invincible" ? "Start Be Invincible season" : copy.enterLeague}
               </button>
             )}
+            </div>
           </div>
 
           <div className="draft-right">

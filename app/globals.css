@@ -6786,18 +6786,28 @@ main:has(.analytics-consent) .milestone-nudge {
   line-height: 1.1;
 }
 
-/* ── Draft grid: board | (pitch + formation), manager score spans full width ── */
+/* ── Draft grid: assistant + board | compact pitch + formation rail ── */
 
 .draft-grid {
   display: grid;
-  grid-template-columns: minmax(520px, 0.9fr) minmax(660px, 1.1fr);
-  grid-template-areas: "board side";
+  grid-template-columns: minmax(650px, 1fr) minmax(520px, 0.48fr);
+  grid-template-areas: "main side";
   gap: 14px;
   align-items: start;
 }
 
-.draft-grid > .draft-board {
-  grid-area: board;
+.draft-grid > .draft-main {
+  grid-area: main;
+}
+
+.draft-main {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.draft-main .assistant-strip {
+  margin: 0;
 }
 
 .draft-grid > .draft-right {
@@ -6806,7 +6816,7 @@ main:has(.analytics-consent) .milestone-nudge {
 
 .draft-right {
   display: grid;
-  grid-template-columns: minmax(380px, 1.15fr) minmax(280px, 0.85fr);
+  grid-template-columns: minmax(330px, 1fr) minmax(150px, 170px);
   grid-template-areas:
     "pitch formation"
     "score score";
@@ -6820,17 +6830,18 @@ main:has(.analytics-consent) .milestone-nudge {
 .draft-right > .progression-panel { grid-area: score; min-width: 0; }
 
 .draft-right .formation-grid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: 7px;
 }
 
 .draft-right .formation-button {
-  flex-direction: column;
+  flex-direction: row;
   align-items: center;
-  gap: 4px;
-  min-height: 70px;
-  padding: 7px 6px;
-  text-align: center;
+  justify-content: flex-start;
+  gap: 9px;
+  min-height: 48px;
+  padding: 6px 9px;
+  text-align: left;
 }
 
 .draft-right .formation-button span {
@@ -6838,18 +6849,18 @@ main:has(.analytics-consent) .milestone-nudge {
   white-space: nowrap;
 }
 
-/* The list column is narrow — drop stat chips so names stay readable.
-   (Rating badge + fit label still convey quality.) Stats return when stacked. */
+/* The compact tile stays available whenever the candidate container has room;
+   the container query below removes it before names become cramped. */
 .draft-grid .fm-row-stats {
-  display: none;
+  display: grid;
 }
 
-/* Collapse to a single column on smaller screens */
-@media (max-width: 1679px) {
+/* Collapse only when the draft and compact side rail no longer fit together. */
+@media (max-width: 1279px) {
   .draft-grid {
     grid-template-columns: 1fr;
     grid-template-areas:
-      "board"
+      "main"
       "side";
   }
 
@@ -6858,14 +6869,15 @@ main:has(.analytics-consent) .milestone-nudge {
   }
 
   .draft-right {
-    grid-template-columns: minmax(380px, 1.15fr) minmax(280px, 0.85fr);
+    grid-template-columns: minmax(330px, 380px) minmax(150px, 170px);
     grid-template-areas:
       "pitch formation"
       "score score";
+    justify-content: center;
   }
 
   .draft-right .formation-grid {
-    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
@@ -7009,7 +7021,7 @@ main:has(.analytics-consent) .milestone-nudge {
 }
 
 .draft-right .pitch-container {
-  width: min(100%, 420px);
+  width: min(100%, 330px);
   min-height: 0;
   margin-inline: auto;
 }
@@ -7053,12 +7065,12 @@ main:has(.analytics-consent) .milestone-nudge {
   }
 
   .draft-grid {
-    grid-template-columns: minmax(650px, 0.78fr) minmax(900px, 1.22fr);
+    grid-template-columns: minmax(900px, 1fr) minmax(540px, 0.42fr);
     gap: clamp(18px, 1.4vw, 30px);
   }
 
   .draft-right {
-    grid-template-columns: minmax(480px, 1.2fr) minmax(340px, 0.8fr);
+    grid-template-columns: minmax(340px, 1fr) minmax(150px, 170px);
   }
 
   .draft-grid .fm-row-stats {
@@ -7066,7 +7078,7 @@ main:has(.analytics-consent) .milestone-nudge {
   }
 
   .draft-right .pitch-container {
-    width: min(100%, 480px);
+    width: min(100%, 330px);
   }
 
   .complete-grid {

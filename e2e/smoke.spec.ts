@@ -113,8 +113,8 @@ for (const viewport of [
   });
 }
 
-test("draft workspace gives the pitch and formation room on a wide screen", async ({ page }) => {
-  await page.setViewportSize({ width: 2048, height: 1129 });
+test("draft workspace prioritizes the draft and keeps the full pitch onscreen", async ({ page }) => {
+  await page.setViewportSize({ width: 2048, height: 900 });
   await page.addInitScript(() => {
     window.localStorage.setItem("footyrush.analyticsConsent", "denied");
   });
@@ -130,22 +130,42 @@ test("draft workspace gives the pitch and formation room on a wide screen", asyn
   const dimensions = await page.evaluate(() => {
     const rect = (selector: string) => document.querySelector(selector)?.getBoundingClientRect();
     const board = rect(".draft-board");
+    const assistant = rect(".draft-main .assistant-strip");
     const right = rect(".draft-right");
+    const pitchPanel = rect(".draft-right .squad-panel");
     const pitch = rect(".draft-right .pitch-container");
     const formation = rect(".draft-right .formation-panel");
+    const formationButtons = Array.from(document.querySelectorAll(".draft-right .formation-button"))
+      .slice(0, 2)
+      .map((element) => element.getBoundingClientRect());
     return {
       boardWidth: board?.width ?? 0,
+      assistantWidth: assistant?.width ?? 0,
+      assistantTop: assistant?.top ?? 0,
       rightWidth: right?.width ?? 0,
+      pitchPanelTop: pitchPanel?.top ?? 0,
       pitchWidth: pitch?.width ?? 0,
+      pitchBottom: pitch?.bottom ?? Number.POSITIVE_INFINITY,
       formationWidth: formation?.width ?? 0,
+      formationFirstX: formationButtons[0]?.x ?? 0,
+      formationFirstY: formationButtons[0]?.y ?? 0,
+      formationSecondX: formationButtons[1]?.x ?? Number.POSITIVE_INFINITY,
+      formationSecondY: formationButtons[1]?.y ?? 0,
       overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth
     };
   });
 
   expect(dimensions.overflow).toBe(0);
-  expect(dimensions.rightWidth).toBeGreaterThan(dimensions.boardWidth);
-  expect(dimensions.pitchWidth).toBeGreaterThanOrEqual(450);
-  expect(dimensions.formationWidth).toBeGreaterThanOrEqual(330);
+  expect(dimensions.boardWidth).toBeGreaterThan(dimensions.rightWidth * 1.5);
+  expect(Math.abs(dimensions.assistantWidth - dimensions.boardWidth)).toBeLessThanOrEqual(2);
+  expect(Math.abs(dimensions.pitchPanelTop - dimensions.assistantTop)).toBeLessThanOrEqual(2);
+  expect(dimensions.pitchWidth).toBeGreaterThanOrEqual(300);
+  expect(dimensions.pitchWidth).toBeLessThanOrEqual(340);
+  expect(dimensions.pitchBottom).toBeLessThanOrEqual(900);
+  expect(dimensions.formationWidth).toBeGreaterThanOrEqual(145);
+  expect(dimensions.formationWidth).toBeLessThanOrEqual(180);
+  expect(Math.abs(dimensions.formationFirstX - dimensions.formationSecondX)).toBeLessThanOrEqual(2);
+  expect(dimensions.formationSecondY).toBeGreaterThan(dimensions.formationFirstY);
 
   const spin = page.getByRole("button", { name: "Spin", exact: true });
   await expect(spin).toBeEnabled({ timeout: 10_000 });
@@ -173,8 +193,6 @@ test("draft workspace gives the pitch and formation room on a wide screen", asyn
   expect(playerNameStyle.wordBreak).toBe("normal");
   expect(playerNameStyle.identityWidth).toBeGreaterThanOrEqual(180);
 
-  await expect(page.locator(".fm-row-stats").first()).toBeHidden();
-  await page.setViewportSize({ width: 1440, height: 1000 });
   await expect(page.locator(".fm-row-stats").first()).toBeVisible();
 
   const statTile = await page.locator(".fm-row-stats").first().evaluate((element) => {
