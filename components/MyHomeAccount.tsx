@@ -1,8 +1,13 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-import { Database, LogOut, Mail, Save, ShieldCheck, UserRound } from "lucide-react";
+import { CheckCircle2, Database, LogOut, Mail, Save, ShieldCheck, UserRound, X } from "lucide-react";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
+import { getProfileExperienceCopy } from "@/lib/user/profile-copy";
+import {
+  countProfilePreferences,
+  PROFILE_PREFERENCE_TOTAL
+} from "@/lib/user/profile-reminder";
 
 interface Summary {
   ok?: boolean;
@@ -33,6 +38,12 @@ interface ModeStats {
   matches: number;
 }
 
+interface SaveToast {
+  kind: "success" | "error";
+  title: string;
+  body: string;
+}
+
 async function headers(): Promise<Record<string, string>> {
   const supabase = getSupabaseBrowserClient();
   const { data } = (await supabase?.auth.getSession()) ?? { data: { session: null } };
@@ -57,9 +68,10 @@ export default function MyHomeAccount({
   publicName: string;
   email?: string;
 }) {
+  const experienceCopy = getProfileExperienceCopy(locale);
   const [summary, setSummary] = useState<Summary | null>(null);
-  const [message, setMessage] = useState("");
   const [saving, setSaving] = useState(false);
+  const [toast, setToast] = useState<SaveToast | null>(null);
   const [preferences, setPreferences] = useState({
     countryCode: "",
     ageBand: "",
@@ -100,37 +112,88 @@ export default function MyHomeAccount({
     void load();
   }, []);
 
+  useEffect(() => {
+    if (!toast) return;
+    const timeout = window.setTimeout(() => setToast(null), 4800);
+    return () => window.clearTimeout(timeout);
+  }, [toast]);
+
   async function savePreferences(event: FormEvent) {
     event.preventDefault();
     setSaving(true);
-    setMessage("");
-    const response = await fetch("/api/account/preferences", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json", ...(await headers()) },
-      body: JSON.stringify({
-        ...preferences,
-        followedLeagues: preferences.followedLeagues.split(",").map((value) => value.trim()).filter(Boolean)
-      })
-    });
-    const result = (await response.json().catch(() => null)) as { reason?: string } | null;
-    setMessage(response.ok ? "Preferences saved." : result?.reason ?? "Could not save preferences.");
-    setSaving(false);
-    if (response.ok) void load();
+    try {
+      const response = await fetch("/api/account/preferences", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", ...(await headers()) },
+        body: JSON.stringify({
+          ...preferences,
+          followedLeagues: preferences.followedLeagues.split(",").map((value) => value.trim()).filter(Boolean)
+        })
+      });
+      const result = (await response.json().catch(() => null)) as {
+        reason?: string;
+        preferences?: Record<string, unknown>;
+      } | null;
+      if (!response.ok) {
+        setToast({
+          kind: "error",
+          title: experienceCopy.saveErrorTitle,
+          body: result?.reason ?? experienceCopy.saveErrorBody
+        });
+        return;
+      }
+      if (result?.preferences) {
+        setSummary((current) => current ? { ...current, preferences: result.preferences ?? null } : current);
+      }
+      setToast({
+        kind: "success",
+        title: experienceCopy.savedTitle,
+        body: experienceCopy.savedBody
+      });
+      await load();
+    } catch {
+      setToast({
+        kind: "error",
+        title: experienceCopy.saveErrorTitle,
+        body: experienceCopy.saveErrorBody
+      });
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function updateCommunication(
     key: "emailOptIn" | "audienceInsightsOptIn",
     checked: boolean
   ) {
-    setMessage("");
-    const response = await fetch("/api/account/communications", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json", ...(await headers()) },
-      body: JSON.stringify({ [key]: checked })
-    });
-    const result = (await response.json().catch(() => null)) as { reason?: string } | null;
-    setMessage(response.ok ? "Your choice has been saved." : result?.reason ?? "Could not save that choice.");
-    if (response.ok) void load();
+    try {
+      const response = await fetch("/api/account/communications", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", ...(await headers()) },
+        body: JSON.stringify({ [key]: checked })
+      });
+      const result = (await response.json().catch(() => null)) as { reason?: string } | null;
+      if (!response.ok) {
+        setToast({
+          kind: "error",
+          title: experienceCopy.saveErrorTitle,
+          body: result?.reason ?? experienceCopy.saveErrorBody
+        });
+        return;
+      }
+      setToast({
+        kind: "success",
+        title: experienceCopy.choiceSavedTitle,
+        body: experienceCopy.choiceSavedBody
+      });
+      await load();
+    } catch {
+      setToast({
+        kind: "error",
+        title: experienceCopy.saveErrorTitle,
+        body: experienceCopy.saveErrorBody
+      });
+    }
   }
 
   async function signOut() {
@@ -142,6 +205,10 @@ export default function MyHomeAccount({
   const emailOptIn = summary?.marketing?.footyrush_email_opt_in === true;
   const audienceOptIn = summary?.preferences?.audience_insights_opt_in === true;
   const emailVerified = summary?.profile?.emailVerified ?? false;
+  const preferenceCount = countProfilePreferences(summary?.preferences);
+  const savedAt = typeof summary?.preferences?.updated_at === "string"
+    ? new Date(summary.preferences.updated_at)
+    : null;
 
   return (
     <>
@@ -189,12 +256,18 @@ export default function MyHomeAccount({
         </section>
       </div>
 
-      <form className="personal-card preference-form" onSubmit={savePreferences}>
+      <form id="profile-preferences" className="personal-card preference-form" onSubmit={savePreferences}>
         <div className="preference-heading">
           <div>
             <p className="eyebrow">Make FootyRush yours</p>
             <h3>Optional football preferences</h3>
             <p>Share only what you want. Every field can be cleared later.</p>
+            <div className="preference-completion">
+              <span>{experienceCopy.progress(preferenceCount, PROFILE_PREFERENCE_TOTAL)}</span>
+              <span className="preference-completion-track" aria-hidden="true">
+                <span style={{ width: `${(preferenceCount / PROFILE_PREFERENCE_TOTAL) * 100}%` }} />
+              </span>
+            </div>
           </div>
           <ShieldCheck size={22} />
         </div>
@@ -238,9 +311,17 @@ export default function MyHomeAccount({
             </select>
           </label>
         </div>
-        <button className="primary-button" type="submit" disabled={saving}>
-          <Save size={16} /> {saving ? "Saving…" : "Save preferences"}
-        </button>
+        <div className="preference-save-row">
+          <button className="primary-button" type="submit" disabled={saving}>
+            <Save size={16} /> {saving ? "Saving…" : "Save preferences"}
+          </button>
+          {savedAt && !Number.isNaN(savedAt.getTime()) && (
+            <span className="preference-saved-at">
+              <CheckCircle2 size={16} />
+              {experienceCopy.lastSaved} {savedAt.toLocaleString(locale)}
+            </span>
+          )}
+        </div>
       </form>
 
       <section className="personal-card communication-card">
@@ -254,8 +335,22 @@ export default function MyHomeAccount({
           <span><ShieldCheck size={18} /><span><strong>Anonymous audience insights</strong><small>Allow optional preferences in grouped reports. Advertisers never receive your identity or contact details.</small></span></span>
           <input type="checkbox" checked={audienceOptIn} onChange={(event) => void updateCommunication("audienceInsightsOptIn", event.target.checked)} />
         </label>
-        {message && <p className="registration-message" role="status">{message}</p>}
       </section>
+
+      {toast && (
+        <div className={`save-toast ${toast.kind}`} role="status" aria-live="polite">
+          <span className="save-toast-icon" aria-hidden="true">
+            {toast.kind === "success" ? <CheckCircle2 size={21} /> : <ShieldCheck size={21} />}
+          </span>
+          <span>
+            <strong>{toast.title}</strong>
+            <small>{toast.body}</small>
+          </span>
+          <button type="button" onClick={() => setToast(null)} aria-label="Dismiss notification">
+            <X size={17} />
+          </button>
+        </div>
+      )}
     </>
   );
 }

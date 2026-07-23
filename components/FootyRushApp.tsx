@@ -79,6 +79,7 @@ import {
 import { getSupabaseBrowserClient, hasSupabaseConfig } from "@/lib/supabase/client";
 import { useAccountActivity } from "@/lib/user/account-activity";
 import MyHomeAccount from "@/components/MyHomeAccount";
+import ProfileCompletionReminder from "@/components/ProfileCompletionReminder";
 import type { Session } from "@supabase/supabase-js";
 import type {
   CompetitionMode,
@@ -2713,6 +2714,15 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
           </button>
         </div>
       </header>
+
+      {profile && !profile.demo && (
+        <ProfileCompletionReminder
+          enabled={view === "play" && phase === "setup" && !isPlaying && !exhibitionPlaying}
+          locale={locale}
+          profileKey={profile.id}
+          onOpen={() => switchView("personal")}
+        />
+      )}
 
       {phase !== "setup" && (
         <section className={`status-strip${phase === "draft" ? " draft-status-strip" : ""}`} aria-label="Game status">
