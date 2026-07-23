@@ -2730,6 +2730,7 @@ p {
 .manager-avatar {
   display: flex;
   align-items: center;
+  gap: 12px;
   margin-top: 14px;
   padding: 14px 16px;
   border-top: 1px dashed var(--line);
@@ -2812,7 +2813,7 @@ p {
 }
 
 .pitch-token.team-kit::before,
-.fm-row-kit.team-kit::before {
+.draw-ticket-kit.team-kit::before {
   content: "";
   position: absolute;
   inset: 5px 7px 8px;
@@ -2828,8 +2829,7 @@ p {
   color: var(--team-secondary);
 }
 
-.team-kit .kit-num,
-.team-kit .fm-row-kit-num {
+.team-kit .kit-num {
   z-index: 2;
   color: var(--team-ink);
   text-shadow: 0 1px 1px rgba(255, 255, 255, 0.24);
@@ -6004,26 +6004,20 @@ main:has(.analytics-consent) .milestone-nudge {
   border: 1px dashed var(--line);
 }
 
-.fm-row-kit {
-  position: relative;
+.fm-row-number {
   flex: 0 0 auto;
   display: grid;
   place-items: center;
+  min-width: 27px;
+  height: 27px;
+  padding: 0 5px;
+  border: 1px solid color-mix(in srgb, var(--accent) 52%, var(--line));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 9%, var(--panel));
   color: var(--accent);
-}
-
-.fm-row-kit .kit-icon {
-  color: inherit;
-}
-
-.fm-row-kit-num {
-  position: absolute;
-  top: 54%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  font-size: 0.58rem;
+  font-size: 0.72rem;
   font-weight: 900;
-  color: #06110b;
+  line-height: 1;
 }
 
 .fm-row-main {
@@ -6252,19 +6246,42 @@ main:has(.analytics-consent) .milestone-nudge {
 /* Compact draw ticket: TEAM · YEAR · club name on one line */
 .draw-ticket {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   flex-wrap: wrap;
-  gap: 2px 8px;
-  padding: 8px 12px;
+  gap: 4px 8px;
+  min-height: 48px;
+  padding: 7px 12px;
 }
 
 .draw-ticket strong {
   font-size: 1.05rem;
 }
 
+.draw-ticket-club {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  margin-left: 3px;
+}
+
+.draw-ticket-kit {
+  position: relative;
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  color: var(--accent);
+}
+
+.draw-ticket-kit .kit-icon {
+  color: inherit;
+}
+
 .draw-ticket small {
-  margin-left: 4px;
+  margin: 0;
   color: var(--amber);
+  font-size: 0.8rem;
+  font-weight: 800;
 }
 
 .spin-result {

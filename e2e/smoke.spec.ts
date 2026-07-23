@@ -137,6 +137,19 @@ test("draft workspace gives the pitch and formation room on a wide screen", asyn
   expect(dimensions.rightWidth).toBeGreaterThan(dimensions.boardWidth);
   expect(dimensions.pitchWidth).toBeGreaterThanOrEqual(450);
   expect(dimensions.formationWidth).toBeGreaterThanOrEqual(330);
+
+  const spin = page.getByRole("button", { name: "Spin", exact: true });
+  await expect(spin).toBeEnabled({ timeout: 10_000 });
+  await spin.click();
+  await expect(page.locator(".fm-row").first()).toBeVisible({ timeout: 5_000 });
+  await expect(page.locator(".draw-ticket-kit")).toBeVisible();
+  await expect(page.locator(".fm-row-kit")).toHaveCount(0);
+  expect(await page.locator(".fm-row-number").count()).toBeGreaterThan(0);
+
+  const assistantGap = await page.locator(".manager-avatar.compact").evaluate((element) =>
+    Number.parseFloat(window.getComputedStyle(element).columnGap)
+  );
+  expect(assistantGap).toBeGreaterThanOrEqual(12);
 });
 
 test("optional analytics requires a clear preference and remains reversible", async ({ page }) => {

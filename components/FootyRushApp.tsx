@@ -2861,7 +2861,16 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                   <strong>{spin.teamCode}</strong>
                   <span>·</span>
                   <strong>{spin.year}</strong>
-                  <small>{spin.teamName}</small>
+                  <span className="draw-ticket-club">
+                    <span
+                      className="draw-ticket-kit team-kit"
+                      style={getTeamVisualStyle(spin.teamCode) as CSSProperties}
+                      aria-hidden="true"
+                    >
+                      <Shirt size={27} strokeWidth={1.6} className="kit-icon" />
+                    </span>
+                    <small>{spin.teamName}</small>
+                  </span>
                 </div>
                 {pendingCandidate && (
                   <div
@@ -2931,12 +2940,11 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                           <span className="fm-row-ovr hidden">?</span>
                         )}
                         <span
-                          className="fm-row-kit team-kit"
-                          style={getTeamVisualStyle(spin.teamCode) as CSSProperties}
-                          aria-hidden="true"
+                          className="fm-row-number"
+                          aria-label={`Shirt number ${candidate.player.num}`}
+                          title={`Shirt number ${candidate.player.num}`}
                         >
-                          <Shirt size={30} strokeWidth={1.5} className="kit-icon" />
-                          <span className="fm-row-kit-num">{candidate.player.num}</span>
+                          {candidate.player.num}
                         </span>
                         <div className="fm-row-main">
                           <div className="fm-row-name">
