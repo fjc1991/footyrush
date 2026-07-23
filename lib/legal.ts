@@ -46,7 +46,7 @@ export const legalCopy: Record<LegalLocale, LegalCopy> = {
         title: "Privacy Policy",
         summary: "How FootyRush collects, uses, and protects information when you play or create an account.",
         updatedLabel: "Effective",
-        updatedDate: "22 July 2026",
+        updatedDate: "23 July 2026",
         sections: [
           {
             heading: "1. Information we collect",
@@ -57,7 +57,8 @@ export const legalCopy: Record<LegalLocale, LegalCopy> = {
             bullets: [
               "Technical and security information, including a privacy-preserving hash of an IP address for guest-play limits and abuse prevention.",
               "Session data, theme, language, and temporary game progress stored in cookies or local storage on your device.",
-              "Basic device, browser, performance, and error information supplied by our hosting, analytics, and error-monitoring services."
+              "If you opt in, limited product events such as selected game mode, completed drafts or competitions, broad outcome metrics, and milestone sharing. These events use a random browser identifier and, while signed in, may be linked to your internal FootyRush account ID. They do not contain your email, X profile, posts, raw IP address, player names, or free-form text.",
+              "Basic device, browser, performance, and error information supplied by our hosting and error-monitoring services."
             ]
           },
           {
@@ -85,7 +86,7 @@ export const legalCopy: Record<LegalLocale, LegalCopy> = {
           {
             heading: "5. Your choices",
             paragraphs: [
-              "You can sign out, clear local game data through your browser, or disconnect FootyRush in your X account settings. To request access, correction, or deletion of your account data, contact support. We may retain limited records where required for security, leaderboard integrity, or law."
+              "You can allow or disable optional gameplay analytics at any time through Data choices in the game footer. You can also sign out, clear local game data through your browser, or disconnect FootyRush in your X account settings. To request access, correction, or deletion of your account data, contact support. We may retain limited records where required for security, leaderboard integrity, or law."
             ]
           },
           {
@@ -171,7 +172,7 @@ export const legalCopy: Record<LegalLocale, LegalCopy> = {
         title: "Política de privacidad",
         summary: "Cómo FootyRush recopila, usa y protege la información cuando juegas o creas una cuenta.",
         updatedLabel: "En vigor desde",
-        updatedDate: "22 de julio de 2026",
+        updatedDate: "23 de julio de 2026",
         sections: [
           {
             heading: "1. Información que recopilamos",
@@ -182,7 +183,8 @@ export const legalCopy: Record<LegalLocale, LegalCopy> = {
             bullets: [
               "Información técnica y de seguridad, incluido un hash respetuoso con la privacidad de la dirección IP para limitar partidas de invitado y prevenir abusos.",
               "Datos de sesión, tema, idioma y progreso temporal guardados en cookies o almacenamiento local del dispositivo.",
-              "Información básica del dispositivo, navegador, rendimiento y errores facilitada por nuestros servicios de alojamiento, análisis y monitorización."
+              "Si das tu consentimiento, eventos limitados del producto como el modo elegido, drafts o competiciones completadas, métricas generales de resultados y el uso de compartir hitos. Usan un identificador aleatorio del navegador y, con la sesión iniciada, pueden vincularse al ID interno de tu cuenta FootyRush. No incluyen tu email, perfil o publicaciones de X, IP sin procesar, nombres de jugadores ni texto libre.",
+              "Información básica del dispositivo, navegador, rendimiento y errores facilitada por nuestros servicios de alojamiento y monitorización."
             ]
           },
           {
@@ -210,7 +212,7 @@ export const legalCopy: Record<LegalLocale, LegalCopy> = {
           {
             heading: "5. Tus opciones",
             paragraphs: [
-              "Puedes cerrar sesión, borrar los datos locales desde el navegador o desconectar FootyRush en la configuración de X. Para solicitar acceso, corrección o eliminación de tus datos, contacta con soporte. Podemos conservar registros limitados por seguridad, integridad de la clasificación o exigencias legales."
+              "Puedes permitir o desactivar la analítica opcional del juego en cualquier momento desde Opciones de datos en el pie del juego. También puedes cerrar sesión, borrar los datos locales desde el navegador o desconectar FootyRush en la configuración de X. Para solicitar acceso, corrección o eliminación de tus datos, contacta con soporte. Podemos conservar registros limitados por seguridad, integridad de la clasificación o exigencias legales."
             ]
           },
           {
@@ -296,7 +298,7 @@ export const legalCopy: Record<LegalLocale, LegalCopy> = {
         title: "Politique de confidentialité",
         summary: "La manière dont FootyRush collecte, utilise et protège les informations lorsque vous jouez ou créez un compte.",
         updatedLabel: "En vigueur le",
-        updatedDate: "22 juillet 2026",
+        updatedDate: "23 juillet 2026",
         sections: [
           {
             heading: "1. Informations collectées",
@@ -307,7 +309,8 @@ export const legalCopy: Record<LegalLocale, LegalCopy> = {
             bullets: [
               "Des informations techniques et de sécurité, dont une empreinte respectueuse de la vie privée de l’adresse IP pour limiter les parties invitées et prévenir les abus.",
               "Les données de session, le thème, la langue et la progression temporaire stockés dans des cookies ou le stockage local de votre appareil.",
-              "Des informations de base sur l’appareil, le navigateur, les performances et les erreurs fournies par nos services d’hébergement, d’analyse et de suivi."
+              "Si vous y consentez, des événements produit limités tels que le mode choisi, les drafts ou compétitions terminés, des mesures générales de résultat et le partage d’objectifs. Ils utilisent un identifiant de navigateur aléatoire et, lorsque vous êtes connecté, peuvent être liés à l’identifiant interne de votre compte FootyRush. Ils ne contiennent ni e-mail, ni profil ou publication X, ni adresse IP brute, nom de joueur ou texte libre.",
+              "Des informations de base sur l’appareil, le navigateur, les performances et les erreurs fournies par nos services d’hébergement et de suivi."
             ]
           },
           {
@@ -335,7 +338,7 @@ export const legalCopy: Record<LegalLocale, LegalCopy> = {
           {
             heading: "5. Vos choix",
             paragraphs: [
-              "Vous pouvez vous déconnecter, effacer les données locales depuis votre navigateur ou déconnecter FootyRush dans les réglages X. Pour demander l’accès, la rectification ou la suppression de vos données, contactez l’assistance. Certains éléments peuvent être conservés pour la sécurité, l’intégrité des classements ou la loi."
+              "Vous pouvez autoriser ou désactiver à tout moment les statistiques de jeu facultatives depuis Choix des données dans le pied de page du jeu. Vous pouvez aussi vous déconnecter, effacer les données locales depuis votre navigateur ou déconnecter FootyRush dans les réglages X. Pour demander l’accès, la rectification ou la suppression de vos données, contactez l’assistance. Certains éléments peuvent être conservés pour la sécurité, l’intégrité des classements ou la loi."
             ]
           },
           {
@@ -421,7 +424,7 @@ export const legalCopy: Record<LegalLocale, LegalCopy> = {
         title: "Política de Privacidade",
         summary: "Como o FootyRush recolhe, utiliza e protege informações quando joga ou cria uma conta.",
         updatedLabel: "Em vigor desde",
-        updatedDate: "22 de julho de 2026",
+        updatedDate: "23 de julho de 2026",
         sections: [
           {
             heading: "1. Informações que recolhemos",
@@ -432,7 +435,8 @@ export const legalCopy: Record<LegalLocale, LegalCopy> = {
             bullets: [
               "Informações técnicas e de segurança, incluindo um hash da direção IP que preserva a privacidade para limitar jogos de convidados e prevenir abusos.",
               "Dados da sessão, tema, idioma e progresso temporário guardados em cookies ou no armazenamento local do dispositivo.",
-              "Informações básicas sobre o dispositivo, navegador, desempenho e erros fornecidas pelos nossos serviços de alojamento, análise e monitorização."
+              "Se der consentimento, eventos limitados do produto, como o modo escolhido, drafts ou competições concluídos, métricas gerais de resultado e partilha de marcos. Estes usam um identificador aleatório do navegador e, com sessão iniciada, podem ser ligados ao ID interno da sua conta FootyRush. Não incluem email, perfil ou publicações no X, IP em bruto, nomes de jogadores ou texto livre.",
+              "Informações básicas sobre o dispositivo, navegador, desempenho e erros fornecidas pelos nossos serviços de alojamento e monitorização."
             ]
           },
           {
@@ -460,7 +464,7 @@ export const legalCopy: Record<LegalLocale, LegalCopy> = {
           {
             heading: "5. As suas opções",
             paragraphs: [
-              "Pode terminar sessão, apagar dados locais no navegador ou desligar o FootyRush nas definições da sua conta X. Para pedir acesso, correção ou eliminação dos seus dados, contacte o suporte. Podemos conservar registos limitados por motivos de segurança, integridade da classificação ou obrigações legais."
+              "Pode permitir ou desativar a análise opcional do jogo a qualquer momento em Opções de dados no rodapé do jogo. Também pode terminar sessão, apagar dados locais no navegador ou desligar o FootyRush nas definições da sua conta X. Para pedir acesso, correção ou eliminação dos seus dados, contacte o suporte. Podemos conservar registos limitados por motivos de segurança, integridade da classificação ou obrigações legais."
             ]
           },
           {

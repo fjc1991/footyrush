@@ -26,10 +26,29 @@ the last deploy:
   history for Mini League and Invincible, plus title-board fields. It also
   recovers points/GD for older authenticated Invincible attempts without
   guessing historical league titles that were never stored.
+- `0010_consent_product_analytics.sql` — adds the service-role-only
+  `product_events` store for consented, allowlisted gameplay analytics. It stores
+  a random browser ID and optional account ID, but no raw IP, email, X profile,
+  post content, player names, user agent, or free-form text.
 
 ```bash
 # via Supabase CLI (or paste into the SQL editor in order)
 supabase db push
+```
+
+After `0010` is applied, the owner can inspect aggregate usage in the Supabase
+SQL editor without exposing individual event rows:
+
+```sql
+select
+  date_trunc('day', created_at) as day,
+  event_name,
+  count(*) as events,
+  count(distinct anonymous_id) as opted_in_browsers
+from public.product_events
+where created_at >= now() - interval '30 days'
+group by 1, 2
+order by 1 desc, 2;
 ```
 
 ## 2. Environment variables
@@ -59,8 +78,9 @@ supabase db push
 > to focus on core gameplay first. Manager spins and draft re-shuffles are the free
 > allowances only. Payments will be reintroduced later.
 
-Vercel Web Analytics (`<Analytics />`) activates automatically when deployed on
-Vercel; nothing to configure.
+Vercel Web Analytics and FootyRush product analytics activate only after the
+player selects **Allow gameplay analytics**. The preference can be reversed
+from **Data choices** in the game footer.
 
 ### Accounts to create
 - **Upstash Redis** (Vercel-native integration) → provides the two `UPSTASH_*` vars.
@@ -80,6 +100,7 @@ Defined per route via `lib/server/rate-limit.ts`:
 | `POST /api/invincible-attempts` | 20 / hour |
 | `POST /api/invincible-attempts/[id]/complete` | 30 / hour |
 | `POST /api/results` | 30 / hour |
+| `POST /api/analytics` | 180 / hour |
 
 ## 4. What changed (security/integrity)
 - **Guest gate** is now server-enforced via the `guest_play_allowances` table
@@ -145,8 +166,8 @@ longer offered in the FootyRush interface and should be disabled in Supabase.
 Set `NEXT_PUBLIC_SUPABASE_URL` to exactly
 `https://gqiafshqonbhirtuzesp.supabase.co` with no leading/trailing whitespace.
 Check `SUPABASE_URL` too if it is set separately. Keep the existing anon and
-service-role keys in their matching variables, apply migrations `0008` and
-`0009`, then redeploy.
+service-role keys in their matching variables, apply migrations `0008`, `0009`,
+and `0010`, then redeploy.
 
 Smoke-test X sign-in once in each locale. A first-time X user should be sent to
 manager-ID onboarding; a returning user should load the canonical `profiles`

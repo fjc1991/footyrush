@@ -48,5 +48,18 @@ export const en = {
   resumeAutoplay: "Resume auto-play",
   retry: "Retry",
   yourRank: "Your rank",
-  leaderboardEmpty: "No managers ranked in this window yet. Finish a league to appear here."
+  leaderboardEmpty: "No managers ranked in this window yet. Finish a league to appear here.",
+  analyticsTitle: "Help improve matchday",
+  analyticsCopy: "Share limited gameplay usage, such as modes played and completed runs. Signed-in events may be linked to your FootyRush account, but never include your email, X profile, posts, or raw IP address.",
+  analyticsAllow: "Allow gameplay analytics",
+  analyticsDecline: "Not now",
+  dataChoices: "Data choices",
+  milestoneKicker: "Milestone unlocked",
+  milestoneShare: "Share on X",
+  milestoneDismiss: "Dismiss milestone",
+  milestoneDetail: "A result worth celebrating. Share it if you want—this prompt will not interrupt play.",
+  milestoneLeagueChampion: "League champion",
+  milestoneUnbeaten: "An unbeaten season",
+  milestoneExpert: "Expert drafting unlocked",
+  milestoneRunStreak: "A new run landmark"
 };

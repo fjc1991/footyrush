@@ -48,5 +48,18 @@ export const es = {
   resumeAutoplay: "Reanudar reproducción automática",
   retry: "Reintentar",
   yourRank: "Tu posición",
-  leaderboardEmpty: "Aún no hay managers en este periodo. Termina una liga para aparecer aquí."
+  leaderboardEmpty: "Aún no hay managers en este periodo. Termina una liga para aparecer aquí.",
+  analyticsTitle: "Ayúdanos a mejorar la jornada",
+  analyticsCopy: "Comparte datos limitados del juego, como modos jugados y partidas completadas. Los eventos con sesión iniciada pueden vincularse a tu cuenta de FootyRush, pero nunca incluyen tu email, perfil o publicaciones de X ni tu IP sin procesar.",
+  analyticsAllow: "Permitir analítica del juego",
+  analyticsDecline: "Ahora no",
+  dataChoices: "Opciones de datos",
+  milestoneKicker: "Hito conseguido",
+  milestoneShare: "Compartir en X",
+  milestoneDismiss: "Cerrar hito",
+  milestoneDetail: "Un resultado para celebrar. Compártelo si quieres; este aviso no interrumpirá el juego.",
+  milestoneLeagueChampion: "Campeón de liga",
+  milestoneUnbeaten: "Una temporada invicta",
+  milestoneExpert: "Draft experto desbloqueado",
+  milestoneRunStreak: "Un nuevo hito de partidas"
 };

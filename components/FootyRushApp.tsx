@@ -1,14 +1,26 @@
 "use client";
 
-import { Activity, BarChart3, ChevronRight, Globe, Goal, HeartPulse, LogIn, Mail, Moon, Pause, Play, Shirt, Shuffle, Sparkles, Sun, Timer, Trophy, Users, X } from "lucide-react";
+import { Activity, BarChart3, ChevronRight, Globe, Goal, HeartPulse, LogIn, Mail, Moon, Pause, Play, ShieldCheck, Shirt, Shuffle, Sparkles, Sun, Timer, Trophy, Users, X } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { en } from "@/lib/i18n/en";
 import { createXOAuthCredentials } from "@/lib/auth/x-oauth";
+import {
+  getOrCreateAnalyticsAnonymousId,
+  readAnalyticsConsent,
+  writeAnalyticsConsent,
+  type AnalyticsConsent,
+  type ProductEventName
+} from "@/lib/analytics/events";
 import { FORMATION_LIST, getStarterSlots } from "@/lib/game/formations";
 import { autoDraftManager, getDraftSlots, getOpenDraftSlots, makeDraftPick } from "@/lib/game/draft";
 import { loadFootballData, spinForOpenSlots, getFootballData } from "@/lib/game/data";
 import { BOOST_LIMIT } from "@/lib/game/boosts";
 import { MANAGER_POOL, managerRatingForPosition } from "@/lib/game/managers";
+import {
+  invincibleMilestoneKind,
+  miniLeagueMilestoneKind,
+  type MilestoneKind
+} from "@/lib/game/milestones";
 import { createMinileague } from "@/lib/game/matchmaking";
 import { renderCommentary } from "@/lib/game/commentary";
 import {
@@ -129,6 +141,12 @@ function ordinal(n: number): string {
   return n + (s[(v - 20) % 10] ?? s[v] ?? s[0]);
 }
 
+function humanFixtureOutcome(result: FixtureResult): "win" | "draw" | "loss" {
+  const humanGoals = result.homeId === "human" ? result.homeGoals : result.awayGoals;
+  const opponentGoals = result.homeId === "human" ? result.awayGoals : result.homeGoals;
+  return humanGoals === opponentGoals ? "draw" : humanGoals > opponentGoals ? "win" : "loss";
+}
+
 function fitLabelFor(fit: number): "perfect" | "good" | "okay" {
   return fit >= 1 ? "perfect" : fit >= 0.9 ? "good" : "okay";
 }
@@ -151,6 +169,14 @@ type ResultSyncStatus = "idle" | "saving" | "saved" | "failed";
 interface PendingResultSync {
   records: LeaderboardRecord[];
   completedAt: string;
+}
+
+interface ShareMilestone {
+  id: string;
+  kind: MilestoneKind;
+  title: string;
+  detail: string;
+  shareText: string;
 }
 
 interface LeagueState {
@@ -250,11 +276,26 @@ function XLogo({ size = 16 }: { size?: number }) {
   );
 }
 
-function ShareOnXButton({ text }: { text: string }) {
+function ShareOnXButton({
+  text,
+  label = "Share on X",
+  onShare
+}: {
+  text: string;
+  label?: string;
+  onShare?: () => void;
+}) {
   return (
-    <button className="secondary-button share-x" type="button" onClick={() => shareResultOnX(text)}>
+    <button
+      className="secondary-button share-x"
+      type="button"
+      onClick={() => {
+        onShare?.();
+        shareResultOnX(text);
+      }}
+    >
       <XLogo size={16} />
-      Share on X
+      {label}
     </button>
   );
 }
@@ -325,6 +366,9 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
   const [seasonAutoplayPending, setSeasonAutoplayPending] = useState(false);
   const [seasonAutoplayError, setSeasonAutoplayError] = useState("");
   const [seasonCompletionPending, setSeasonCompletionPending] = useState(false);
+  const [analyticsConsent, setAnalyticsConsent] = useState<AnalyticsConsent>("unknown");
+  const [analyticsPromptOpen, setAnalyticsPromptOpen] = useState(false);
+  const [shareMilestone, setShareMilestone] = useState<ShareMilestone | null>(null);
   const seasonAdvanceLockRef = useRef(false);
   const activeSeasonIdRef = useRef<string | null>(null);
   const pendingSeasonCompletionRef = useRef<InvincibleSeason | null>(null);
@@ -334,6 +378,46 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
   const seasonAdvanceRef = useRef<() => Promise<void>>(async () => undefined);
   const leagueCommentaryRef = useRef<HTMLDivElement | null>(null);
   const exhibitionCommentaryRef = useRef<HTMLDivElement | null>(null);
+  const appOpenTrackedRef = useRef(false);
+
+  const trackProductEvent = useCallback(
+    async (
+      eventName: ProductEventName,
+      properties: Record<string, string | number | boolean> = {}
+    ) => {
+      if (readAnalyticsConsent() !== "granted") {
+        return;
+      }
+      try {
+        await fetch("/api/analytics", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+          body: JSON.stringify({
+            eventName,
+            anonymousId: getOrCreateAnalyticsAnonymousId(),
+            locale,
+            properties
+          }),
+          keepalive: true
+        });
+      } catch {
+        // Analytics is best-effort and must never interrupt the game.
+      }
+    },
+    [locale]
+  );
+
+  const chooseAnalyticsConsent = useCallback(
+    (value: Exclude<AnalyticsConsent, "unknown">) => {
+      writeAnalyticsConsent(value);
+      setAnalyticsConsent(value);
+      setAnalyticsPromptOpen(false);
+      if (value === "granted") {
+        void trackProductEvent("analytics_consent_granted", { source: "consent_prompt" });
+      }
+    },
+    [trackProductEvent]
+  );
 
   const hydrateLocalProgress = useCallback((nextProfile: LocalProfile | null) => {
     const progressionKeys = [managerKey, managerScoreKey, managerSpinsKey, expertUnlockedKey, completedLeaguesKey];
@@ -633,6 +717,24 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
   useEffect(() => {
     loadData();
   }, []);
+
+  useEffect(() => {
+    const storedConsent = readAnalyticsConsent();
+    setAnalyticsConsent(storedConsent);
+    if (storedConsent !== "unknown") {
+      return;
+    }
+    const timer = window.setTimeout(() => setAnalyticsPromptOpen(true), 1400);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    if (analyticsConsent !== "granted" || appOpenTrackedRef.current) {
+      return;
+    }
+    appOpenTrackedRef.current = true;
+    void trackProductEvent("app_open", { source: "web_app" });
+  }, [analyticsConsent, trackProductEvent]);
 
   useEffect(() => {
     function applyHashView() {
@@ -1059,6 +1161,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
       setManagerScore(rating);
       window.localStorage.setItem(profileStorageKey(managerScoreKey, profile), String(rating));
       setManagerSpinning(false);
+      void trackProductEvent("manager_shuffled", { managerRating: rating });
     }, 820);
   }
 
@@ -1105,6 +1208,12 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
   }
 
   function startDraft() {
+    void trackProductEvent("draft_started", {
+      competitionMode: gameMode === "be_invincible" ? "invincible" : "minileague",
+      draftMode,
+      formationId,
+      managerRating: selectedManager?.rating ?? managerScore
+    });
     resetDraft("draft");
   }
 
@@ -1248,6 +1357,13 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
       setShowAuthGate(true);
       return;
     }
+
+    void trackProductEvent("draft_completed", {
+      competitionMode: gameMode === "be_invincible" ? "invincible" : "minileague",
+      draftMode,
+      formationId,
+      managerRating: selectedManager?.rating ?? managerScore
+    });
 
     if (gameMode === "be_invincible") {
       let attemptId = `local-${Date.now()}`;
@@ -1488,6 +1604,39 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
       competitionMode: "invincible",
       runId: finalizedSeason.attemptId || finalizedSeason.id
     });
+    const human = finalStandings.find((standing) => standing.managerId === "human");
+    if (human) {
+      const finalPosition = finalStandings.findIndex((standing) => standing.managerId === "human") + 1;
+      void trackProductEvent("competition_completed", {
+        competitionMode: "invincible",
+        points: human.points,
+        finalPosition,
+        goalDifference: human.goalDifference,
+        unbeaten: human.losses === 0,
+        officialAward: completion.officialAward
+      });
+      const milestoneKind = invincibleMilestoneKind({
+        unbeaten: human.losses === 0,
+        finalPosition
+      });
+      if (milestoneKind === "unbeaten") {
+        presentMilestone({
+          id: `invincible:${finalizedSeason.attemptId || finalizedSeason.id}`,
+          kind: "unbeaten",
+          title: copy.milestoneUnbeaten,
+          detail: copy.milestoneDetail,
+          shareText: `I went UNBEATEN in FootyRush Be Invincible — ${human.wins}W-${human.draws}D-0L and ${human.points} points. Can you survive all 38 games? #FootyRush`
+        });
+      } else if (milestoneKind === "league_champion") {
+        presentMilestone({
+          id: `invincible-title:${finalizedSeason.attemptId || finalizedSeason.id}`,
+          kind: "league_champion",
+          title: copy.milestoneLeagueChampion,
+          detail: copy.milestoneDetail,
+          shareText: `I won the FootyRush Be Invincible league with ${human.points} points. The unbeaten dream continues next season. #FootyRush`
+        });
+      }
+    }
     pendingSeasonCompletionRef.current = null;
     setSeasonCompletionPending(false);
     setSeason(finalizedSeason);
@@ -1502,6 +1651,11 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     }
 
     const currentRound = season.rounds[season.currentMatchday] ?? [];
+    void trackProductEvent("match_completed", {
+      competitionMode: "invincible",
+      matchday: season.currentMatchday + 1,
+      outcome: humanFixtureOutcome(humanResult)
+    });
     const nextResults = [...season.results, humanResult];
     const otherFixtures = currentRound.filter((fixture) => fixture.id !== humanResult.fixtureId);
     otherFixtures.forEach((fixture) => {
@@ -1584,6 +1738,11 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
       return;
     }
 
+    void trackProductEvent("match_completed", {
+      competitionMode: "minileague",
+      matchday: league.currentRound + 1,
+      outcome: humanFixtureOutcome(currentResult)
+    });
     let nextManagers = applyFixtureInjuries(league.managers, currentResult);
     const nextResults = [...league.results, currentResult];
     const otherFixtures = currentRoundFixtures.filter((fixture) => fixture.id !== currentResult.fixtureId);
@@ -1653,6 +1812,14 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     }
   }
 
+  function presentMilestone(milestone: ShareMilestone) {
+    setShareMilestone(milestone);
+    void trackProductEvent("milestone_prompted", {
+      milestone: milestone.kind,
+      source: milestone.id
+    });
+  }
+
   function recordCompletedCompetition(params: {
     managers: ManagerSquad[];
     standings: ReturnType<typeof computeStandings>;
@@ -1707,6 +1874,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     window.localStorage.setItem(profileStorageKey(completedLeaguesKey, profile), String(nextCompletedLeagues));
 
     const human = finalStandings.find((standing) => standing.managerId === "human");
+    let unlockedExpert = false;
     if (human) {
       const currentScore = Number(
         window.localStorage.getItem(profileStorageKey(managerScoreKey, profile)) ?? managerScore
@@ -1719,9 +1887,49 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
       setManagerScore(nextScore);
       setLastScoreDelta(delta);
       setExpertUnlockedEarned(nextExpert);
-      setExpertUnlockedThisRun(!wasExpert && nextExpert);
+      unlockedExpert = !wasExpert && nextExpert;
+      setExpertUnlockedThisRun(unlockedExpert);
       window.localStorage.setItem(profileStorageKey(managerScoreKey, profile), String(nextScore));
       window.localStorage.setItem(profileStorageKey(expertUnlockedKey, profile), String(nextExpert));
+
+      const finalPosition = finalStandings.findIndex((standing) => standing.managerId === "human") + 1;
+      void trackProductEvent("competition_completed", {
+        competitionMode: "minileague",
+        points: human.points,
+        finalPosition,
+        goalDifference: human.goalDifference
+      });
+
+      const milestoneKind = miniLeagueMilestoneKind({
+        wonTitle,
+        unlockedExpert,
+        completedLeagues: nextCompletedLeagues
+      });
+      if (milestoneKind === "league_champion") {
+        presentMilestone({
+          id: `minileague-title:${completedLeague.id}`,
+          kind: "league_champion",
+          title: copy.milestoneLeagueChampion,
+          detail: copy.milestoneDetail,
+          shareText: `I won a FootyRush Mini League with ${human.points} points and a ${human.goalDifference >= 0 ? "+" : ""}${human.goalDifference} goal difference. Can you take the title? #FootyRush`
+        });
+      } else if (milestoneKind === "expert_unlocked") {
+        presentMilestone({
+          id: `expert:${completedLeague.id}`,
+          kind: "expert_unlocked",
+          title: copy.milestoneExpert,
+          detail: copy.milestoneDetail,
+          shareText: `I just unlocked Expert drafting in FootyRush. Ratings are hidden next time—time to trust the scouting. #FootyRush`
+        });
+      } else if (milestoneKind === "run_landmark") {
+        presentMilestone({
+          id: `runs:${nextCompletedLeagues}`,
+          kind: "run_landmark",
+          title: `${copy.milestoneRunStreak}: ${nextCompletedLeagues}`,
+          detail: copy.milestoneDetail,
+          shareText: `I just completed my ${nextCompletedLeagues}${ordinal(nextCompletedLeagues).replace(String(nextCompletedLeagues), "")} FootyRush Mini League. One more squad? #FootyRush`
+        });
+      }
     }
 
     recordGuestPlayIfNeeded();
@@ -2245,6 +2453,22 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
         <>
           <section className="setup-home">
             <div className="setup-left">
+              <div className="setup-hero">
+                <span className="broadcast-label">
+                  <span aria-hidden="true" />
+                  Floodlights on · Your season starts here
+                </span>
+                <h2>Draft the XI. Own the story.</h2>
+                <p className="setup-lede">
+                  Build across iconic club seasons, solve the matchday problems, and turn one squad into a run worth remembering.
+                </p>
+                <div className="setup-proof-strip" aria-label="Game overview">
+                  <div><strong>36</strong><span>historic sides</span></div>
+                  <div><strong>16</strong><span>draft picks</span></div>
+                  <div><strong>2</strong><span>ways to play</span></div>
+                </div>
+              </div>
+
               <div className="setup-feature-grid" aria-label="Setup flow">
                 <div>
                   <span>01</span>
@@ -2348,21 +2572,45 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                   <button
                     type="button"
                     className={`choice-card${gameMode === "minileague" ? " active" : ""}`}
-                    onClick={() => setGameMode("minileague")}
+                    onClick={() => {
+                      setGameMode("minileague");
+                      void trackProductEvent("mode_selected", { competitionMode: "minileague" });
+                    }}
                   >
-                    <span className="eyebrow">Mini league</span>
+                    <span className="choice-card-top">
+                      <Timer size={18} aria-hidden="true" />
+                      <span className="eyebrow">Mini league</span>
+                    </span>
                     <strong>Five-match rush</strong>
                     <small>Draft once, climb a compact historical table.</small>
                   </button>
                   <button
                     type="button"
                     className={`choice-card${gameMode === "be_invincible" ? " active" : ""}`}
-                    onClick={() => setGameMode("be_invincible")}
+                    onClick={() => {
+                      setGameMode("be_invincible");
+                      void trackProductEvent("mode_selected", { competitionMode: "invincible" });
+                    }}
                   >
-                    <span className="eyebrow">Be Invincible</span>
+                    <span className="choice-card-top">
+                      <Trophy size={18} aria-hidden="true" />
+                      <span className="eyebrow">Be Invincible</span>
+                    </span>
                     <strong>38-game season</strong>
                     <small>Stay unbeaten through injuries, form dips and tight fixtures.</small>
                   </button>
+                </div>
+                <div className="setup-run-brief">
+                  <div>
+                    <span className="eyebrow">Selected broadcast</span>
+                    <strong>{gameMode === "be_invincible" ? "The 38-game test" : "The five-match rush"}</strong>
+                    <small>
+                      {gameMode === "be_invincible"
+                        ? "Auto-play keeps the season moving and pauses only when your team needs attention."
+                        : "Fast fixtures, a live table, and one clear target: finish above the historical field."}
+                    </small>
+                  </div>
+                  <SetupPitchPreview mode={gameMode} />
                 </div>
               </div>
 
@@ -2381,6 +2629,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
             <nav aria-label="Footer">
               <a href={`/${locale}/privacy`}>{copy.privacy}</a>
               <a href={`/${locale}/terms`}>{copy.terms}</a>
+              <button type="button" onClick={() => setAnalyticsPromptOpen(true)}>{copy.dataChoices}</button>
               <a href="mailto:hello@footyrush.app">Contact</a>
               <a href="mailto:support@footyrush.app">Support</a>
             </nav>
@@ -3010,6 +3259,59 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
         </section>
       )}
 
+      {shareMilestone && (
+        <aside className="milestone-nudge" aria-labelledby="milestone-nudge-title">
+          <div className="milestone-nudge-icon" aria-hidden="true">
+            <Trophy size={22} />
+          </div>
+          <div className="milestone-nudge-copy">
+            <span>{copy.milestoneKicker}</span>
+            <strong id="milestone-nudge-title">{shareMilestone.title}</strong>
+            <p>{shareMilestone.detail}</p>
+          </div>
+          <ShareOnXButton
+            text={shareMilestone.shareText}
+            label={copy.milestoneShare}
+            onShare={() => {
+              void trackProductEvent("milestone_shared", {
+                milestone: shareMilestone.kind,
+                source: shareMilestone.id
+              });
+              setShareMilestone(null);
+            }}
+          />
+          <button
+            className="milestone-nudge-close"
+            type="button"
+            aria-label={copy.milestoneDismiss}
+            onClick={() => setShareMilestone(null)}
+          >
+            <X size={16} />
+          </button>
+        </aside>
+      )}
+
+      {analyticsPromptOpen && (
+        <aside className="analytics-consent" role="dialog" aria-labelledby="analytics-consent-title">
+          <div className="analytics-consent-icon" aria-hidden="true">
+            <ShieldCheck size={22} />
+          </div>
+          <div className="analytics-consent-copy">
+            <strong id="analytics-consent-title">{copy.analyticsTitle}</strong>
+            <p>{copy.analyticsCopy}</p>
+            <a href={`/${locale}/privacy`}>{copy.privacy}</a>
+          </div>
+          <div className="analytics-consent-actions">
+            <button className="primary-button" type="button" onClick={() => chooseAnalyticsConsent("granted")}>
+              {copy.analyticsAllow}
+            </button>
+            <button className="secondary-button" type="button" onClick={() => chooseAnalyticsConsent("denied")}>
+              {analyticsConsent === "granted" ? "Turn off" : copy.analyticsDecline}
+            </button>
+          </div>
+        </aside>
+      )}
+
       {roundSummaryData && (
         <div className="modal-backdrop" role="presentation" onClick={dismissRoundSummary}>
           <section className="auth-modal round-summary-modal" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
@@ -3157,6 +3459,33 @@ function FootyRushLogo() {
         <path className="brand-logo-seam" d="M 28 27 L 35 29 M 45 29 L 53 27 M 32 18 L 28 27 M 48 18 L 53 27" />
       </svg>
       <span>FR</span>
+    </div>
+  );
+}
+
+function SetupPitchPreview({ mode }: { mode: GameMode }) {
+  const dots = mode === "be_invincible"
+    ? [
+        [50, 12], [21, 31], [42, 33], [61, 33], [80, 31],
+        [29, 55], [50, 57], [71, 55], [22, 79], [50, 82], [78, 79]
+      ]
+    : [
+        [50, 13], [18, 35], [39, 34], [61, 34], [82, 35],
+        [23, 58], [50, 55], [77, 58], [30, 80], [50, 75], [70, 80]
+      ];
+  return (
+    <div className="setup-pitch-preview" aria-hidden="true">
+      <span className="setup-pitch-box setup-pitch-box-top" />
+      <span className="setup-pitch-box setup-pitch-box-bottom" />
+      <span className="setup-pitch-halfway" />
+      <span className="setup-pitch-circle" />
+      {dots.map(([left, top], index) => (
+        <span
+          className={`setup-pitch-player${index === 0 ? " keeper" : ""}`}
+          key={`${left}-${top}`}
+          style={{ left: `${left}%`, top: `${top}%` }}
+        />
+      ))}
     </div>
   );
 }

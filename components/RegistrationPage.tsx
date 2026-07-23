@@ -17,18 +17,7 @@ interface LocalProfile {
   demo: boolean;
 }
 
-interface CanonicalProfileResponse {
-  ok?: boolean;
-  profile?: {
-    id: string;
-    managerId: string | null;
-    displayName: string;
-    email: string | null;
-    demo: false;
-  };
-}
-
-type SessionState = "loading" | "anonymous" | "needs-manager-id" | "complete" | "error";
+type SessionState = "loading" | "anonymous" | "needs-manager-id" | "complete";
 
 function readRegisteredManagerIds(): Record<string, string> {
   try {
@@ -66,9 +55,8 @@ export default function RegistrationPage({ locale }: { locale: string }) {
 
     void supabase.auth.getSession().then(async ({ data }) => {
       if (!active) return;
-      const session = data.session;
-      const user = session?.user;
-      if (!session || !user) {
+      const user = data.session?.user;
+      if (!user) {
         // A stale local profile must never turn an anonymous browser into an
         // authenticated onboarding request.
         window.localStorage.removeItem(profileKey);
@@ -76,30 +64,23 @@ export default function RegistrationPage({ locale }: { locale: string }) {
         return;
       }
 
-      let response: Response;
-      try {
-        response = await fetch("/api/profile", {
-          headers: { Authorization: `Bearer ${session.access_token}` }
-        });
-      } catch {
-        if (!active) return;
-        setMessage("We could not load your account. Refresh and try again.");
-        setSessionState("error");
-        return;
-      }
-      const result = (await response.json().catch(() => null)) as CanonicalProfileResponse | null;
+      const { data: row, error } = await supabase
+        .from("profiles")
+        .select("id, manager_id, display_name, email")
+        .eq("id", user.id)
+        .maybeSingle();
       if (!active) return;
-      if (!response.ok || !result?.ok || !result.profile) {
+      if (error) {
         setMessage("We could not load your account. Refresh and try again.");
-        setSessionState("error");
+        setSessionState("needs-manager-id");
         return;
       }
 
       const storedProfile: LocalProfile = {
-        id: result.profile.id,
-        managerId: result.profile.managerId ?? undefined,
-        displayName: result.profile.displayName || user.email?.split("@")[0] || "Manager",
-        email: result.profile.email || user.email || "",
+        id: user.id,
+        managerId: typeof row?.manager_id === "string" ? row.manager_id : undefined,
+        displayName: row?.display_name || user.email?.split("@")[0] || "Manager",
+        email: row?.email || user.email || "",
         demo: false
       };
       setEmail(storedProfile.email);
@@ -325,15 +306,6 @@ export default function RegistrationPage({ locale }: { locale: string }) {
           <div className="registration-message" role="status">
             <span>Loading your account…</span>
           </div>
-        ) : sessionState === "error" ? (
-          <div className="registration-form">
-            <div className="registration-message unavailable" role="alert">
-              <span>{message}</span>
-            </div>
-            <button className="secondary-button wide" type="button" onClick={() => window.location.reload()}>
-              Refresh account
-            </button>
-          </div>
         ) : sessionState === "complete" ? (
           <div className="registration-form">
             <div className="registration-message available" role="status">
@@ -388,7 +360,7 @@ export default function RegistrationPage({ locale }: { locale: string }) {
           </form>
         )}
 
-        {sessionState !== "loading" && sessionState !== "complete" && sessionState !== "error" && (
+        {sessionState !== "loading" && sessionState !== "complete" && (
           <div className={`registration-message${available ? " available" : available === false ? " unavailable" : ""}`} aria-live="polite">
             {available && <CheckCircle2 size={17} />}
             <span>

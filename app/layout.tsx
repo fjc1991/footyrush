@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { Barlow_Condensed, Inter } from "next/font/google";
-import { Analytics } from "@vercel/analytics/react";
+import { ConsentAnalytics } from "@/components/ConsentAnalytics";
 import "./globals.css";
 
 const displayFont = Barlow_Condensed({
@@ -64,7 +64,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
       </head>
       <body>
         {children}
-        <Analytics />
+        <ConsentAnalytics />
       </body>
     </html>
   );

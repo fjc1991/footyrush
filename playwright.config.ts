@@ -29,7 +29,21 @@ export default defineConfig({
   webServer: {
     command: isCI ? `npm run start` : `npm run dev`,
     url: baseURL,
-    env: { PORT: String(PORT) },
+    env: {
+      PORT: String(PORT),
+      ...(isCI
+        ? {
+            // Production runtime validation intentionally refuses public dev
+            // fallbacks. Browser smoke tests use isolated placeholders and an
+            // unreachable local Supabase URL; routes degrade safely without
+            // ever touching a real project or secret.
+            NEXT_PUBLIC_SUPABASE_URL: "http://127.0.0.1:54321",
+            SUPABASE_SERVICE_ROLE_KEY: "playwright-local-service-role",
+            FOOTYRUSH_IP_HASH_SALT: "playwright-local-ip-hash-salt",
+            INVINCIBLE_GATE_SECRET: "playwright-local-invincible-gate-secret"
+          }
+        : {})
+    },
     timeout: 120_000,
     reuseExistingServer: !isCI
   }
