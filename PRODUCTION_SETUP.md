@@ -31,6 +31,13 @@ the last deploy:
   a random browser ID and optional account ID, but no raw IP, email, X profile,
   post content, player names, user agent, or free-form text.
 
+The application includes an idempotent compatibility path that can still save
+and read authenticated **Mini League** results through the pre-`0009` table
+shape. This prevents completed five-match runs from being lost during a rolling
+deployment. Apply `0009` promptly: full Invincible persistence, format-separated
+leaderboards, and exact finishing-position history intentionally remain gated
+on the verified migration.
+
 ```bash
 # via Supabase CLI (or paste into the SQL editor in order)
 supabase db push

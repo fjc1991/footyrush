@@ -22,6 +22,7 @@ import {
   type MilestoneKind
 } from "@/lib/game/milestones";
 import { createMinileague } from "@/lib/game/matchmaking";
+import { canonicalAccountRunId } from "@/lib/game/result-id";
 import { renderCommentary } from "@/lib/game/commentary";
 import {
   INVINCIBLE_TEAM_TALK_LIMIT,
@@ -535,10 +536,38 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     setResultSyncStatus("saving");
     setResultSyncMessage("Saving this result to your account…");
     try {
+      const normalizedRecords = await Promise.all(payload.records.map(async (record) => {
+        const runId = await canonicalAccountRunId(profile.id, record.competitionMode, record.runId);
+        return runId === record.runId
+          ? record
+          : { ...record, id: `${profile.id}-${runId}`, userId: profile.id, runId };
+      }));
+      const normalizedPayload = { ...payload, records: normalizedRecords };
+      const replacements = new Map(
+        payload.records.map((record, index) => [
+          `${record.competitionMode}:${record.runId}`,
+          normalizedRecords[index]
+        ])
+      );
+      setLeaderboardRecords((current) => {
+        const rewritten = mergeRunRecords(current.map((record) =>
+          replacements.get(`${record.competitionMode}:${record.runId}`) ?? record
+        ));
+        leaderboardRecordsRef.current = rewritten;
+        window.localStorage.setItem(recordsStorageKey(profile), JSON.stringify(rewritten));
+        return rewritten;
+      });
+      for (const [oldKey, replacement] of replacements) {
+        if (`${replacement.competitionMode}:${replacement.runId}` !== oldKey) {
+          recordedRunIdsRef.current.delete(oldKey);
+          recordedRunIdsRef.current.add(`${replacement.competitionMode}:${replacement.runId}`);
+        }
+      }
+      pendingResultSyncRef.current = normalizedPayload;
       const response = await fetch("/api/results", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...(await authHeaders()) },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(normalizedPayload)
       });
       const body = (await response.json().catch(() => null)) as { error?: string } | null;
       if (!response.ok) {

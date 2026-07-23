@@ -59,4 +59,75 @@ describe("/api/leaderboards", () => {
     expect(client.builder.eq).toHaveBeenCalledWith("competition_mode", "invincible");
     expect(client.builder.eq).not.toHaveBeenCalledWith("league_titles", 1);
   });
+
+  it("serves legacy Mini League rows instead of an empty board before migration 0009", async () => {
+    const fullBuilder = {
+      select: vi.fn(),
+      lte: vi.fn(),
+      gte: vi.fn(),
+      eq: vi.fn(),
+      order: vi.fn(),
+      range: vi.fn().mockResolvedValue({
+        data: null,
+        error: { code: "PGRST204", message: "competition_mode column missing" }
+      })
+    };
+    fullBuilder.select.mockReturnValue(fullBuilder);
+    fullBuilder.lte.mockReturnValue(fullBuilder);
+    fullBuilder.gte.mockReturnValue(fullBuilder);
+    fullBuilder.eq.mockReturnValue(fullBuilder);
+    fullBuilder.order.mockReturnValue(fullBuilder);
+
+    const legacyBuilder = {
+      select: vi.fn(),
+      lte: vi.fn(),
+      gte: vi.fn(),
+      eq: vi.fn(),
+      order: vi.fn(),
+      range: vi.fn().mockResolvedValue({
+        data: [{
+          id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          profile_id: "profile-1",
+          display_name: "Joe Costello",
+          kind: "human",
+          match_points: 13,
+          goal_difference: 7,
+          goals_for: 11,
+          league_titles: 0,
+          opponent_strength: 1880,
+          completed_at: new Date().toISOString()
+        }],
+        error: null
+      })
+    };
+    legacyBuilder.select.mockReturnValue(legacyBuilder);
+    legacyBuilder.lte.mockReturnValue(legacyBuilder);
+    legacyBuilder.gte.mockReturnValue(legacyBuilder);
+    legacyBuilder.eq.mockReturnValue(legacyBuilder);
+    legacyBuilder.order.mockReturnValue(legacyBuilder);
+    routeMocks.serviceClient.mockReturnValue({
+      from: vi.fn()
+        .mockReturnValueOnce(fullBuilder)
+        .mockReturnValueOnce(legacyBuilder)
+    });
+
+    const response = await GET(new NextRequest(
+      "http://localhost/api/leaderboards?period=daily&metric=points&competitionMode=minileague"
+    ));
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload).toMatchObject({
+      production: true,
+      degraded: true,
+      competitionMode: "minileague"
+    });
+    expect(payload.entries).toEqual([
+      expect.objectContaining({
+        displayName: "Joe Costello",
+        matchPoints: 13,
+        competitionMode: "minileague"
+      })
+    ]);
+  });
 });

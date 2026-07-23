@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import type { CompetitionMode, LeaderboardRecord } from "@/lib/game/types";
+import { canonicalAccountRunId, isResultUuid } from "@/lib/game/result-id";
 import { getSupabaseServiceClient } from "@/lib/supabase/server";
 import { getAuthenticatedUserId } from "@/lib/server/auth";
+import { isCompetitionSchemaMissing } from "@/lib/server/database-errors";
 import { rateLimit, tooManyRequests } from "@/lib/server/rate-limit";
 
 export const runtime = "nodejs";
@@ -22,6 +24,19 @@ interface EntryRow {
   run_id: string;
   games_played: number;
   final_position: number | null;
+  match_points: number;
+  goal_difference: number;
+  goals_for: number;
+  league_titles: number;
+  opponent_strength: number;
+  completed_at: string;
+}
+
+interface LegacyEntryRow {
+  id: string;
+  profile_id: string | null;
+  display_name: string;
+  kind: "human" | "reserve";
   match_points: number;
   goal_difference: number;
   goals_for: number;
@@ -78,11 +93,7 @@ function normalizeRunId(record: Record<string, unknown>): string | null {
   return value;
 }
 
-function isUuid(value: string): boolean {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
-}
-
-function toRecord(row: EntryRow): LeaderboardRecord {
+function toRecord(row: EntryRow, legacy = false): LeaderboardRecord {
   return {
     id: row.id,
     userId: row.profile_id ?? `deleted:${row.id}`,
@@ -90,6 +101,7 @@ function toRecord(row: EntryRow): LeaderboardRecord {
     kind: row.kind,
     competitionMode: row.competition_mode === "invincible" ? "invincible" : "minileague",
     runId: row.run_id,
+    ...(legacy ? { legacy: true } : {}),
     gamesPlayed: row.games_played,
     finalPosition: row.final_position,
     periodAt: row.completed_at,
@@ -100,6 +112,37 @@ function toRecord(row: EntryRow): LeaderboardRecord {
     opponentStrength: row.opponent_strength,
     completedAt: row.completed_at
   };
+}
+
+function legacyToRecord(row: LegacyEntryRow): LeaderboardRecord {
+  return toRecord({
+    ...row,
+    competition_mode: "minileague",
+    run_id: row.id,
+    games_played: 5,
+    final_position: row.league_titles === 1 ? 1 : null
+  }, true);
+}
+
+async function writeLegacyMiniLeagueResult(
+  supabase: NonNullable<ReturnType<typeof getSupabaseServiceClient>>,
+  row: Record<string, unknown>
+) {
+  const completedAt = String(row.p_completed_at);
+  return supabase.from("leaderboard_entries").upsert({
+    id: row.p_run_id,
+    profile_id: row.p_profile_id,
+    display_name: row.p_display_name,
+    kind: "human",
+    period: "daily",
+    period_start: completedAt.slice(0, 10),
+    match_points: row.p_match_points,
+    goal_difference: row.p_goal_difference,
+    goals_for: row.p_goals_for,
+    league_titles: row.p_league_titles,
+    opponent_strength: row.p_opponent_strength,
+    completed_at: completedAt
+  }, { onConflict: "id" });
 }
 
 /**
@@ -150,13 +193,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Every result must be a human competition record." }, { status: 400 });
     }
     const competitionMode = normalizeMode(value.competitionMode);
-    const runId = normalizeRunId(value);
-    if (!competitionMode || !runId) {
+    const submittedRunId = normalizeRunId(value);
+    if (!competitionMode || !submittedRunId) {
       return NextResponse.json({ error: "Each result needs a valid competition mode and run ID." }, { status: 400 });
     }
-    if (competitionMode === "invincible" && !isUuid(runId)) {
+    if (competitionMode === "invincible" && !isResultUuid(submittedRunId)) {
       return NextResponse.json({ error: "Invincible results need a verified attempt ID." }, { status: 400 });
     }
+    const runId = await canonicalAccountRunId(profile.id, competitionMode, submittedRunId);
     if (submittedRunIds.has(runId)) {
       return NextResponse.json({ error: "Each run ID may only appear once per request." }, { status: 400 });
     }
@@ -214,11 +258,30 @@ export async function POST(request: NextRequest) {
   for (const row of normalizedRows) {
     const { error: writeError } = await supabase.rpc("record_competition_result", row);
     if (writeError) {
+      if (isCompetitionSchemaMissing(writeError) && row.p_competition_mode === "minileague") {
+        const { error: fallbackError } = await writeLegacyMiniLeagueResult(supabase, row);
+        if (!fallbackError) {
+          continue;
+        }
+      }
+      if (isCompetitionSchemaMissing(writeError)) {
+        return NextResponse.json(
+          {
+            error: "Account result storage is being upgraded. Please retry shortly.",
+            code: "competition_schema_upgrade_required"
+          },
+          { status: 503 }
+        );
+      }
       return NextResponse.json({ error: "Could not record result." }, { status: 500 });
     }
   }
 
-  return NextResponse.json({ persisted: true, count: normalizedRows.length });
+  return NextResponse.json({
+    persisted: true,
+    count: normalizedRows.length,
+    runIds: normalizedRows.map((row) => String(row.p_run_id))
+  });
 }
 
 /** Return only the authenticated manager's durable competition history. */
@@ -264,10 +327,35 @@ export async function GET(request: NextRequest) {
   const { data, error } = await query.limit(requestedLimit);
 
   if (error) {
+    if (isCompetitionSchemaMissing(error)) {
+      let legacyQuery = supabase
+        .from("leaderboard_entries")
+        .select(
+          "id, profile_id, display_name, kind, match_points, goal_difference, goals_for, league_titles, opponent_strength, completed_at"
+        )
+        .eq("profile_id", profileId)
+        .order("completed_at", { ascending: false })
+        .order("id", { ascending: false });
+      if (cursorAt && cursorId) {
+        const normalizedCursorAt = new Date(cursorTimestamp).toISOString();
+        legacyQuery = legacyQuery.or(
+          `completed_at.lt.${normalizedCursorAt},and(completed_at.eq.${normalizedCursorAt},id.lt.${cursorId})`
+        );
+      }
+      const { data: legacyData, error: legacyError } = await legacyQuery.limit(requestedLimit);
+      if (!legacyError) {
+        const records = ((legacyData as LegacyEntryRow[] | null) ?? []).map(legacyToRecord);
+        const last = records.at(-1);
+        const nextCursor = records.length === requestedLimit && last
+          ? { completedAt: last.completedAt, id: last.id }
+          : null;
+        return NextResponse.json({ records, production: true, degraded: true, nextCursor });
+      }
+    }
     return NextResponse.json({ error: "Could not load competition history." }, { status: 500 });
   }
 
-  const records = ((data as EntryRow[] | null) ?? []).map(toRecord);
+  const records = ((data as EntryRow[] | null) ?? []).map((row) => toRecord(row));
   const last = records.at(-1);
   const nextCursor = records.length === requestedLimit && last
     ? { completedAt: last.completedAt, id: last.id }

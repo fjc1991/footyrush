@@ -21,6 +21,7 @@ vi.mock("@/lib/server/rate-limit", () => ({
 }));
 
 import { GET, POST } from "@/app/api/results/route";
+import { canonicalAccountRunId } from "@/lib/game/result-id";
 
 function request(method: "GET" | "POST", body?: unknown, url = "http://localhost/api/results") {
   return new NextRequest(url, {
@@ -30,7 +31,10 @@ function request(method: "GET" | "POST", body?: unknown, url = "http://localhost
   });
 }
 
-function postClient() {
+function postClient(options: {
+  rpcError?: { code?: string; message?: string } | null;
+  fallbackError?: { code?: string; message?: string } | null;
+} = {}) {
   const profileBuilder = {
     select: vi.fn(),
     eq: vi.fn(),
@@ -42,10 +46,14 @@ function postClient() {
   profileBuilder.select.mockReturnValue(profileBuilder);
   profileBuilder.eq.mockReturnValue(profileBuilder);
 
-  const rpc = vi.fn().mockResolvedValue({ error: null });
+  const fallbackUpsert = vi.fn().mockResolvedValue({ error: options.fallbackError ?? null });
+  const rpc = vi.fn().mockResolvedValue({ error: options.rpcError ?? null });
   return {
-    from: vi.fn(() => profileBuilder),
-    rpc
+    from: vi.fn((table: string) =>
+      table === "profiles" ? profileBuilder : { upsert: fallbackUpsert }
+    ),
+    rpc,
+    fallbackUpsert
   };
 }
 
@@ -195,10 +203,69 @@ describe("/api/results", () => {
     }));
 
     expect(response.status).toBe(200);
+    const canonicalRunId = await canonicalAccountRunId("profile-1", "minileague", "legacy-run");
     expect(client.rpc).toHaveBeenCalledWith(
       "record_competition_result",
-      expect.objectContaining({ p_run_id: "legacy-run", p_final_position: null, p_league_titles: 0 })
+      expect.objectContaining({ p_run_id: canonicalRunId, p_final_position: null, p_league_titles: 0 })
     );
+  });
+
+  it("persists Mini League results through the legacy schema when migration 0009 is missing", async () => {
+    const client = postClient({
+      rpcError: {
+        code: "PGRST202",
+        message: "Could not find the function public.record_competition_result in the schema cache"
+      }
+    });
+    routeMocks.serviceClient.mockReturnValue(client);
+
+    const response = await POST(request("POST", {
+      records: [{
+        id: "legacy-compatible-run",
+        kind: "human",
+        competitionMode: "minileague",
+        runId: "league-123-456",
+        finalPosition: 2,
+        matchPoints: 13,
+        goalDifference: 7,
+        goalsFor: 11,
+        opponentStrength: 1880
+      }],
+      completedAt: "2026-07-22T12:00:00.000Z"
+    }));
+    const payload = await response.json();
+    const runId = await canonicalAccountRunId("profile-1", "minileague", "league-123-456");
+
+    expect(response.status).toBe(200);
+    expect(payload).toMatchObject({ persisted: true, count: 1, runIds: [runId] });
+    expect(client.fallbackUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: runId,
+        profile_id: "profile-1",
+        match_points: 13,
+        goal_difference: 7,
+        league_titles: 0
+      }),
+      { onConflict: "id" }
+    );
+  });
+
+  it("does not bypass an unrelated result-writer failure", async () => {
+    const client = postClient({ rpcError: { code: "42501", message: "permission denied" } });
+    routeMocks.serviceClient.mockReturnValue(client);
+
+    const response = await POST(request("POST", {
+      records: [{
+        id: "run-no-fallback",
+        kind: "human",
+        competitionMode: "minileague",
+        runId: "run-no-fallback",
+        finalPosition: 2
+      }]
+    }));
+
+    expect(response.status).toBe(500);
+    expect(client.fallbackUpsert).not.toHaveBeenCalled();
   });
 
   it.each([0, -1, 7, 1.5, null])("rejects an invalid Mini League final position (%s)", async (finalPosition) => {
@@ -291,5 +358,65 @@ describe("/api/results", () => {
 
     expect(response.status).toBe(400);
     expect(client.builder.limit).not.toHaveBeenCalled();
+  });
+
+  it("reads legacy Mini League history while migration 0009 is pending", async () => {
+    const fullBuilder = {
+      select: vi.fn(),
+      eq: vi.fn(),
+      order: vi.fn(),
+      or: vi.fn(),
+      limit: vi.fn().mockResolvedValue({
+        data: null,
+        error: { code: "PGRST204", message: "competition_mode column missing" }
+      })
+    };
+    fullBuilder.select.mockReturnValue(fullBuilder);
+    fullBuilder.eq.mockReturnValue(fullBuilder);
+    fullBuilder.order.mockReturnValue(fullBuilder);
+    fullBuilder.or.mockReturnValue(fullBuilder);
+    const legacyRow = {
+      id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      profile_id: "profile-1",
+      display_name: "Canonical Manager",
+      kind: "human",
+      match_points: 13,
+      goal_difference: 7,
+      goals_for: 11,
+      league_titles: 0,
+      opponent_strength: 1880,
+      completed_at: "2026-07-22T12:00:00.000Z"
+    };
+    const legacyBuilder = {
+      select: vi.fn(),
+      eq: vi.fn(),
+      order: vi.fn(),
+      or: vi.fn(),
+      limit: vi.fn().mockResolvedValue({ data: [legacyRow], error: null })
+    };
+    legacyBuilder.select.mockReturnValue(legacyBuilder);
+    legacyBuilder.eq.mockReturnValue(legacyBuilder);
+    legacyBuilder.order.mockReturnValue(legacyBuilder);
+    legacyBuilder.or.mockReturnValue(legacyBuilder);
+    routeMocks.serviceClient.mockReturnValue({
+      from: vi.fn()
+        .mockReturnValueOnce(fullBuilder)
+        .mockReturnValueOnce(legacyBuilder)
+    });
+
+    const response = await GET(request("GET"));
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload).toMatchObject({ production: true, degraded: true });
+    expect(payload.records).toEqual([
+      expect.objectContaining({
+        runId: legacyRow.id,
+        competitionMode: "minileague",
+        gamesPlayed: 5,
+        finalPosition: null,
+        legacy: true
+      })
+    ]);
   });
 });

@@ -6,6 +6,7 @@ import type {
   LeaderboardRecord,
   Period
 } from "@/lib/game/types";
+import { isCompetitionSchemaMissing } from "@/lib/server/database-errors";
 import { getSupabaseServiceClient } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
@@ -31,6 +32,19 @@ interface EntryRow {
   completed_at: string;
 }
 
+interface LegacyEntryRow {
+  id: string;
+  profile_id: string | null;
+  display_name: string;
+  kind: "human" | "reserve";
+  match_points: number;
+  goal_difference: number;
+  goals_for: number;
+  league_titles: number;
+  opponent_strength: number;
+  completed_at: string;
+}
+
 function toRecord(row: EntryRow): LeaderboardRecord {
   return {
     id: row.id,
@@ -42,6 +56,27 @@ function toRecord(row: EntryRow): LeaderboardRecord {
     runId: row.run_id || row.id,
     gamesPlayed: row.games_played ?? 0,
     finalPosition: row.final_position,
+    periodAt: row.completed_at,
+    matchPoints: row.match_points,
+    goalDifference: row.goal_difference,
+    goalsFor: row.goals_for,
+    leagueTitles: row.league_titles,
+    opponentStrength: row.opponent_strength,
+    completedAt: row.completed_at
+  };
+}
+
+function legacyToRecord(row: LegacyEntryRow): LeaderboardRecord {
+  return {
+    id: row.id,
+    userId: row.profile_id ?? `deleted:${row.id}`,
+    displayName: row.display_name,
+    kind: row.kind,
+    competitionMode: "minileague",
+    runId: row.id,
+    legacy: true,
+    gamesPlayed: 5,
+    finalPosition: row.league_titles === 1 ? 1 : null,
     periodAt: row.completed_at,
     matchPoints: row.match_points,
     goalDifference: row.goal_difference,
@@ -99,6 +134,53 @@ export async function GET(request: NextRequest) {
       .range(from, from + PAGE - 1);
 
     if (error) {
+      if (isCompetitionSchemaMissing(error)) {
+        // Migration 0009 has not reached this project yet. Preserve Mini League
+        // rankings through the original table shape instead of returning an
+        // empty board or losing newly completed runs.
+        if (metric === "points" && competitionMode === "invincible") {
+          return NextResponse.json({
+            entries: [],
+            production: true,
+            degraded: true,
+            period,
+            metric,
+            competitionMode
+          });
+        }
+        let legacyQuery = supabase
+          .from("leaderboard_entries")
+          .select(
+            "id, profile_id, display_name, kind, match_points, goal_difference, goals_for, league_titles, opponent_strength, completed_at"
+          )
+          .lte("completed_at", snapshotAt);
+        if (period !== "all_time") {
+          legacyQuery = legacyQuery.gte("completed_at", windowStart);
+        }
+        if (metric === "titles") {
+          legacyQuery = legacyQuery.eq("league_titles", 1);
+        }
+        const { data: legacyData, error: legacyError } = await legacyQuery
+          .order("completed_at", { ascending: false })
+          .order("id", { ascending: false })
+          .range(0, MAX_ROWS - 1);
+        if (!legacyError) {
+          return NextResponse.json({
+            entries: aggregateLeaderboard(
+              ((legacyData as LegacyEntryRow[] | null) ?? []).map(legacyToRecord),
+              period,
+              new Date(),
+              metric
+            ),
+            production: true,
+            degraded: true,
+            truncated: (legacyData?.length ?? 0) >= MAX_ROWS,
+            period,
+            metric,
+            ...(metric === "points" ? { competitionMode: "minileague" } : {})
+          });
+        }
+      }
       return NextResponse.json({ entries: [], production: true, degraded: true, period, metric });
     }
     const page = (data as EntryRow[] | null) ?? [];
