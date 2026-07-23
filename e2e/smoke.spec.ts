@@ -147,11 +147,41 @@ test("draft workspace gives the pitch and formation room on a wide screen", asyn
   expect(await page.locator(".fm-row-number").count()).toBeGreaterThan(0);
   const playerNameStyle = await page.locator(".fm-row-name strong").first().evaluate((element) => {
     const style = window.getComputedStyle(element);
-    return { whiteSpace: style.whiteSpace, textOverflow: style.textOverflow, overflow: style.overflow };
+    const main = element.closest(".fm-row-main")?.getBoundingClientRect();
+    return {
+      whiteSpace: style.whiteSpace,
+      textOverflow: style.textOverflow,
+      overflow: style.overflow,
+      overflowWrap: style.overflowWrap,
+      wordBreak: style.wordBreak,
+      identityWidth: main?.width ?? 0
+    };
   });
   expect(playerNameStyle.whiteSpace).not.toBe("nowrap");
   expect(playerNameStyle.textOverflow).not.toBe("ellipsis");
   expect(playerNameStyle.overflow).not.toBe("hidden");
+  expect(playerNameStyle.overflowWrap).not.toBe("anywhere");
+  expect(playerNameStyle.wordBreak).toBe("normal");
+  expect(playerNameStyle.identityWidth).toBeGreaterThanOrEqual(180);
+
+  await expect(page.locator(".fm-row-stats").first()).toBeHidden();
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await expect(page.locator(".fm-row-stats").first()).toBeVisible();
+
+  const statTile = await page.locator(".fm-row-stats").first().evaluate((element) => {
+    const style = window.getComputedStyle(element);
+    const rect = element.getBoundingClientRect();
+    return {
+      display: style.display,
+      columns: style.gridTemplateColumns.split(" ").length,
+      width: rect.width,
+      height: rect.height
+    };
+  });
+  expect(statTile.display).toBe("grid");
+  expect(statTile.columns).toBe(2);
+  expect(statTile.width).toBeLessThanOrEqual(80);
+  expect(statTile.height).toBeLessThanOrEqual(70);
 
   const assistantGap = await page.locator(".manager-avatar.compact").evaluate((element) =>
     Number.parseFloat(window.getComputedStyle(element).columnGap)

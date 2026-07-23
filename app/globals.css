@@ -6022,8 +6022,8 @@ main:has(.analytics-consent) .milestone-nudge {
 }
 
 .fm-row-main {
-  flex: 1 1 auto;
-  min-width: 0;
+  flex: 1 1 210px;
+  min-width: 180px;
   display: flex;
   flex-direction: column;
   gap: 1px;
@@ -6039,7 +6039,8 @@ main:has(.analytics-consent) .milestone-nudge {
 .fm-row-name strong {
   font-size: 0.95rem;
   white-space: normal;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
+  word-break: normal;
   line-height: 1.18;
 }
 
@@ -6074,19 +6075,43 @@ main:has(.analytics-consent) .milestone-nudge {
 }
 
 .fm-row-stats {
-  flex: 0 0 auto;
-  display: flex;
-  gap: 4px;
-  font-size: 0.68rem;
+  flex: 0 0 70px;
+  width: 70px;
+  min-height: 58px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid color-mix(in srgb, var(--accent) 20%, var(--line));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--panel) 82%, transparent);
 }
 
 .fm-row-stats span {
-  padding: 2px 5px;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto auto;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 2px 3px;
   background: rgba(255, 255, 255, 0.06);
-  border-radius: 5px;
-  color: var(--muted);
-  font-weight: 700;
+  border-radius: 4px;
+  line-height: 1;
   white-space: nowrap;
+}
+
+.fm-row-stats small {
+  color: var(--muted);
+  font-size: 0.48rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.fm-row-stats strong {
+  color: var(--text);
+  font-size: 0.66rem;
+  font-weight: 900;
 }
 
 .fm-row .fit-badge {
@@ -6122,6 +6147,7 @@ main:has(.analytics-consent) .milestone-nudge {
 
   .fm-row-main {
     flex-basis: calc(100% - 96px);
+    min-width: 0;
   }
 
   .fm-row .fit-badge {
@@ -6785,7 +6811,7 @@ main:has(.analytics-consent) .milestone-nudge {
   }
 
   .draft-grid .fm-row-stats {
-    display: flex;
+    display: grid;
   }
 
   .draft-right {
@@ -6993,7 +7019,7 @@ main:has(.analytics-consent) .milestone-nudge {
   }
 
   .draft-grid .fm-row-stats {
-    display: flex;
+    display: grid;
   }
 
   .draft-right .pitch-container {
@@ -7002,5 +7028,17 @@ main:has(.analytics-consent) .milestone-nudge {
 
   .complete-grid {
     grid-template-columns: minmax(0, 1.2fr) minmax(480px, 0.8fr);
+  }
+}
+
+/* Candidate attributes only occupy a compact 2×2 tile. At genuinely narrow
+   list widths the tile yields before the player identity or action does. */
+@container (max-width: 820px) {
+  .draft-grid .fm-row-stats {
+    display: none;
+  }
+
+  .fm-row-main {
+    min-width: 0;
   }
 }

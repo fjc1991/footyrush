@@ -3112,11 +3112,11 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                           </div>
                         </div>
                         {draftMode === "classic" && (
-                          <div className="fm-row-stats">
-                            <span>PAC {candidate.player.pac}</span>
-                            <span>SHO {candidate.player.sho}</span>
-                            <span>PAS {candidate.player.pas}</span>
-                            <span>DEF {candidate.player.def}</span>
+                          <div className="fm-row-stats" aria-label="Player attributes">
+                            <span><small>PAC</small><strong>{candidate.player.pac}</strong></span>
+                            <span><small>SHO</small><strong>{candidate.player.sho}</strong></span>
+                            <span><small>PAS</small><strong>{candidate.player.pas}</strong></span>
+                            <span><small>DEF</small><strong>{candidate.player.def}</strong></span>
                           </div>
                         )}
                         {draftMode === "classic" && <span className={`fit-badge ${fitLabel}`}>{fitText}</span>}
