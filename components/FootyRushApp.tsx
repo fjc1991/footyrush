@@ -180,6 +180,24 @@ interface ShareMilestone {
   shareText: string;
 }
 
+interface OAuthResumeSnapshot {
+  version: 1;
+  createdAt: number;
+  locale: string;
+  view: MainView;
+  phase: "setup" | "draft";
+  gameMode: GameMode;
+  formationId: string;
+  picks: DraftPick[];
+  draftReshufflesLeft: number;
+  selectedManager: SelectedManager | null;
+  managerScore: number;
+  managerSpinsLeft: number;
+  completedLeagues: number;
+  expertUnlockedEarned: boolean;
+  records: LeaderboardRecord[];
+}
+
 interface LeagueState {
   id: string;
   skillBand: string;
@@ -208,6 +226,9 @@ const legacyProgressClaimKey = "footyrush.progressLegacyClaimed";
 const SCORE_MODEL = "v3-zero-to-1000";
 const completedLeaguesKey = "footyrush.completedLeagues";
 const expertUnlockedKey = "footyrush.expertUnlocked";
+const oauthResumeKey = "footyrush.oauthResume.v1";
+const OAUTH_RESUME_MAX_AGE_MS = 60 * 60 * 1000;
+const AUTH_RESTORE_GRACE_MS = 1_500;
 const TESTING_MODE = process.env.NEXT_PUBLIC_TESTING_MODE === "true";
 const DRAFT_RESHUFFLE_LIMIT = 5;
 const MANAGER_SPIN_LIMIT = 3;
@@ -523,6 +544,89 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     hydrateLocalProgress(nextProfile);
     setShowAuthGate(false);
   }, [hydrateLocalProgress]);
+
+  const restoreOAuthResume = useCallback((nextProfile: LocalProfile) => {
+    let snapshot: OAuthResumeSnapshot | null = null;
+    try {
+      const raw = window.sessionStorage.getItem(oauthResumeKey);
+      snapshot = raw ? (JSON.parse(raw) as OAuthResumeSnapshot) : null;
+    } catch {
+      snapshot = null;
+    }
+
+    window.sessionStorage.removeItem(oauthResumeKey);
+    if (
+      !snapshot ||
+      snapshot.version !== 1 ||
+      snapshot.locale !== locale ||
+      !Number.isFinite(snapshot.createdAt) ||
+      Date.now() - snapshot.createdAt > OAUTH_RESUME_MAX_AGE_MS ||
+      (snapshot.phase !== "setup" && snapshot.phase !== "draft") ||
+      !Array.isArray(snapshot.picks)
+    ) {
+      return false;
+    }
+
+    if (snapshot.selectedManager) {
+      window.localStorage.setItem(
+        profileStorageKey(managerKey, nextProfile),
+        JSON.stringify(snapshot.selectedManager)
+      );
+    }
+    window.localStorage.setItem(
+      profileStorageKey(managerScoreKey, nextProfile),
+      String(snapshot.managerScore)
+    );
+    window.localStorage.setItem(
+      profileStorageKey(managerSpinsKey, nextProfile),
+      String(snapshot.managerSpinsLeft)
+    );
+    window.localStorage.setItem(
+      profileStorageKey(completedLeaguesKey, nextProfile),
+      String(snapshot.completedLeagues)
+    );
+    window.localStorage.setItem(
+      profileStorageKey(expertUnlockedKey, nextProfile),
+      String(snapshot.expertUnlockedEarned)
+    );
+    window.localStorage.setItem(profileStorageKey(scoreModelKey, nextProfile), SCORE_MODEL);
+
+    const restoredRecords = snapshot.records.map((record, index): LeaderboardRecord => {
+      const competitionMode: CompetitionMode = record.competitionMode === "invincible"
+        ? "invincible"
+        : "minileague";
+      const runId = record.runId || record.id || `oauth-${index}`;
+      return {
+        ...record,
+        id: `${nextProfile.id}-${runId}`,
+        userId: nextProfile.id,
+        displayName: nextProfile.displayName,
+        competitionMode,
+        runId
+      };
+    });
+    if (restoredRecords.length > 0) {
+      const scopedKey = recordsStorageKey(nextProfile);
+      let existing: LeaderboardRecord[] = [];
+      try {
+        const raw = window.localStorage.getItem(scopedKey);
+        existing = raw ? (JSON.parse(raw) as LeaderboardRecord[]) : [];
+      } catch {
+        existing = [];
+      }
+      window.localStorage.setItem(scopedKey, JSON.stringify(mergeRunRecords(existing, restoredRecords)));
+    }
+
+    setView(snapshot.view);
+    setGameMode(snapshot.gameMode);
+    setFormationId(snapshot.formationId);
+    setPicks(snapshot.picks);
+    setSpin(null);
+    setSlotPickerCandidateId(null);
+    setDraftReshufflesLeft(snapshot.draftReshufflesLeft);
+    setPhase(snapshot.phase);
+    return true;
+  }, [locale]);
 
   const syncCompletedResult = useCallback(async (payload: PendingResultSync) => {
     if (!profile || profile.demo) {
@@ -860,6 +964,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     let disposed = false;
     let authEventSeen = false;
     let authRequestGeneration = 0;
+    let missingSessionTimer: number | null = null;
     const readStoredProfile = (): LocalProfile | null => {
       try {
         const stored = window.localStorage.getItem(profileKey);
@@ -878,12 +983,38 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
       setIsAdmin(false);
     };
 
-    const applySession = async (session: Session | null) => {
+    const cancelMissingSessionCheck = () => {
+      if (missingSessionTimer !== null) {
+        window.clearTimeout(missingSessionTimer);
+        missingSessionTimer = null;
+      }
+    };
+    const confirmMissingSession = () => {
+      cancelMissingSessionCheck();
+      missingSessionTimer = window.setTimeout(() => {
+        void supabase.auth.getSession().then(({ data, error }) => {
+          if (!disposed && !error && !data.session) {
+            clearAuthenticatedProfile();
+          }
+        });
+      }, AUTH_RESTORE_GRACE_MS);
+    };
+
+    const applySession = async (session: Session | null, confirmedSignOut = false) => {
       const requestGeneration = ++authRequestGeneration;
       if (!session?.user) {
-        clearAuthenticatedProfile();
+        if (confirmedSignOut) {
+          cancelMissingSessionCheck();
+          clearAuthenticatedProfile();
+        } else {
+          // INITIAL_SESSION can briefly be null while an OAuth return is being
+          // recovered from URL/storage. Keep the cached profile and its scoped
+          // progress until a second session check confirms that it is absent.
+          confirmMissingSession();
+        }
         return;
       }
+      cancelMissingSessionCheck();
       // A confirmed link produces a session: clear the pending-confirmation prompt.
       setPendingConfirmEmail("");
 
@@ -943,18 +1074,20 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
       }
       setIsAdmin(Boolean(payload.admin));
       setAuthMessage("");
-      persistProfile({
+      const nextProfile: LocalProfile = {
         id: payload.profile.id,
         managerId: payload.profile.managerId,
         displayName: payload.profile.displayName,
         email: payload.profile.email ?? session.user.email ?? "",
         demo: false
-      });
+      };
+      restoreOAuthResume(nextProfile);
+      persistProfile(nextProfile);
     };
 
-    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
       authEventSeen = true;
-      window.setTimeout(() => void applySession(session), 0);
+      window.setTimeout(() => void applySession(session, event === "SIGNED_OUT"), 0);
     });
     supabase.auth.getSession().then(({ data }) => {
       if (!authEventSeen) {
@@ -963,10 +1096,11 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     });
     return () => {
       disposed = true;
+      cancelMissingSessionCheck();
       authRequestGeneration += 1;
       authListener.subscription.unsubscribe();
     };
-  }, [copy, hydrateLocalProgress, locale, persistProfile]);
+  }, [copy, hydrateLocalProgress, locale, persistProfile, restoreOAuthResume]);
 
   // Result history follows the signed-in account. Guests keep a separate device-only
   // history, while authenticated managers merge their private server history with
@@ -2148,10 +2282,35 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
       setAuthMessage(copy.authConfigMissing);
       return;
     }
+    try {
+      const resumablePhase = phase === "draft" ? "draft" : "setup";
+      const snapshot: OAuthResumeSnapshot = {
+        version: 1,
+        createdAt: Date.now(),
+        locale,
+        view,
+        phase: resumablePhase,
+        gameMode,
+        formationId,
+        picks: phase === "draft" ? picks : [],
+        draftReshufflesLeft,
+        selectedManager,
+        managerScore,
+        managerSpinsLeft,
+        completedLeagues,
+        expertUnlockedEarned,
+        records: leaderboardRecords
+      };
+      window.sessionStorage.setItem(oauthResumeKey, JSON.stringify(snapshot));
+    } catch {
+      // OAuth can still proceed if private browsing blocks session storage.
+    }
+
     const { error } = await supabase.auth.signInWithOAuth(
       createXOAuthCredentials(window.location.origin, locale)
     );
     if (error) {
+      window.sessionStorage.removeItem(oauthResumeKey);
       const message = error.message.toLowerCase();
       setAuthMessage(
         message.includes("unsupported provider") || message.includes("provider is not enabled")

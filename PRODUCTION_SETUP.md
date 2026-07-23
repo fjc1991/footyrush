@@ -58,6 +58,23 @@ group by 1, 2
 order by 1 desc, 2;
 ```
 
+### Where player information is stored
+
+| Information | Storage | Owner view |
+| --- | --- | --- |
+| X/Supabase identity, provider identifier and basic provider metadata | Supabase Auth (`auth.users`, managed by Supabase) | Supabase Dashboard → Authentication → Users |
+| FootyRush manager ID, display name and email (when the provider supplies one) | Supabase Postgres `public.profiles` | Supabase Dashboard → Table Editor → `profiles` |
+| Completed Mini League and Invincible history used by rankings/progress | `public.leaderboard_entries` and `public.invincible_attempts` | Table Editor or aggregate SQL |
+| Shared end-of-run squads | `public.community_squads` | Table Editor |
+| Guest free-play enforcement | `public.guest_play_allowances` using a salted IP hash, not the raw IP | Table Editor |
+| Opt-in, allowlisted gameplay events | `public.product_events` after migration `0010` | Prefer aggregate SQL; raw rows are service-role-only |
+| Active setup/draft state, preferences and unsynced fallback progress | The player's browser storage | Not centrally visible; it stays on that device unless a completed result is synced |
+
+X credentials and tokens are handled by X and Supabase Auth. FootyRush does not
+store the user's X password, scrape their posts, or copy their X profile into
+`product_events`. Product analytics remains off until the player explicitly
+opts in.
+
 ## 2. Environment variables
 
 ### Required in production (the app refuses to boot without these)

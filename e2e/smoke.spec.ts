@@ -104,6 +104,41 @@ for (const viewport of [
   });
 }
 
+test("draft workspace gives the pitch and formation room on a wide screen", async ({ page }) => {
+  await page.setViewportSize({ width: 2048, height: 1129 });
+  await page.addInitScript(() => {
+    window.localStorage.setItem("footyrush.analyticsConsent", "denied");
+  });
+  await page.goto("/en");
+  await expect(page.locator("[data-app-ready='true']")).toBeVisible({ timeout: 15_000 });
+
+  await page.getByRole("button", { name: "Shuffle manager", exact: true }).click();
+  const startDraft = page.getByRole("button", { name: "Start draft", exact: true });
+  await expect(startDraft).toBeEnabled({ timeout: 5_000 });
+  await startDraft.click();
+  await expect(page.locator(".draft-grid")).toBeVisible();
+
+  const dimensions = await page.evaluate(() => {
+    const rect = (selector: string) => document.querySelector(selector)?.getBoundingClientRect();
+    const board = rect(".draft-board");
+    const right = rect(".draft-right");
+    const pitch = rect(".draft-right .pitch-container");
+    const formation = rect(".draft-right .formation-panel");
+    return {
+      boardWidth: board?.width ?? 0,
+      rightWidth: right?.width ?? 0,
+      pitchWidth: pitch?.width ?? 0,
+      formationWidth: formation?.width ?? 0,
+      overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth
+    };
+  });
+
+  expect(dimensions.overflow).toBe(0);
+  expect(dimensions.rightWidth).toBeGreaterThan(dimensions.boardWidth);
+  expect(dimensions.pitchWidth).toBeGreaterThanOrEqual(450);
+  expect(dimensions.formationWidth).toBeGreaterThanOrEqual(330);
+});
+
 test("optional analytics requires a clear preference and remains reversible", async ({ page }) => {
   await page.addInitScript(() => window.localStorage.removeItem("footyrush.analyticsConsent"));
   await page.goto("/en");

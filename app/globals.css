@@ -6143,7 +6143,7 @@ main:has(.analytics-consent) .milestone-nudge {
 
 .draft-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.45fr) minmax(420px, 1fr);
+  grid-template-columns: minmax(520px, 0.9fr) minmax(660px, 1.1fr);
   grid-template-areas: "board side";
   gap: 14px;
   align-items: start;
@@ -6159,7 +6159,7 @@ main:has(.analytics-consent) .milestone-nudge {
 
 .draft-right {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(380px, 1.15fr) minmax(280px, 0.85fr);
   grid-template-areas:
     "pitch formation"
     "score score";
@@ -6198,7 +6198,7 @@ main:has(.analytics-consent) .milestone-nudge {
 }
 
 /* Collapse to a single column on smaller screens */
-@media (max-width: 1080px) {
+@media (max-width: 1679px) {
   .draft-grid {
     grid-template-columns: 1fr;
     grid-template-areas:
@@ -6211,15 +6211,24 @@ main:has(.analytics-consent) .milestone-nudge {
   }
 
   .draft-right {
+    grid-template-columns: minmax(380px, 1.15fr) minmax(280px, 0.85fr);
+    grid-template-areas:
+      "pitch formation"
+      "score score";
+  }
+
+  .draft-right .formation-grid {
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .draft-right {
     grid-template-columns: 1fr;
     grid-template-areas:
       "pitch"
       "formation"
       "score";
-  }
-
-  .draft-right .formation-grid {
-    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
   }
 }
 
@@ -6330,7 +6339,7 @@ main:has(.analytics-consent) .milestone-nudge {
 }
 
 .draft-right .pitch-container {
-  width: min(100%, 360px);
+  width: min(100%, 420px);
   min-height: 0;
   margin-inline: auto;
 }
@@ -6368,14 +6377,18 @@ main:has(.analytics-consent) .milestone-nudge {
   display: none;
 }
 
-@media (min-width: 1600px) {
+@media (min-width: 1680px) {
   .topbar {
     padding-inline: 28px;
   }
 
   .draft-grid {
-    grid-template-columns: minmax(680px, 1.22fr) minmax(760px, 0.78fr);
+    grid-template-columns: minmax(650px, 0.78fr) minmax(900px, 1.22fr);
     gap: clamp(18px, 1.4vw, 30px);
+  }
+
+  .draft-right {
+    grid-template-columns: minmax(480px, 1.2fr) minmax(340px, 0.8fr);
   }
 
   .draft-grid .fm-row-stats {
@@ -6383,7 +6396,7 @@ main:has(.analytics-consent) .milestone-nudge {
   }
 
   .draft-right .pitch-container {
-    width: min(100%, 440px);
+    width: min(100%, 480px);
   }
 
   .complete-grid {
