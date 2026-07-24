@@ -171,6 +171,14 @@ function fitTextFor(fit: number): string {
   return fit >= 1 ? "Perfect" : fit >= 0.9 ? "Good fit" : "Okay";
 }
 
+function fitDescriptionFor(fit: number): string {
+  return fit >= 1
+    ? "Natural position. No rating drop."
+    : fit >= 0.9
+      ? "Can adapt here with a small rating drop."
+      : "Out of position. Expect a larger rating drop.";
+}
+
 interface GuestStatus {
   allowed: boolean;
   played: boolean;
@@ -934,6 +942,19 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     error: seasonAutoplayError
   });
   const pendingCandidate = spin?.candidates.find((candidate) => candidate.player.i === slotPickerCandidateId) ?? null;
+  const rankedCandidates = useMemo(
+    () =>
+      spin
+        ? spin.candidates
+            .map((candidate, originalIndex) => ({ candidate, originalIndex }))
+            .sort(
+              (left, right) =>
+                right.candidate.effectiveRating - left.candidate.effectiveRating ||
+                left.originalIndex - right.originalIndex
+            )
+        : [],
+    [spin]
+  );
   const latestHumanInjury = [...visibleEvents]
     .reverse()
     .find((event) => event.code === "injury" && event.teamId === "human" && !selectedSub);
@@ -1529,9 +1550,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     const slotOption =
       slotId !== undefined
         ? candidate.slotOptions.find((option) => option.slotId === slotId)
-        : candidate.slotOptions.length === 1
-          ? candidate.slotOptions[0]
-          : null;
+        : null;
     if (!slotOption) {
       setSlotPickerCandidateId(candidate.player.i);
       return;
@@ -3034,102 +3053,120 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                     onClick={() => setSlotPickerCandidateId(null)}
                   >
                     <div className="slot-picker" onClick={(event) => event.stopPropagation()}>
-                    <div className="slot-picker-head">
-                      <div>
-                        <p className="eyebrow">Assign role</p>
-                        <strong>{pendingCandidate.player.n}</strong>
-                        <span className="slot-picker-positions">{pendingCandidate.player.p.join(" / ")}</span>
-                      </div>
-                      <button
-                        className="slot-picker-close"
-                        type="button"
-                        onClick={() => setSlotPickerCandidateId(null)}
-                        aria-label="Cancel role selection"
-                      >
-                        ×
-                      </button>
-                    </div>
-                    <div className="slot-option-grid">
-                      {pendingCandidate.slotOptions.map((option) => {
-                        const optionFitLabel = fitLabelFor(option.fit);
-                        const candidateIndex = spin.candidates.findIndex((entry) => entry.player.i === pendingCandidate.player.i);
-                        return (
-                          <button
-                            key={option.slotId}
-                            type="button"
-                            className={`slot-option ${optionFitLabel}`}
-                            onClick={() => choosePlayer(candidateIndex, option.slotId)}
+                      <div className="slot-picker-head">
+                        <div className="slot-picker-player">
+                          {draftMode === "classic" ? (
+                            <span className="slot-picker-ovr">{Math.round(pendingCandidate.effectiveRating)}</span>
+                          ) : (
+                            <span className="slot-picker-ovr hidden">?</span>
+                          )}
+                          <span
+                            className="slot-picker-number"
+                            aria-label={`Shirt number ${pendingCandidate.player.num}`}
                           >
-                            <span>{option.slotLabel}</span>
-                            <strong>{fitTextFor(option.fit)}</strong>
-                            {draftMode === "classic" && <small>{Math.round(option.effectiveRating)} OVR</small>}
-                          </button>
-                        );
-                      })}
-                    </div>
+                            {pendingCandidate.player.num}
+                          </span>
+                          <div>
+                            <p className="eyebrow">Choose a role</p>
+                            <strong>{pendingCandidate.player.n}</strong>
+                            <span className="slot-picker-positions">{pendingCandidate.player.p.join(" / ")}</span>
+                          </div>
+                        </div>
+                        <button
+                          className="slot-picker-close"
+                          type="button"
+                          onClick={() => setSlotPickerCandidateId(null)}
+                          aria-label="Cancel role selection"
+                        >
+                          ×
+                        </button>
+                      </div>
+
+                      <div className="slot-picker-details">
+                        {draftMode === "classic" && (
+                          <div className="slot-picker-stats" aria-label="Player attributes">
+                            <span><small>PAC</small><strong>{pendingCandidate.player.pac}</strong></span>
+                            <span><small>SHO</small><strong>{pendingCandidate.player.sho}</strong></span>
+                            <span><small>PAS</small><strong>{pendingCandidate.player.pas}</strong></span>
+                            <span><small>DEF</small><strong>{pendingCandidate.player.def}</strong></span>
+                          </div>
+                        )}
+                        {pendingCandidate.boost && (
+                          <div className="slot-picker-boost">
+                            <span className={`boost-badge${activeBoostCount < BOOST_LIMIT ? "" : " inactive"}`}>
+                              <Sparkles size={12} />
+                              {pendingCandidate.boost.label}
+                              {activeBoostCount < BOOST_LIMIT ? " boost available" : " boost inactive"}
+                            </span>
+                            <small>
+                              {activeBoostCount < BOOST_LIMIT
+                                ? "This specialist boost will activate when you add the player."
+                                : `Your ${BOOST_LIMIT} active player boosts are already filled.`}
+                            </small>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="slot-picker-guide">
+                        <strong>Role suitability</strong>
+                        <span>Select the role that best balances fit and effective rating.</span>
+                      </div>
+
+                      <div className="slot-option-grid">
+                        {pendingCandidate.slotOptions.map((option) => {
+                          const optionFitLabel = fitLabelFor(option.fit);
+                          const candidateIndex = spin.candidates.findIndex((entry) => entry.player.i === pendingCandidate.player.i);
+                          return (
+                            <button
+                              key={option.slotId}
+                              type="button"
+                              className={`slot-option ${optionFitLabel}`}
+                              onClick={() => choosePlayer(candidateIndex, option.slotId)}
+                            >
+                              <span className="slot-option-role">{option.slotLabel}</span>
+                              <span className={`fit-badge ${optionFitLabel}`}>{fitTextFor(option.fit)}</span>
+                              <strong>{fitDescriptionFor(option.fit)}</strong>
+                              {draftMode === "classic" && <small>{Math.round(option.effectiveRating)} effective OVR</small>}
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
                   </div>
                 )}
-                {draftMode === "classic" && (
-                  <div className="fit-legend" aria-label="Position fit guide">
-                    <span className="fit-legend-title">Position fit</span>
-                    <span className="fit-legend-item"><span className="fit-badge perfect">Perfect</span> natural position</span>
-                    <span className="fit-legend-item"><span className="fit-badge good">Good fit</span> can adapt, small rating drop</span>
-                    <span className="fit-legend-item"><span className="fit-badge okay">Okay</span> out of position, bigger drop</span>
-                  </div>
-                )}
+                <div className="candidate-board-head">
+                  <span>Available players</span>
+                  <small>Select a player to compare role suitability</small>
+                </div>
                 <div className="candidate-list">
-                  {spin.candidates.map((candidate, index) => {
-                    const fitLabel = fitLabelFor(candidate.fit);
-                    const fitText = fitTextFor(candidate.fit);
-                    const cardFitClass = draftMode === "classic" ? ` ${fitLabel}` : "";
-                    const boostWillActivate = Boolean(candidate.boost && activeBoostCount < BOOST_LIMIT);
-                    const roleTargets = candidate.slotOptions.slice(0, 3).map((option) => option.slotLabel).join(" · ") + (candidate.slotOptions.length > 3 ? " · +" : "");
+                  {rankedCandidates.map(({ candidate, originalIndex }, rank) => {
                     return (
-                      <div className={`fm-row${cardFitClass}`} key={candidate.player.i}>
+                      <button
+                        className="candidate-card"
+                        key={candidate.player.i}
+                        type="button"
+                        data-rating={Math.round(candidate.effectiveRating)}
+                        onClick={() => choosePlayer(originalIndex)}
+                        aria-label={`Choose ${candidate.player.n}, ranked ${rank + 1}`}
+                      >
                         {draftMode === "classic" ? (
-                          <span className="fm-row-ovr">{Math.round(candidate.effectiveRating)}</span>
+                          <span className="candidate-card-ovr">{Math.round(candidate.effectiveRating)}</span>
                         ) : (
-                          <span className="fm-row-ovr hidden">?</span>
+                          <span className="candidate-card-ovr hidden">?</span>
                         )}
                         <span
-                          className="fm-row-number"
+                          className="candidate-card-number"
                           aria-label={`Shirt number ${candidate.player.num}`}
                           title={`Shirt number ${candidate.player.num}`}
                         >
                           {candidate.player.num}
                         </span>
-                        <div className="fm-row-main">
-                          <div className="fm-row-name">
-                            <strong>{candidate.player.n}</strong>
-                          </div>
-                          {candidate.boost && (
-                            <div className="fm-row-boost">
-                              <span className={`boost-badge${boostWillActivate ? "" : " inactive"}`}>
-                                <Sparkles size={12} />
-                                {candidate.boost.label}{boostWillActivate ? "" : " (inactive)"}
-                              </span>
-                            </div>
-                          )}
-                          <div className="fm-row-sub">
-                            <span className="card-positions">{candidate.player.p.join(" / ")}</span>
-                            <span className="role-targets">→ {roleTargets}</span>
-                          </div>
-                        </div>
-                        {draftMode === "classic" && (
-                          <div className="fm-row-stats" aria-label="Player attributes">
-                            <span><small>PAC</small><strong>{candidate.player.pac}</strong></span>
-                            <span><small>SHO</small><strong>{candidate.player.sho}</strong></span>
-                            <span><small>PAS</small><strong>{candidate.player.pas}</strong></span>
-                            <span><small>DEF</small><strong>{candidate.player.def}</strong></span>
-                          </div>
-                        )}
-                        {draftMode === "classic" && <span className={`fit-badge ${fitLabel}`}>{fitText}</span>}
-                        <button className="primary-button pick-button" type="button" onClick={() => choosePlayer(index)}>
-                          {candidate.slotOptions.length === 1 ? `Add to ${candidate.slotOptions[0].slotLabel}` : "Pick role"}
-                          <ChevronRight size={16} />
-                        </button>
-                      </div>
+                        <strong className="candidate-card-name">{candidate.player.n}</strong>
+                        <span className="candidate-card-action">
+                          View roles
+                          <ChevronRight size={17} />
+                        </span>
+                      </button>
                     );
                   })}
                 </div>

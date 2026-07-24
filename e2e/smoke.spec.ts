@@ -81,6 +81,7 @@ test("X account legal pages are public and connected", async ({ page }) => {
 for (const viewport of [
   { name: "wide desktop", width: 2560, height: 1400 },
   { name: "desktop", width: 1440, height: 1000 },
+  { name: "14-inch MacBook", width: 1512, height: 823 },
   { name: "laptop", width: 1024, height: 768 },
   { name: "tablet", width: 768, height: 900 },
   { name: "mobile", width: 390, height: 844 }
@@ -93,13 +94,22 @@ for (const viewport of [
     await page.goto("/en");
     await expect(page.locator("[data-app-ready='true']")).toBeVisible({ timeout: 15_000 });
 
+    if (viewport.name === "14-inch MacBook") {
+      await page.getByRole("button", { name: "Shuffle manager", exact: true }).click();
+      await expect(page.getByRole("button", { name: "Start draft", exact: true })).toBeEnabled();
+    }
+
     const dimensions = await page.evaluate(() => {
       const app = document.querySelector(".app-shell")?.getBoundingClientRect();
       const setup = document.querySelector(".setup-home")?.getBoundingClientRect();
+      const startDraft = Array.from(document.querySelectorAll("button"))
+        .find((button) => button.textContent?.includes("Start draft"))
+        ?.getBoundingClientRect();
       return {
         appWidth: app?.width ?? 0,
         setupWidth: setup?.width ?? 0,
-        overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth
+        overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        startDraftBottom: startDraft?.bottom ?? Number.POSITIVE_INFINITY
       };
     });
 
@@ -110,6 +120,9 @@ for (const viewport of [
     expect(dimensions.appWidth).toBeGreaterThan(
       viewport.width * (viewport.width >= 2000 ? 0.8 : 0.95)
     );
+    if (viewport.name === "14-inch MacBook") {
+      expect(dimensions.startDraftBottom).toBeLessThanOrEqual(viewport.height);
+    }
   });
 }
 
@@ -170,13 +183,13 @@ test("draft workspace prioritizes the draft and keeps the full pitch onscreen", 
   const spin = page.getByRole("button", { name: "Spin", exact: true });
   await expect(spin).toBeEnabled({ timeout: 10_000 });
   await spin.click();
-  await expect(page.locator(".fm-row").first()).toBeVisible({ timeout: 5_000 });
+  await expect(page.locator(".candidate-card").first()).toBeVisible({ timeout: 5_000 });
   await expect(page.locator(".draw-ticket-kit")).toBeVisible();
   await expect(page.locator(".fm-row-kit")).toHaveCount(0);
-  expect(await page.locator(".fm-row-number").count()).toBeGreaterThan(0);
-  const playerNameStyle = await page.locator(".fm-row-name strong").first().evaluate((element) => {
+  expect(await page.locator(".candidate-card-number").count()).toBeGreaterThan(0);
+  const playerNameStyle = await page.locator(".candidate-card-name").first().evaluate((element) => {
     const style = window.getComputedStyle(element);
-    const main = element.closest(".fm-row-main")?.getBoundingClientRect();
+    const main = element.getBoundingClientRect();
     return {
       whiteSpace: style.whiteSpace,
       textOverflow: style.textOverflow,
@@ -191,26 +204,32 @@ test("draft workspace prioritizes the draft and keeps the full pitch onscreen", 
   expect(playerNameStyle.overflow).not.toBe("hidden");
   expect(playerNameStyle.overflowWrap).not.toBe("anywhere");
   expect(playerNameStyle.wordBreak).toBe("normal");
-  expect(playerNameStyle.identityWidth).toBeGreaterThanOrEqual(200);
-  expect(playerNameStyle.identityWidth).toBeLessThanOrEqual(260);
+  expect(playerNameStyle.identityWidth).toBeGreaterThanOrEqual(180);
 
-  await expect(page.locator(".fm-row-stats").first()).toBeVisible();
-
-  const statTile = await page.locator(".fm-row-stats").first().evaluate((element) => {
-    const style = window.getComputedStyle(element);
-    const rect = element.getBoundingClientRect();
-    return {
-      display: style.display,
-      columns: style.gridTemplateColumns.split(" ").length,
-      width: rect.width,
-      height: rect.height
-    };
+  const candidateLayout = await page.locator(".candidate-card").evaluateAll((elements) => {
+    const cards = elements.slice(0, 4).map((element) => ({
+      ...element.getBoundingClientRect().toJSON(),
+      rating: Number((element as HTMLElement).dataset.rating)
+    }));
+    return cards;
   });
-  expect(statTile.display).toBe("grid");
-  expect(statTile.columns).toBe(2);
-  expect(statTile.width).toBeGreaterThanOrEqual(90);
-  expect(statTile.width).toBeLessThanOrEqual(104);
-  expect(statTile.height).toBeLessThanOrEqual(72);
+  expect(candidateLayout.length).toBeGreaterThanOrEqual(4);
+  expect(Math.abs(candidateLayout[0].y - candidateLayout[1].y)).toBeLessThanOrEqual(2);
+  expect(candidateLayout[1].x).toBeGreaterThan(candidateLayout[0].x);
+  expect(Math.abs(candidateLayout[0].x - candidateLayout[2].x)).toBeLessThanOrEqual(2);
+  expect(candidateLayout[2].y).toBeGreaterThan(candidateLayout[0].y);
+  expect(candidateLayout[0].rating).toBeGreaterThanOrEqual(candidateLayout[1].rating);
+  expect(candidateLayout[1].rating).toBeGreaterThanOrEqual(candidateLayout[2].rating);
+  await expect(page.locator(".candidate-list .fit-badge")).toHaveCount(0);
+  await expect(page.locator(".candidate-list .slot-picker-stats")).toHaveCount(0);
+
+  await page.locator(".candidate-card").first().click();
+  const roleDialog = page.getByRole("dialog", { name: /Assign a role to/i });
+  await expect(roleDialog).toBeVisible();
+  await expect(roleDialog.locator(".slot-picker-stats")).toBeVisible();
+  await expect(roleDialog.getByText("Role suitability", { exact: true })).toBeVisible();
+  await expect(roleDialog.locator(".fit-badge").first()).toBeVisible();
+  await expect(roleDialog.locator(".slot-option").first()).toContainText(/rating drop/i);
 
   const assistantGap = await page.locator(".manager-avatar.compact").evaluate((element) =>
     Number.parseFloat(window.getComputedStyle(element).columnGap)
