@@ -6065,8 +6065,9 @@ main:has(.analytics-consent) .milestone-nudge {
 }
 
 .fm-row-main {
-  flex: 1 1 210px;
-  min-width: 180px;
+  flex: 0 1 260px;
+  min-width: 200px;
+  max-width: 260px;
   display: flex;
   flex-direction: column;
   gap: 1px;
@@ -6118,13 +6119,13 @@ main:has(.analytics-consent) .milestone-nudge {
 }
 
 .fm-row-stats {
-  flex: 0 0 70px;
-  width: 70px;
+  flex: 0 0 96px;
+  width: 96px;
   min-height: 58px;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 3px;
-  padding: 3px;
+  gap: 4px;
+  padding: 4px;
   border: 1px solid color-mix(in srgb, var(--accent) 20%, var(--line));
   border-radius: 10px;
   background: color-mix(in srgb, var(--panel) 82%, transparent);
@@ -6133,27 +6134,26 @@ main:has(.analytics-consent) .milestone-nudge {
 .fm-row-stats span {
   min-width: 0;
   display: grid;
-  grid-template-columns: auto auto;
-  align-items: center;
-  justify-content: center;
-  gap: 2px;
-  padding: 2px 3px;
+  place-items: center;
+  align-content: center;
+  gap: 1px;
+  padding: 3px 4px;
   background: rgba(255, 255, 255, 0.06);
-  border-radius: 4px;
+  border-radius: 5px;
   line-height: 1;
   white-space: nowrap;
 }
 
 .fm-row-stats small {
   color: var(--muted);
-  font-size: 0.48rem;
+  font-size: 0.52rem;
   font-weight: 700;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.04em;
 }
 
 .fm-row-stats strong {
   color: var(--text);
-  font-size: 0.66rem;
+  font-size: 0.74rem;
   font-weight: 900;
 }
 
@@ -6164,7 +6164,7 @@ main:has(.analytics-consent) .milestone-nudge {
 .fm-row .pick-button {
   flex: 0 0 auto;
   width: auto;
-  margin: 0;
+  margin: 0 0 0 auto;
   min-height: 44px;
   padding: 0 14px;
   white-space: nowrap;
@@ -6191,6 +6191,7 @@ main:has(.analytics-consent) .milestone-nudge {
   .fm-row-main {
     flex-basis: calc(100% - 96px);
     min-width: 0;
+    max-width: none;
   }
 
   .fm-row .fit-badge {
@@ -7094,6 +7095,8 @@ main:has(.analytics-consent) .milestone-nudge {
   }
 
   .fm-row-main {
+    flex: 1 1 auto;
     min-width: 0;
+    max-width: none;
   }
 }

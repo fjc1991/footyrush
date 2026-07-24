@@ -191,7 +191,8 @@ test("draft workspace prioritizes the draft and keeps the full pitch onscreen", 
   expect(playerNameStyle.overflow).not.toBe("hidden");
   expect(playerNameStyle.overflowWrap).not.toBe("anywhere");
   expect(playerNameStyle.wordBreak).toBe("normal");
-  expect(playerNameStyle.identityWidth).toBeGreaterThanOrEqual(180);
+  expect(playerNameStyle.identityWidth).toBeGreaterThanOrEqual(200);
+  expect(playerNameStyle.identityWidth).toBeLessThanOrEqual(260);
 
   await expect(page.locator(".fm-row-stats").first()).toBeVisible();
 
@@ -207,8 +208,9 @@ test("draft workspace prioritizes the draft and keeps the full pitch onscreen", 
   });
   expect(statTile.display).toBe("grid");
   expect(statTile.columns).toBe(2);
-  expect(statTile.width).toBeLessThanOrEqual(80);
-  expect(statTile.height).toBeLessThanOrEqual(70);
+  expect(statTile.width).toBeGreaterThanOrEqual(90);
+  expect(statTile.width).toBeLessThanOrEqual(104);
+  expect(statTile.height).toBeLessThanOrEqual(72);
 
   const assistantGap = await page.locator(".manager-avatar.compact").evaluate((element) =>
     Number.parseFloat(window.getComputedStyle(element).columnGap)
