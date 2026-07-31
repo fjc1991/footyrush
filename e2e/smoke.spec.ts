@@ -184,6 +184,11 @@ test("draft workspace prioritizes the draft and keeps the full pitch onscreen", 
   await expect(spin).toBeEnabled({ timeout: 10_000 });
   await spin.click();
   await expect(page.locator(".candidate-card").first()).toBeVisible({ timeout: 5_000 });
+  await expect(page.locator(".candidate-card")).toHaveCount(8);
+  await page.getByRole("button", { name: /View full squad \(\d+\)/ }).click();
+  await expect.poll(() => page.locator(".candidate-card").count()).toBeGreaterThan(8);
+  await page.getByRole("button", { name: "Back to shortlist", exact: true }).click();
+  await expect(page.locator(".candidate-card")).toHaveCount(8);
   await expect(page.locator(".draw-ticket-kit")).toBeVisible();
   await expect(page.locator(".fm-row-kit")).toHaveCount(0);
   expect(await page.locator(".candidate-card-number").count()).toBeGreaterThan(0);

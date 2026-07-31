@@ -7,10 +7,14 @@ import {
   TEAM_TALK_EXPECTED_GOALS_BONUS,
   INVINCIBLE_CONTENDER_XG_BONUS,
   INVINCIBLE_MANAGER_RATING_CAP,
+  INVINCIBLE_MAX_SEASON_CASUALTIES,
+  INVINCIBLE_MIN_SEASON_CASUALTIES,
+  SEASON_OUT_OF_FORM_CHANCE,
   applySeasonFixtureInjuries,
   applySeasonFixtureSuspensions,
   availableSeasonBench,
   buildDoubleRoundRobin,
+  buildSeasonCasualtySchedule,
   canUseSeasonTeamTalk,
   createInvincibleSeason,
   createSeasonPregame,
@@ -22,6 +26,7 @@ import {
   remainingSeasonTeamTalks,
   seasonMissingRequiredSubstitutions
 } from "@/lib/game/season";
+import { createRng } from "@/lib/game/rng";
 import { calculateSquadStrength, computeStandings, simulateFixture } from "@/lib/game/simulation";
 import type { FixtureResult, ManagerSquad, RawFootballData } from "@/lib/game/types";
 
@@ -60,6 +65,55 @@ describe("Be Invincible season", () => {
       const played = allFixtures.filter((fixture) => fixture.homeId === manager.id || fixture.awayId === manager.id);
       expect(played).toHaveLength(38);
     }
+  });
+
+  it("builds reproducible four-or-five incident arcs with a clear finale and recovery beats", () => {
+    const counts = new Set<number>();
+
+    for (let index = 0; index < 80; index += 1) {
+      const seed = `incident-arc-${index}`;
+      const schedule = buildSeasonCasualtySchedule({ totalMatchdays: 38, rng: createRng(seed) });
+      const repeated = buildSeasonCasualtySchedule({ totalMatchdays: 38, rng: createRng(seed) });
+      const entries = Object.entries(schedule)
+        .map(([matchday, kind]) => ({ matchday: Number(matchday), kind }))
+        .sort((first, second) => first.matchday - second.matchday);
+
+      expect(schedule).toEqual(repeated);
+      expect(entries.length).toBeGreaterThanOrEqual(INVINCIBLE_MIN_SEASON_CASUALTIES);
+      expect(entries.length).toBeLessThanOrEqual(INVINCIBLE_MAX_SEASON_CASUALTIES);
+      expect(entries.some(({ kind }) => kind === "redCard")).toBe(true);
+      expect(schedule[37]).toBeUndefined();
+
+      entries.forEach(({ matchday }, incidentIndex) => {
+        const stratumStart = Math.floor((incidentIndex * 37) / entries.length);
+        const stratumEnd = Math.floor(((incidentIndex + 1) * 37) / entries.length) - 1;
+        expect(matchday).toBeGreaterThanOrEqual(stratumStart);
+        expect(matchday).toBeLessThanOrEqual(stratumEnd);
+        if (incidentIndex > 0) {
+          expect(matchday - entries[incidentIndex - 1].matchday).toBeGreaterThanOrEqual(3);
+        }
+      });
+      counts.add(entries.length);
+    }
+
+    expect([...counts].sort()).toEqual([
+      INVINCIBLE_MIN_SEASON_CASUALTIES,
+      INVINCIBLE_MAX_SEASON_CASUALTIES
+    ]);
+  });
+
+  it("caps a short season at four incidents when a fifth would remove feasible recovery beats", () => {
+    const schedule = buildSeasonCasualtySchedule({
+      totalMatchdays: 11,
+      rng: () => 0.999999
+    });
+    const matchdays = Object.keys(schedule).map(Number).sort((first, second) => first - second);
+
+    expect(matchdays).toEqual([0, 3, 6, 9]);
+    expect(schedule[10]).toBeUndefined();
+    matchdays.slice(1).forEach((matchday, index) => {
+      expect(matchday - matchdays[index]).toBeGreaterThanOrEqual(3);
+    });
   });
 
   it("keeps full-season standings arithmetic consistent", () => {
@@ -106,6 +160,34 @@ describe("Be Invincible season", () => {
     });
     expect(applied.injuryGamesByPlayerId[starter.player.i]).toBeGreaterThanOrEqual(1);
     expect(applied.injuryGamesByPlayerId[starter.player.i]).toBeLessThanOrEqual(10);
+  });
+
+  it("makes short match injuries common, medium layoffs uncommon, and long layoffs rare", () => {
+    const base = human("weighted-injury-human");
+    const starter = base.picks[0];
+    const result = simulateFixture({
+      fixture: { id: "weighted-injury-fx", round: 1, homeId: "human", awayId: "away" },
+      home: base,
+      away: autoDraftManager({ id: "away", displayName: "Away", formationId: "4-4-2", seed: "weighted-injury-away" }),
+      seed: "weighted-injury-result"
+    });
+    const durations = Array.from({ length: 1_000 }, (_, index) =>
+      applySeasonFixtureInjuries({
+        injuryGamesByPlayerId: {},
+        result: { ...result, homeInjuries: [starter.player.i], awayInjuries: [] },
+        seed: `weighted-injury-duration-${index}`
+      }).newInjuries[0].games
+    );
+    const short = durations.filter((games) => games <= 3).length;
+    const medium = durations.filter((games) => games >= 4 && games <= 6).length;
+    const long = durations.filter((games) => games >= 7).length;
+
+    expect(Math.min(...durations)).toBe(1);
+    expect(Math.max(...durations)).toBe(10);
+    expect(short).toBeGreaterThan(medium * 2);
+    expect(medium).toBeGreaterThan(long * 2);
+    expect(long).toBeGreaterThan(0);
+    expect(long).toBeLessThan(120);
   });
 
   it("applies fixed three-game red-card suspensions and returns players automatically", () => {
@@ -156,12 +238,24 @@ describe("Be Invincible season", () => {
       injuryGamesByPlayerId: { [starter.player.i]: 4 },
       suspensionGamesByPlayerId: { [secondStarter.player.i]: 2 }
     });
+    const starterAsSub = seasonMissingRequiredSubstitutions({
+      human: { ...base, substitutions: { [starter.player.i]: secondStarter.player.i } },
+      injuryGamesByPlayerId: { [starter.player.i]: 4 },
+      suspensionGamesByPlayerId: {}
+    });
+    const unknownSub = seasonMissingRequiredSubstitutions({
+      human: { ...base, substitutions: { [starter.player.i]: 987_654_321 } },
+      injuryGamesByPlayerId: { [starter.player.i]: 4 },
+      suspensionGamesByPlayerId: {}
+    });
 
     expect(missing.map((pick) => pick.player.i)).toContain(starter.player.i);
     expect(resolved).toHaveLength(0);
     expect(stale.map((pick) => pick.player.i)).toContain(starter.player.i);
     expect(duplicate).toHaveLength(1);
     expect(duplicate[0].player.i).toBe(secondStarter.player.i);
+    expect(starterAsSub.map((pick) => pick.player.i)).toContain(starter.player.i);
+    expect(unknownSub.map((pick) => pick.player.i)).toContain(starter.player.i);
   });
 
   it("caps the appointed-manager advantage for the full-season challenge", () => {
@@ -300,9 +394,9 @@ describe("Be Invincible season", () => {
     expect(base.substitutions[starter.player.i]).toBeUndefined();
   });
 
-  it("creates forced pre-match events for deterministic tests", () => {
+  it("reserves out-of-form decisions for healthy weeks", () => {
     const base = human("forced-events");
-    const prepared = createSeasonPregame({
+    const trainingWeek = createSeasonPregame({
       human: base,
       matchday: 4,
       injuryGamesByPlayerId: {},
@@ -310,9 +404,70 @@ describe("Be Invincible season", () => {
       trainingInjuryChance: 1,
       outOfFormChance: 1
     });
+    const healthyWeek = createSeasonPregame({
+      human: base,
+      matchday: 5,
+      injuryGamesByPlayerId: {},
+      seed: "forced-form",
+      trainingInjuryChance: 0,
+      outOfFormChance: 1
+    });
 
-    expect(prepared.decision.trainingInjury).toBeTruthy();
-    expect(prepared.decision.outOfForm).toBeTruthy();
+    expect(trainingWeek.decision.trainingInjury).toBeTruthy();
+    expect(trainingWeek.decision.outOfForm).toBeUndefined();
+    expect(healthyWeek.decision.trainingInjury).toBeUndefined();
+    expect(healthyWeek.decision.outOfForm).toBeTruthy();
+  });
+
+  it("accounts for injuries and suspensions before offering an out-of-form choice", () => {
+    const base = human("unavailable-form");
+    const suspendedStarter = base.picks.find(
+      (pick) => pick.target !== "SUB" && !pick.player.p.includes("GK")
+    )!;
+    const injuredSub = base.picks.find((pick) => pick.target === "SUB")!;
+    const suspendedWeek = createSeasonPregame({
+      human: base,
+      matchday: 6,
+      injuryGamesByPlayerId: {},
+      suspensionGamesByPlayerId: { [suspendedStarter.player.i]: 2 },
+      seed: "suspended-form",
+      trainingInjuryChance: 1,
+      outOfFormChance: 1
+    });
+    const injuredWeek = createSeasonPregame({
+      human: base,
+      matchday: 7,
+      injuryGamesByPlayerId: { [injuredSub.player.i]: 2 },
+      suspensionGamesByPlayerId: {},
+      seed: "injured-form",
+      trainingInjuryChance: 0,
+      outOfFormChance: 1
+    });
+
+    expect(suspendedWeek.decision.trainingInjury?.playerId).not.toBe(suspendedStarter.player.i);
+    expect(suspendedWeek.decision.outOfForm).toBeUndefined();
+    expect(injuredWeek.decision.outOfForm).toBeUndefined();
+  });
+
+  it("activates out-of-form decisions at six percent by default", () => {
+    const base = human("default-form-rate");
+    let decisions = 0;
+    for (let index = 0; index < 1_000; index += 1) {
+      const prepared = createSeasonPregame({
+        human: base,
+        matchday: index % 38,
+        injuryGamesByPlayerId: {},
+        suspensionGamesByPlayerId: {},
+        seed: `default-form-${index}`
+      });
+      if (prepared.decision.outOfForm) {
+        decisions += 1;
+      }
+    }
+
+    expect(SEASON_OUT_OF_FORM_CHANCE).toBe(0.06);
+    expect(decisions).toBeGreaterThanOrEqual(40);
+    expect(decisions).toBeLessThanOrEqual(80);
   });
 
   it("team talks improve outcomes modestly without guaranteeing wins", () => {

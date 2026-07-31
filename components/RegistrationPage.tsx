@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
-import { Activity, ArrowLeft, CheckCircle2, LogIn, Shield } from "lucide-react";
+import { Activity, ArrowLeft, CheckCircle2, LogIn, LogOut, Shield } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { getSupabaseBrowserClient, hasSupabaseConfig } from "@/lib/supabase/client";
 import { managerIdValidationMessage, normalizeManagerId } from "@/lib/user/manager-id";
@@ -54,6 +54,7 @@ export default function RegistrationPage({ locale }: { locale: string }) {
   const [message, setMessage] = useState("");
   const [checking, setChecking] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
   const [available, setAvailable] = useState<boolean | null>(null);
   const [sessionState, setSessionState] = useState<SessionState>(hasSupabaseConfig() ? "loading" : "anonymous");
   const [signedInProfile, setSignedInProfile] = useState<LocalProfile | null>(null);
@@ -308,6 +309,27 @@ export default function RegistrationPage({ locale }: { locale: string }) {
     }
   }
 
+  async function signOutAndUseAnotherAccount() {
+    setSigningOut(true);
+    setMessage("");
+    const supabase = getSupabaseBrowserClient();
+
+    try {
+      const { error } = (await supabase?.auth.signOut()) ?? { error: null };
+      if (error) {
+        setMessage("We could not sign you out. Please try again.");
+        return;
+      }
+
+      window.localStorage.removeItem(profileKey);
+      router.replace(`/${locale}`);
+    } catch {
+      setMessage("We could not sign you out. Please try again.");
+    } finally {
+      setSigningOut(false);
+    }
+  }
+
   const completingSignedInAccount = sessionState === "needs-manager-id";
 
   return (
@@ -394,10 +416,21 @@ export default function RegistrationPage({ locale }: { locale: string }) {
                 </label>
               </>
             )}
-            <button className="primary-button wide" type="submit" disabled={submitting}>
+            <button className="primary-button wide" type="submit" disabled={submitting || signingOut}>
               <LogIn size={18} />
               {submitting ? (completingSignedInAccount ? "Saving..." : "Creating...") : completingSignedInAccount ? "Save manager ID" : "Create manager ID"}
             </button>
+            {completingSignedInAccount && (
+              <button
+                className="secondary-button wide"
+                type="button"
+                onClick={() => void signOutAndUseAnotherAccount()}
+                disabled={submitting || signingOut}
+              >
+                <LogOut size={18} />
+                {signingOut ? "Signing out..." : "Sign out and use another account"}
+              </button>
+            )}
           </form>
         )}
 

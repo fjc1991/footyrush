@@ -4,6 +4,7 @@ import { seedFootballData } from "@/lib/game/data";
 import { autoDraftManager } from "@/lib/game/draft";
 import {
   INVINCIBLE_MAX_SEASON_CASUALTIES,
+  INVINCIBLE_MIN_SEASON_CASUALTIES,
   applySeasonFixtureInjuries,
   applySeasonFixtureSuspensions,
   createInvincibleSeason,
@@ -104,7 +105,7 @@ function playSeason(index: number): { injuries: number; redCards: number; victim
 
 describe("Be Invincible season casualty budget", () => {
   it(
-    "never exceeds five casualties, sometimes has none, and targets the top scorer above chance",
+    "delivers four or five casualties with a red card and targets the top scorer above chance",
     () => {
       const SEASONS = 80;
       const totals: number[] = [];
@@ -114,19 +115,20 @@ describe("Be Invincible season casualty budget", () => {
       for (let index = 0; index < SEASONS; index += 1) {
         const outcome = playSeason(index);
         const total = outcome.injuries + outcome.redCards;
-        expect(total).toBeGreaterThanOrEqual(0);
+        expect(total).toBeGreaterThanOrEqual(INVINCIBLE_MIN_SEASON_CASUALTIES);
         expect(total).toBeLessThanOrEqual(INVINCIBLE_MAX_SEASON_CASUALTIES);
+        expect(outcome.redCards).toBeGreaterThanOrEqual(1);
         totals.push(total);
         victims += outcome.victimIds.length;
         topScorerHits += outcome.victimIds.filter((id) => outcome.topScorerIds.has(id)).length;
       }
 
-      // Reaches the full range: at least one casualty-free season and one that spends much of the budget.
-      expect(Math.min(...totals)).toBe(0);
-      expect(Math.max(...totals)).toBeGreaterThanOrEqual(4);
+      // Both deck sizes occur across deterministic season seeds.
+      expect(Math.min(...totals)).toBe(INVINCIBLE_MIN_SEASON_CASUALTIES);
+      expect(Math.max(...totals)).toBe(INVINCIBLE_MAX_SEASON_CASUALTIES);
       const mean = totals.reduce((a, b) => a + b, 0) / totals.length;
-      expect(mean).toBeGreaterThan(1.4);
-      expect(mean).toBeLessThan(3.6);
+      expect(mean).toBeGreaterThan(INVINCIBLE_MIN_SEASON_CASUALTIES);
+      expect(mean).toBeLessThan(INVINCIBLE_MAX_SEASON_CASUALTIES);
       // The leading scorer(s) should absorb more than a uniform 1-of-11 share of the casualties.
       expect(topScorerHits / Math.max(1, victims)).toBeGreaterThan(0.12);
     },

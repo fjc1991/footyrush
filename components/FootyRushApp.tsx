@@ -24,6 +24,7 @@ import {
 import { createMinileague } from "@/lib/game/matchmaking";
 import { canonicalAccountRunId } from "@/lib/game/result-id";
 import { renderCommentary } from "@/lib/game/commentary";
+import { buildMatchFeedback, type MatchFeedback } from "@/lib/game/match-presentation";
 import { type MatchSpeed } from "@/lib/game/match-clock";
 import { useMatchClock } from "@/lib/game/use-match-clock";
 import {
@@ -57,6 +58,7 @@ import {
   getInvincibleAutoplayStatus,
   invincibleAutoplayTimerKey,
   scheduleInvincibleCountdown,
+  shouldPauseAfterInvincibleResult,
   type InvincibleAutoplayStatus
 } from "@/lib/game/invincible-autoplay";
 import { getTeamMonogram, getTeamVisualStyle } from "@/lib/game/team-visuals";
@@ -79,6 +81,7 @@ import {
 import { getSupabaseBrowserClient, hasSupabaseConfig } from "@/lib/supabase/client";
 import { useAccountActivity } from "@/lib/user/account-activity";
 import MyHomeAccount from "@/components/MyHomeAccount";
+import MatchBroadcast from "@/components/MatchBroadcast";
 import ProfileCompletionReminder from "@/components/ProfileCompletionReminder";
 import type { Session } from "@supabase/supabase-js";
 import type {
@@ -122,6 +125,15 @@ interface CanonicalProfileResponse {
     renameAvailable?: boolean;
   };
   admin?: boolean;
+}
+
+interface SeasonMatchReveal {
+  result: FixtureResult;
+  home: ManagerSquad;
+  away: ManagerSquad;
+  feedback: MatchFeedback;
+  managerCall?: string;
+  hold: boolean;
 }
 
 function publicLocalProfile(profile: LocalProfile): LocalProfile {
@@ -378,7 +390,22 @@ function BroadcastClock({ minute, running }: { minute: number; running: boolean 
   );
 }
 
+function usePrefersReducedMotion(): boolean {
+  const [reduced, setReduced] = useState(false);
+
+  useEffect(() => {
+    const media = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const update = () => setReduced(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+
+  return reduced;
+}
+
 export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: string }) {
+  const prefersReducedMotion = usePrefersReducedMotion();
   const [view, setView] = useState<MainView>("play");
   const [phase, setPhase] = useState<Phase>("setup");
   const [theme, setTheme] = useState<"light" | "dark">("dark");
@@ -400,6 +427,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
   const exhibitionRunRef = useRef<string | null>(null);
   const [guestStatus, setGuestStatus] = useState<GuestStatus>({ allowed: true, played: false });
   const [showAuthGate, setShowAuthGate] = useState(false);
+  const [pageVisible, setPageVisible] = useState(true);
   const authCloseRef = useRef<HTMLButtonElement | null>(null);
   const [langMenuOpen, setLangMenuOpen] = useState(false);
   const [authEmail, setAuthEmail] = useState("");
@@ -431,6 +459,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
   const [selectedSub, setSelectedSub] = useState<string | null>(null);
   const [spinning, setSpinning] = useState(false);
   const [slotPickerCandidateId, setSlotPickerCandidateId] = useState<number | null>(null);
+  const [showAllCandidates, setShowAllCandidates] = useState(false);
   const [draftReshufflesLeft, setDraftReshufflesLeft] = useState(DRAFT_RESHUFFLE_LIMIT);
   const [dataReady, setDataReady] = useState(false);
   const [dataError, setDataError] = useState(false);
@@ -471,6 +500,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
   const [seasonAutoplayCountdown, setSeasonAutoplayCountdown] = useState(INVINCIBLE_AUTOPLAY_SECONDS);
   const [seasonAutoplayPending, setSeasonAutoplayPending] = useState(false);
   const [seasonAutoplayError, setSeasonAutoplayError] = useState("");
+  const [seasonMatchReveal, setSeasonMatchReveal] = useState<SeasonMatchReveal | null>(null);
   const [seasonCompletionPending, setSeasonCompletionPending] = useState(false);
   const [analyticsConsent, setAnalyticsConsent] = useState<AnalyticsConsent>("unknown");
   const [analyticsPromptOpen, setAnalyticsPromptOpen] = useState(false);
@@ -883,19 +913,28 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
 
   const expertUnlocked = hasExpertAccess(managerScore, expertUnlockedEarned);
   const draftMode: DraftMode = expertUnlocked ? "expert" : "classic";
-  const draftStatus = phase === "complete" || phase === "exhibition" || phase === "invincible_complete" ? "Complete" : `${picks.length}/${draftSlots.length}`;
-  const leagueStatus =
-    phase === "invincible_complete"
-      ? "Invincible complete"
-      : phase === "season" && season
-        ? `Match ${Math.min(season.currentMatchday + 1, 38)}/38`
-        : phase === "complete"
-          ? "Complete"
-          : phase === "exhibition"
-            ? "Exhibition"
-            : league
-              ? `Round ${Math.min(league.currentRound + 1, 5)}/5`
-              : "Not joined";
+  const draftSquadOverall = useMemo(() => {
+    if (!draftComplete || picks.length === 0) {
+      return null;
+    }
+    return Math.round(
+      calculateSquadStrength({
+        id: "human",
+        displayName: profile?.displayName ?? "Guest Manager",
+        kind: "human",
+        source: "human",
+        formationId,
+        mode: draftMode,
+        picks,
+        mmr: managerScore,
+        managerRating: selectedManager?.rating ?? managerScore,
+        completedLeagues,
+        injuredPlayerIds: [],
+        suspendedPlayerIds: [],
+        substitutions: {}
+      }).overall
+    );
+  }, [completedLeagues, draftComplete, draftMode, formationId, managerScore, picks, profile?.displayName, selectedManager?.rating]);
   const humanStanding = standings.find((standing) => standing.managerId === "human");
   const seasonHumanStanding = seasonStandings.find((standing) => standing.managerId === "human");
   const seasonOutOfFormSubs = useMemo(() => {
@@ -939,6 +978,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     paused: seasonAutoplayPaused,
     attentionReason: seasonAttentionReason,
     pending: seasonAutoplayPending,
+    presenting: Boolean(seasonMatchReveal),
     error: seasonAutoplayError
   });
   const pendingCandidate = spin?.candidates.find((candidate) => candidate.player.i === slotPickerCandidateId) ?? null;
@@ -955,6 +995,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
         : [],
     [spin]
   );
+  const visibleRankedCandidates = showAllCandidates ? rankedCandidates : rankedCandidates.slice(0, 8);
   const latestHumanInjury = [...visibleEvents]
     .reverse()
     .find((event) => event.code === "injury" && event.teamId === "human" && !selectedSub);
@@ -1363,14 +1404,57 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
   }, [locale]);
 
   useEffect(() => {
-    if (leagueCommentaryRef.current) {
-      leagueCommentaryRef.current.scrollTop = leagueCommentaryRef.current.scrollHeight;
+    const updateVisibility = () => {
+      const visible = !document.hidden;
+      setPageVisible(visible);
+      if (!visible && phase === "season") {
+        setSeasonAutoplayPaused(true);
+      }
+    };
+    updateVisibility();
+    document.addEventListener("visibilitychange", updateVisibility);
+    return () => document.removeEventListener("visibilitychange", updateVisibility);
+  }, [phase]);
+
+  useEffect(() => {
+    if (phase === "season" && showAuthGate) {
+      setSeasonAutoplayPaused(true);
+    }
+  }, [phase, showAuthGate]);
+
+  useEffect(() => {
+    if (phase !== "season" || view !== "play" || (season?.results.length ?? 0) > 0) return;
+    const frame = window.requestAnimationFrame(() => {
+      document.querySelector<HTMLButtonElement>(".season-next-button")?.focus();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [phase, season?.results.length, view]);
+
+  useEffect(() => {
+    if (view !== "play" || (phase !== "complete" && phase !== "invincible_complete")) return;
+    const frame = window.requestAnimationFrame(() => {
+      document.querySelector<HTMLElement>(".complete-grid .completion-heading")?.focus();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [phase, view]);
+
+  useEffect(() => {
+    const log = leagueCommentaryRef.current;
+    if (log) {
+      const distanceFromBottom = log.scrollHeight - log.scrollTop - log.clientHeight;
+      if (visibleEvents.length <= 1 || distanceFromBottom < 110) {
+        log.scrollTop = log.scrollHeight;
+      }
     }
   }, [visibleEvents.length]);
 
   useEffect(() => {
-    if (exhibitionCommentaryRef.current) {
-      exhibitionCommentaryRef.current.scrollTop = exhibitionCommentaryRef.current.scrollHeight;
+    const log = exhibitionCommentaryRef.current;
+    if (log) {
+      const distanceFromBottom = log.scrollHeight - log.scrollTop - log.clientHeight;
+      if (exhibitionEvents.length <= 1 || distanceFromBottom < 110) {
+        log.scrollTop = log.scrollHeight;
+      }
     }
   }, [exhibitionEvents.length]);
 
@@ -1411,7 +1495,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
       window.localStorage.setItem(profileStorageKey(managerScoreKey, profile), String(rating));
       setManagerSpinning(false);
       void trackProductEvent("manager_shuffled", { managerRating: rating });
-    }, 820);
+    }, prefersReducedMotion ? 0 : 820);
   }
 
   function shuffleManager() {
@@ -1444,6 +1528,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     setReadyToRecord(false);
     setSelectedSub(null);
     setSlotPickerCandidateId(null);
+    setShowAllCandidates(false);
     setDraftReshufflesLeft(DRAFT_RESHUFFLE_LIMIT);
     setExhibition(null);
     resetExhibitionClock();
@@ -1457,6 +1542,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     setSeasonAutoplayCountdown(INVINCIBLE_AUTOPLAY_SECONDS);
     setSeasonAutoplayPending(false);
     setSeasonAutoplayError("");
+    setSeasonMatchReveal(null);
     seasonAdvanceLockRef.current = false;
     activeSeasonIdRef.current = null;
     pendingSeasonCompletionRef.current = null;
@@ -1483,6 +1569,9 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
   }
 
   function switchView(nextView: MainView) {
+    if (phase === "season" && nextView !== "play") {
+      setSeasonAutoplayPaused(true);
+    }
     setView(nextView);
     const nextHash = nextView === "play" ? "" : `#${nextView}`;
     window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}${nextHash}`);
@@ -1491,12 +1580,13 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
   function runDraftSpin() {
     setSpin(null);
     setSlotPickerCandidateId(null);
+    setShowAllCandidates(false);
     setSpinning(true);
     const seed = `${Date.now()}:${picks.length}:${formationId}`;
     window.setTimeout(() => {
       setSpin(spinForOpenSlots(openSlots, usedPlayerIds, seed));
       setSpinning(false);
-    }, 650);
+    }, prefersReducedMotion ? 0 : 650);
   }
 
   // First draw is free; each re-spin uses a free re-shuffle.
@@ -1523,13 +1613,14 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     }
     setSpin(null);
     setSlotPickerCandidateId(null);
+    setShowAllCandidates(false);
     setSpinning(true);
     const nextUsedPlayerIds = new Set(nextPicks.map((pick) => pick.player.i));
     const seed = `draft:${formationId}:${nextPicks.map((pick) => pick.player.i).join("-")}`;
     window.setTimeout(() => {
       setSpin(spinForOpenSlots(nextOpenSlots, nextUsedPlayerIds, seed));
       setSpinning(false);
-    }, 500);
+    }, prefersReducedMotion ? 0 : 500);
   }
 
   function handleSubSelection(injuredPlayerId: number, subPlayerId: number, subName: string) {
@@ -1603,6 +1694,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
       human,
       matchday: nextSeason.currentMatchday,
       injuryGamesByPlayerId: nextSeason.injuryGamesByPlayerId,
+      suspensionGamesByPlayerId: nextSeason.suspensionGamesByPlayerId,
       seed: `${nextSeason.id}:pregame:${nextSeason.currentMatchday}:${nextSeason.results.length}`
     });
     setSeasonDecision(prepared.decision);
@@ -1638,10 +1730,13 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     if (gameMode === "be_invincible") {
       let attemptId = `local-${Date.now()}`;
       setSeasonAttemptMessage("");
-      setSeasonAutoplayPaused(false);
+      // The first kickoff is deliberate: give the player time to read the season
+      // dashboard before they choose whether to hand control to auto-play.
+      setSeasonAutoplayPaused(true);
       setSeasonAutoplayCountdown(INVINCIBLE_AUTOPLAY_SECONDS);
       setSeasonAutoplayPending(false);
       setSeasonAutoplayError("");
+      setSeasonMatchReveal(null);
       seasonAdvanceLockRef.current = false;
       activeSeasonIdRef.current = null;
       pendingSeasonCompletionRef.current = null;
@@ -1932,7 +2027,18 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
       return;
     }
 
+    const revealNeedsAcknowledgement = shouldPauseAfterInvincibleResult({
+      previousResults: season.results,
+      result: humanResult
+    });
+    if (revealNeedsAcknowledgement) {
+      // Let turning points land. The next screen explains what happened and the
+      // player explicitly resumes once they have absorbed it or fixed the XI.
+      setSeasonAutoplayPaused(true);
+    }
+
     const currentRound = season.rounds[season.currentMatchday] ?? [];
+    const previousStandings = computeStandings(season.managers, season.results);
     void trackProductEvent("match_completed", {
       competitionMode: "invincible",
       matchday: season.currentMatchday + 1,
@@ -1965,6 +2071,8 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
         })
       );
     });
+    const completedRoundResults = nextResults.slice(season.results.length);
+    const completedStandings = computeStandings(season.managers, nextResults);
 
     const postMatchInjuries = applySeasonFixtureInjuries({
       injuryGamesByPlayerId: decrementSeasonAbsences(season.injuryGamesByPlayerId),
@@ -1988,6 +2096,36 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
       boostsUsed: seasonTeamTalkActive ? season.boostsUsed + 1 : season.boostsUsed
     };
 
+    const currentHuman = season.managers.find((manager) => manager.id === "human");
+    const managerCalls = [
+      seasonTeamTalkActive ? "Team talk used" : "",
+      seasonDecision?.outOfForm && seasonOutOfFormChoice === "keep"
+        ? `${seasonDecision.outOfForm.playerName} kept in the XI`
+        : seasonDecision?.outOfForm && seasonOutOfFormChoice === "bench"
+          ? `${seasonDecision.outOfForm.playerName} rested${seasonOutOfFormSubId
+            ? ` for ${currentHuman?.picks.find((pick) => pick.player.i === seasonOutOfFormSubId)?.player.n ?? "a substitute"}`
+            : ""}`
+          : ""
+    ].filter(Boolean);
+    const revealHome = season.managers.find((manager) => manager.id === humanResult.homeId);
+    const revealAway = season.managers.find((manager) => manager.id === humanResult.awayId);
+    if (revealHome && revealAway) {
+      setSeasonMatchReveal({
+        result: humanResult,
+        home: revealHome,
+        away: revealAway,
+        feedback: buildMatchFeedback({
+          previousHumanResults: season.results,
+          completedRoundResults,
+          previousStandings,
+          completedStandings,
+          currentHumanResult: humanResult
+        }),
+        managerCall: managerCalls.join(" · ") || undefined,
+        hold: revealNeedsAcknowledgement || nextMatchday >= season.rounds.length
+      });
+    }
+
     setSeasonOutOfFormChoice(null);
     setSeasonOutOfFormSubId(null);
     setSeasonTeamTalkActive(false);
@@ -1995,12 +2133,42 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     if (nextMatchday >= season.rounds.length) {
       pendingSeasonCompletionRef.current = nextSeason;
       setSeasonCompletionPending(true);
-      await finalizeInvincibleSeason(nextSeason);
+      setSeason(nextSeason);
       return;
     }
 
     nextSeason = prepareSeasonMatch(nextSeason);
     setSeason(nextSeason);
+  }
+
+  async function finishSeasonMatchReveal() {
+    setSeasonMatchReveal(null);
+    const pendingCompletion = pendingSeasonCompletionRef.current;
+    if (!pendingCompletion) {
+      window.requestAnimationFrame(() => {
+        document.querySelector<HTMLButtonElement>(
+          ".season-next-button:not(:disabled), .season-event-card .sub-option:not(:disabled)"
+        )?.focus();
+      });
+      return;
+    }
+
+    window.requestAnimationFrame(() => {
+      document.querySelector<HTMLElement>(".season-finalizing")?.focus();
+    });
+    setSeasonAutoplayPending(true);
+    setSeasonAutoplayError("");
+    try {
+      await finalizeInvincibleSeason(pendingCompletion);
+    } catch (error) {
+      setSeasonAutoplayError(
+        error instanceof Error && error.message
+          ? error.message
+          : "The completed season could not be verified. Your result is safe; retry to continue."
+      );
+    } finally {
+      setSeasonAutoplayPending(false);
+    }
   }
 
   // Keep the timer callback current without making the timer restart for every
@@ -2013,7 +2181,13 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
   // disposes it, so pause, required decisions, reset, completion, and unmount all
   // cancel the pending automatic start. Resuming creates a fresh three seconds.
   useEffect(() => {
-    if (phase !== "season" || !seasonAutoplayKey || seasonAutoplayStatus !== "running") {
+    if (
+      phase !== "season" ||
+      view !== "play" ||
+      document.hidden ||
+      !seasonAutoplayKey ||
+      seasonAutoplayStatus !== "running"
+    ) {
       return;
     }
     return scheduleInvincibleCountdown({
@@ -2022,7 +2196,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
         void seasonAdvanceRef.current();
       }
     });
-  }, [phase, seasonAutoplayKey, seasonAutoplayStatus]);
+  }, [phase, seasonAutoplayKey, seasonAutoplayStatus, view]);
 
   function recordRoundAndAdvance() {
     if (!league || !currentResult) {
@@ -2427,6 +2601,10 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
   }
 
   async function signInWithX() {
+    if (phase !== "setup" && phase !== "draft") {
+      setAuthMessage("X sign-in is available between matches so an active run is never lost. Use email sign-in here, or finish the run first.");
+      return;
+    }
     const supabase = getSupabaseBrowserClient();
     if (!supabase) {
       setAuthMessage(copy.authConfigMissing);
@@ -2546,7 +2724,17 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
 
   async function signOut() {
     const supabase = getSupabaseBrowserClient();
-    await supabase?.auth.signOut();
+    setAuthMessage("");
+    try {
+      const { error } = (await supabase?.auth.signOut()) ?? { error: null };
+      if (error) {
+        setAuthMessage("We could not sign you out. Your session is still active; please try again.");
+        return;
+      }
+    } catch {
+      setAuthMessage("We could not sign you out. Your session is still active; please try again.");
+      return;
+    }
     setProfile(null);
     hydrateLocalProgress(null);
     setIsAdmin(false);
@@ -2628,6 +2816,53 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
             : phase === "invincible_complete"
               ? "Invincible season complete. The official award depends on the hidden eligibility gate."
             : "Season recorded. Try the community exhibition or build another squad.";
+
+  const leagueHumanResults = league?.results.filter(
+    (result) => result.homeId === "human" || result.awayId === "human"
+  ).length ?? 0;
+  const seasonHumanResults = season?.results.filter(
+    (result) => result.homeId === "human" || result.awayId === "human"
+  ).length ?? 0;
+  const humanLeaguePosition = Math.max(1, standings.findIndex((standing) => standing.managerId === "human") + 1);
+  const humanSeasonPosition = Math.max(1, seasonStandings.findIndex((standing) => standing.managerId === "human") + 1);
+  const hudLabel = phase === "draft"
+    ? "Squad build"
+    : phase === "league" || phase === "complete"
+      ? "Mini League"
+      : phase === "season" || phase === "invincible_complete"
+        ? "Be Invincible"
+        : "Community match";
+  const hudHeadline = phase === "draft"
+    ? draftComplete ? "Squad ready" : `Pick ${picks.length + 1} of ${draftSlots.length}`
+    : phase === "league"
+      ? `Round ${Math.min(5, leagueHumanResults + 1)} of 5`
+      : phase === "season"
+        ? seasonMatchReveal
+          ? "Full-time review"
+          : `Match ${Math.min(38, seasonHumanResults + 1)} of 38`
+        : phase === "complete" || phase === "invincible_complete"
+          ? "Full-time review"
+          : "One-off fixture";
+  const hudContext = phase === "draft"
+    ? `${openSlots.length} role${openSlots.length === 1 ? "" : "s"} open`
+    : phase === "league" || phase === "complete"
+      ? `#${humanLeaguePosition} · ${humanStanding?.points ?? 0} pts`
+      : phase === "season"
+        ? seasonMatchReveal
+          ? "Result incoming"
+          : `#${humanSeasonPosition} · ${seasonHumanStanding?.points ?? 0} pts`
+        : phase === "invincible_complete"
+          ? `#${humanSeasonPosition} · ${seasonHumanStanding?.points ?? 0} pts`
+        : `${Math.min(90, exhibitionSecond)}′`;
+  const hudProgress = phase === "draft"
+    ? (picks.length / Math.max(1, draftSlots.length)) * 100
+    : phase === "league"
+      ? (leagueHumanResults / 5) * 100
+      : phase === "season"
+        ? ((seasonHumanResults - (seasonMatchReveal ? 1 : 0)) / 38) * 100
+        : phase === "complete" || phase === "invincible_complete"
+          ? 100
+          : (exhibitionSecond / 90) * 100;
 
   return (
     <main className="app-shell" data-app-ready={dataReady ? "true" : "false"}>
@@ -2744,33 +2979,24 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
       )}
 
       {phase !== "setup" && (
-        <section className={`status-strip${phase === "draft" ? " draft-status-strip" : ""}`} aria-label="Game status">
-          {phase !== "draft" && (
-            <div>
-              <span>Draft</span>
-              <strong>{draftStatus}</strong>
+        <section className="game-hud" data-phase={phase} aria-label="Game status">
+          <div className="game-hud-phase">
+            <span>{hudLabel}</span>
+            <strong>{hudHeadline}</strong>
+            <small>{hudContext}</small>
+          </div>
+          <span className="game-hud-progress" aria-hidden="true">
+            <span style={{ width: `${Math.min(100, Math.max(0, hudProgress))}%` }} />
+          </span>
+          {view === "play" && phase !== "draft" && (
+            <div className="game-hud-coach">
+              <ManagerAvatar mood={assistantMood} line={assistantLine} compact />
             </div>
           )}
-          {phase !== "draft" && (
-            <div>
-              <span>League</span>
-              <strong>{leagueStatus}</strong>
-            </div>
-          )}
-          <div>
-            <span>Score</span>
-            <strong>{selectedManager ? managerScore : "—"}</strong>
+          <div className="game-hud-meta">
+            <span>Manager <strong>{managerScore}</strong></span>
+            <span>{expertUnlocked ? "Expert draft" : "Assisted draft"}</span>
           </div>
-          <div>
-            <span>Draft level</span>
-            <strong>{expertUnlocked ? "Expert" : "Assisted"}</strong>
-          </div>
-        </section>
-      )}
-
-      {view === "play" && phase !== "setup" && phase !== "draft" && (
-        <section className="assistant-strip" aria-label="Assistant tip">
-          <ManagerAvatar mood={assistantMood} line={assistantLine} compact />
         </section>
       )}
 
@@ -2801,6 +3027,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
           profile={profile}
           isAdmin={isAdmin}
           locale={locale}
+          onSignOut={signOut}
         />
       )}
 
@@ -3006,7 +3233,9 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                   ? "Squad complete"
                   : `${copy.draftRound} ${Math.min(picks.length + 1, draftSlots.length)} / ${draftSlots.length}`}
               </p>
-              {dataError ? (
+              {draftComplete ? (
+                <span className="draft-ready-chip"><ShieldCheck size={15} /> Ready</span>
+              ) : dataError ? (
                 <button className="secondary-button" type="button" onClick={loadData}>
                   <Shuffle size={17} />
                   Data failed to load — retry
@@ -3135,14 +3364,25 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                   </div>
                 )}
                 <div className="candidate-board-head">
-                  <span>Available players</span>
-                  <small>Select a player to compare role suitability</small>
+                  <div>
+                    <span>{showAllCandidates ? "Full club squad" : "Scouted shortlist"}</span>
+                    <small>
+                      {showAllCandidates
+                        ? `${rankedCandidates.length} available players · ordered by best open-role fit`
+                        : `Top ${Math.min(8, rankedCandidates.length)} fits for your remaining roles`}
+                    </small>
+                  </div>
+                  {rankedCandidates.length > 8 && (
+                    <button className="candidate-view-toggle" type="button" onClick={() => setShowAllCandidates((shown) => !shown)}>
+                      {showAllCandidates ? "Back to shortlist" : `View full squad (${rankedCandidates.length})`}
+                    </button>
+                  )}
                 </div>
                 <div className="candidate-list">
-                  {rankedCandidates.map(({ candidate, originalIndex }, rank) => {
+                  {visibleRankedCandidates.map(({ candidate, originalIndex }, rank) => {
                     return (
                       <button
-                        className="candidate-card"
+                        className={`candidate-card${rank < 3 ? " is-featured" : ""}`}
                         key={candidate.player.i}
                         type="button"
                         data-rating={Math.round(candidate.effectiveRating)}
@@ -3163,6 +3403,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                         </span>
                         <strong className="candidate-card-name">{candidate.player.n}</strong>
                         <span className="candidate-card-action">
+                          <small>#{rank + 1}</small>
                           View roles
                           <ChevronRight size={17} />
                         </span>
@@ -3170,7 +3411,32 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                     );
                   })}
                 </div>
+                {!showAllCandidates && rankedCandidates.length > 8 && (
+                  <p className="shortlist-note">Scouting has hidden {rankedCandidates.length - 8} lower-ranked options. The full squad stays one tap away.</p>
+                )}
                 {spin.redraws > 0 && <p className="fine-print">Auto-redrew {spin.redraws} unavailable draw{spin.redraws === 1 ? "" : "s"}.</p>}
+              </div>
+            ) : draftComplete ? (
+              <div className="draft-complete-stage" role="status">
+                <span className="draft-complete-glow" aria-hidden="true" />
+                <span className="draft-complete-emblem" aria-hidden="true"><ShieldCheck size={38} /></span>
+                <p className="eyebrow">Selection confirmed</p>
+                <h2>Your matchday squad is ready</h2>
+                <p>
+                      Sixteen picks, one identity. Take this XI into the {gameMode === "be_invincible" ? "38-match test" : "five-match rush"}.
+                </p>
+                <div className="draft-complete-stats" aria-label="Completed squad summary">
+                  <span><strong>{formationId}</strong><small>Shape</small></span>
+                  <span><strong>{draftSquadOverall ?? "—"}</strong><small>XI rating</small></span>
+                  <span><strong>{activeBoostCount}/{BOOST_LIMIT}</strong><small>Boosts</small></span>
+                </div>
+              </div>
+            ) : spinning ? (
+              <div className="draft-loading-stage" role="status" aria-live="polite">
+                <span className="scouting-radar" aria-hidden="true"><span /></span>
+                <strong>Scouting the next club-season…</strong>
+                <p>Checking every open role and ranking the strongest fits.</p>
+                <div className="draft-loading-lines" aria-hidden="true"><span /><span /><span /></div>
               </div>
             ) : (
               <div className="empty-state">
@@ -3246,11 +3512,11 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
               <BroadcastClock minute={liveSecond} running={isPlaying} />
             </div>
 
-            {currentHumanFixture && (
+            {currentHumanFixture && currentResult && (
               <MatchHeader
                 home={managerById.get(currentHumanFixture.homeId)}
                 away={managerById.get(currentHumanFixture.awayId)}
-                started={Boolean(currentResult)}
+                started
                 homeGoals={liveHomeGoals}
                 awayGoals={liveAwayGoals}
                 flashing={scoreFlashing}
@@ -3270,7 +3536,13 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
 
             {currentResult && (
               <>
-                <div className="commentary-log" aria-live="polite" ref={leagueCommentaryRef}>
+                <div
+                  className="commentary-log"
+                  role="log"
+                  aria-live={isPlaying ? "polite" : "off"}
+                  aria-relevant="additions"
+                  ref={leagueCommentaryRef}
+                >
                   {visibleEvents.map((event) => (
                     <div
                       className={`commentary-line${event.code === "goal" ? " goal-flash" : event.code === "red_card" ? " red-flash" : ""}`}
@@ -3344,6 +3616,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                         key={speed}
                         type="button"
                         className={matchSpeed === speed ? "active" : ""}
+                        aria-pressed={matchSpeed === speed}
                         onClick={() => setMatchSpeed(speed)}
                       >
                         {speed}x
@@ -3365,7 +3638,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
           </div>
 
           <div className="side-stack">
-            <StandingsPanel standings={standings} />
+            <StandingsPanel standings={standings} managers={league.managers} />
             <InjuryPanel managers={league.managers} />
           </div>
         </section>
@@ -3373,54 +3646,95 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
 
       {view === "play" && phase === "season" && season && (
         <section className="season-dashboard">
-          <div className="season-dashboard-grid">
-            <div className="season-main-stack">
-              <div className="panel match-panel season-control-panel">
-                {seasonAttemptMessage && <p className="fine-print compact-note">{seasonAttemptMessage}</p>}
+          <div className="panel match-panel season-control-panel">
+            {seasonAttemptMessage && <p className="fine-print compact-note">{seasonAttemptMessage}</p>}
 
-                {currentSeasonFixture && seasonHumanManager && (
-                  <SeasonPreMatchPanel
-                    copy={copy}
-                    opponent={currentSeasonFixture.homeId === "human"
-                      ? seasonManagerById.get(currentSeasonFixture.awayId)
-                      : seasonManagerById.get(currentSeasonFixture.homeId)}
-                    human={seasonHumanManager}
-                    humanStanding={seasonHumanStanding}
-                    decision={seasonDecision}
-                    season={season}
-                    teamTalkActive={seasonTeamTalkActive}
-                    outOfFormChoice={seasonOutOfFormChoice}
-                    outOfFormSubId={seasonOutOfFormSubId}
-                    availableSubs={seasonOutOfFormSubs}
-                    unavailableStarters={seasonUnavailableStartersList}
-                    missingSubstitutions={seasonMissingSubstitutions}
-                    humanIsHome={currentSeasonFixture.homeId === "human"}
-                    autoplayStatus={seasonAutoplayStatus}
-                    autoplayPaused={seasonAutoplayPaused}
-                    autoplayCountdown={seasonAutoplayCountdown}
-                    autoplayError={seasonAutoplayError}
-                    onChooseSub={handleSeasonSubSelection}
-                    onUseTeamTalk={() => canUseSeasonTeamTalk(season) && setSeasonTeamTalkActive(true)}
-                    onSkipTeamTalk={() => setSeasonTeamTalkActive(false)}
-                    onKeepOutOfForm={() => {
-                      setSeasonOutOfFormChoice("keep");
-                      setSeasonOutOfFormSubId(null);
+            {seasonMatchReveal ? (
+              <MatchBroadcast
+                result={seasonMatchReveal.result}
+                home={seasonMatchReveal.home}
+                away={seasonMatchReveal.away}
+                feedback={seasonMatchReveal.feedback}
+                locale={locale}
+                managerCall={seasonMatchReveal.managerCall}
+                hold={seasonMatchReveal.hold}
+                reducedMotion={prefersReducedMotion}
+                active={view === "play" && pageVisible && !showAuthGate}
+                onComplete={() => void finishSeasonMatchReveal()}
+              />
+            ) : currentSeasonFixture && seasonHumanManager ? (
+              <SeasonPreMatchPanel
+                copy={copy}
+                opponent={currentSeasonFixture.homeId === "human"
+                  ? seasonManagerById.get(currentSeasonFixture.awayId)
+                  : seasonManagerById.get(currentSeasonFixture.homeId)}
+                human={seasonHumanManager}
+                humanStanding={seasonHumanStanding}
+                humanPosition={Math.max(1, seasonStandings.findIndex((standing) => standing.managerId === "human") + 1)}
+                decision={seasonDecision}
+                season={season}
+                teamTalkActive={seasonTeamTalkActive}
+                outOfFormChoice={seasonOutOfFormChoice}
+                outOfFormSubId={seasonOutOfFormSubId}
+                availableSubs={seasonOutOfFormSubs}
+                unavailableStarters={seasonUnavailableStartersList}
+                missingSubstitutions={seasonMissingSubstitutions}
+                humanIsHome={currentSeasonFixture.homeId === "human"}
+                autoplayStatus={seasonAutoplayStatus}
+                autoplayPaused={seasonAutoplayPaused}
+                autoplayCountdown={seasonAutoplayCountdown}
+                autoplayError={seasonAutoplayError}
+                onChooseSub={handleSeasonSubSelection}
+                onUseTeamTalk={() => canUseSeasonTeamTalk(season) && setSeasonTeamTalkActive(true)}
+                onSkipTeamTalk={() => setSeasonTeamTalkActive(false)}
+                onKeepOutOfForm={() => {
+                  setSeasonOutOfFormChoice("keep");
+                  setSeasonOutOfFormSubId(null);
+                }}
+                onBenchOutOfForm={(subId) => {
+                  setSeasonOutOfFormChoice("bench");
+                  setSeasonOutOfFormSubId(subId);
+                }}
+                onStart={playSeasonMatchAndAdvance}
+                onToggleAutoplay={() => setSeasonAutoplayPaused((paused) => !paused)}
+                canStart={(seasonCompletionPending || canKickOffSeasonMatch()) && seasonAutoplayStatus !== "saving"}
+              />
+            ) : seasonCompletionPending ? (
+              <div className="season-finalizing" role="status" tabIndex={-1}>
+                <span className="draft-complete-emblem" aria-hidden="true"><Trophy size={34} /></span>
+                <div>
+                  <p className="eyebrow">Season complete</p>
+                  <h2>{seasonAutoplayError ? "Verification paused" : "Confirming your final table…"}</h2>
+                  <p>{seasonAutoplayError || "Your 38-match result is safe while the official award gate is checked."}</p>
+                </div>
+                {seasonAutoplayError && (
+                  <button
+                    className="primary-button"
+                    type="button"
+                    onClick={(event) => {
+                      const finalizingPanel = event.currentTarget.closest<HTMLElement>(".season-finalizing");
+                      void playSeasonMatchAndAdvance();
+                      window.requestAnimationFrame(() => finalizingPanel?.focus());
                     }}
-                    onBenchOutOfForm={(subId) => {
-                      setSeasonOutOfFormChoice("bench");
-                      setSeasonOutOfFormSubId(subId);
-                    }}
-                    onStart={playSeasonMatchAndAdvance}
-                    onToggleAutoplay={() => setSeasonAutoplayPaused((paused) => !paused)}
-                    canStart={(seasonCompletionPending || canKickOffSeasonMatch()) && seasonAutoplayStatus !== "saving"}
-                  />
+                  >
+                    Retry verification
+                  </button>
                 )}
               </div>
+            ) : null}
+          </div>
 
-              <StandingsPanel standings={seasonStandings} eyebrow="Be Invincible" title="Season table" scrollable />
+          {!seasonMatchReveal && (
+          <div className="season-dashboard-grid">
+            <div className="season-main-stack">
+              <StandingsPanel standings={seasonStandings} managers={season.managers} eyebrow="Be Invincible" title="Season table" scrollable />
             </div>
 
             <div className="side-stack season-side-stack">
+              <SeasonStatusPanel season={season} />
+              {season.results.some((result) => result.homeId === "human" || result.awayId === "human") && (
+                <SeasonResultsList season={season} managers={season.managers} />
+              )}
               {seasonHumanManager && (
                 <div className="panel season-pitch-panel">
                   <div className="panel-header">
@@ -3438,37 +3752,81 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                   />
                 </div>
               )}
-              <SeasonStatusPanel season={season} />
-              {season.results.some((result) => result.homeId === "human" || result.awayId === "human") && (
-                <SeasonResultsList season={season} managers={season.managers} />
-              )}
               {seasonDisplayManagers.some((manager) => manager.injuredPlayerIds.length > 0 || manager.suspendedPlayerIds.length > 0) && (
                 <InjuryPanel managers={seasonDisplayManagers} />
               )}
             </div>
           </div>
+          )}
         </section>
       )}
 
       {view === "play" && phase === "complete" && league && (
         <section className="layout-grid complete-grid">
           <div className="panel intro-panel">
-            <p className="eyebrow">League complete</p>
-            <h2>{humanStanding ? `${humanStanding.points} points from five games` : "Final whistle"}</h2>
-            <p>Your Mini League points and any league win now count toward separate leaderboards.</p>
-            <ResultSyncNotice
-              status={resultSyncStatus}
-              message={resultSyncMessage}
-              onRetry={retryCompletedResultSync}
-            />
+            <div className={`season-event-card${humanLeaguePosition === 1 ? " active" : ""}`}>
+              <div className="panel-header">
+                <div>
+                  <p className="eyebrow">Mini League complete</p>
+                  <h2 className="completion-heading" tabIndex={-1}>
+                    {humanStanding
+                      ? humanLeaguePosition === 1
+                        ? "Mini League champions"
+                        : `${ordinal(humanLeaguePosition)}-place finish`
+                      : "Final whistle"}
+                  </h2>
+                </div>
+                {humanLeaguePosition === 1
+                  ? <Trophy size={48} aria-hidden="true" />
+                  : <ShieldCheck size={48} aria-hidden="true" />}
+              </div>
+              <p>
+                {humanStanding ? `${humanStanding.points} points from five games. ` : ""}
+                Your result now counts toward the Mini League leaderboards.
+              </p>
+            </div>
             <div className={`score-change-card${expertUnlockedThisRun ? " unlocked" : ""}`}>
               <div>
-                <span>Manager score</span>
-                <strong>{managerScore}</strong>
+                <span>Finish</span>
+                <strong>{humanStanding ? `${ordinal(humanLeaguePosition)} / ${standings.length}` : "—"}</strong>
               </div>
               <div>
-                <span>This league</span>
-                <strong>{lastScoreDelta === null ? "0" : `${lastScoreDelta >= 0 ? "+" : ""}${lastScoreDelta}`}</strong>
+                <span>Record</span>
+                <strong>
+                  {humanStanding
+                    ? `${humanStanding.wins}W-${humanStanding.draws}D-${humanStanding.losses}L`
+                    : "—"}
+                </strong>
+              </div>
+              <div>
+                <span>Final-round move</span>
+                <strong>
+                  {(() => {
+                    const humanResults = league.results.filter(
+                      (result) => result.homeId === "human" || result.awayId === "human"
+                    );
+                    const latestRound = Math.max(...humanResults.map((result) => result.round));
+                    const previousIndex = computeStandings(
+                      league.managers,
+                      league.results.filter((result) => result.round < latestRound)
+                    ).findIndex((standing) => standing.managerId === "human");
+                    const previousPosition = previousIndex === -1 ? humanLeaguePosition : previousIndex + 1;
+                    const places = Math.abs(previousPosition - humanLeaguePosition);
+                    return previousPosition === humanLeaguePosition
+                      ? `Held #${humanLeaguePosition}`
+                      : previousPosition > humanLeaguePosition
+                        ? `↑ ${places} to #${humanLeaguePosition}`
+                        : `↓ ${places} to #${humanLeaguePosition}`;
+                  })()}
+                </strong>
+              </div>
+              <div>
+                <span>Manager score</span>
+                <strong>
+                  {lastScoreDelta === null
+                    ? managerScore
+                    : `${managerScore} (${lastScoreDelta >= 0 ? "+" : ""}${lastScoreDelta})`}
+                </strong>
               </div>
               <p>
                 {expertUnlockedThisRun
@@ -3478,11 +3836,11 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                     : `${Math.max(0, EXPERT_SCORE_THRESHOLD - managerScore)} score to expert mode.`}
               </p>
             </div>
+            <button className="primary-button wide" type="button" onClick={startAnotherRun}>
+              <Shuffle size={18} />
+              Build another squad
+            </button>
             <div className="complete-actions">
-              <button className="primary-button" type="button" onClick={startAnotherRun}>
-                <Shuffle size={18} />
-                Build another squad
-              </button>
               <button className="secondary-button" type="button" onClick={startExhibition} disabled={!dataReady}>
                 <Users size={18} />
                 Community exhibition
@@ -3499,39 +3857,85 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                 }
               />
             </div>
+            <ResultSyncNotice
+              status={resultSyncStatus}
+              message={resultSyncMessage}
+              onRetry={retryCompletedResultSync}
+            />
           </div>
-          <StandingsPanel standings={standings} />
+          <StandingsPanel standings={standings} managers={league.managers} eyebrow="Mini League" title="Final table" />
         </section>
       )}
 
       {view === "play" && phase === "invincible_complete" && season && (
         <section className="layout-grid complete-grid">
           <div className="panel intro-panel">
-            <p className="eyebrow">Be Invincible complete</p>
-            <h2>
-              {seasonHumanStanding?.losses === 0
-                ? season.officialAward && season.awardProduction !== false
-                  ? "Official Invincible run awarded"
-                  : "Unbeaten, but not an official assigned run"
-                : `${seasonHumanStanding?.losses ?? 0} loss${seasonHumanStanding?.losses === 1 ? "" : "es"} ended the dream`}
-            </h2>
-            <p>
-              Final record: {seasonHumanStanding?.wins ?? 0}W-{seasonHumanStanding?.draws ?? 0}D-{seasonHumanStanding?.losses ?? 0}L,
-              {" "}{seasonHumanStanding?.points ?? 0} points, GD {seasonHumanStanding?.goalDifference ?? 0}.
-            </p>
-            <ResultSyncNotice
-              status={resultSyncStatus}
-              message={resultSyncMessage}
-              onRetry={retryCompletedResultSync}
-            />
+            <div
+              className={`season-event-card${seasonHumanStanding?.losses === 0 ? " active" : ""}`}
+            >
+              <div className="panel-header">
+                <div>
+                  <p className="eyebrow">Be Invincible complete</p>
+                  <h2 className="completion-heading" tabIndex={-1}>
+                    {seasonHumanStanding?.losses === 0
+                      ? season.officialAward && season.awardProduction !== false
+                        ? "Official Invincible run awarded"
+                        : "An unbeaten season"
+                      : humanSeasonPosition === 1
+                        ? "League champions — the unbeaten dream ended"
+                        : `${ordinal(humanSeasonPosition)} place — the unbeaten dream ended`}
+                  </h2>
+                </div>
+                <ShieldCheck size={48} aria-hidden="true" />
+              </div>
+              <p>
+                {seasonHumanStanding?.losses === 0
+                  ? "You survived all 38 matches without defeat."
+                  : `${seasonHumanStanding?.losses ?? 0} loss${seasonHumanStanding?.losses === 1 ? "" : "es"}, but the final table still tells the full story.`}
+              </p>
+            </div>
             <div className={`score-change-card${season.officialAward && season.awardProduction !== false ? " unlocked" : ""}`}>
               <div>
-                <span>Unbeaten</span>
-                <strong>{seasonHumanStanding?.losses === 0 ? "Yes" : "No"}</strong>
+                <span>Finish</span>
+                <strong>{seasonHumanStanding ? `${ordinal(humanSeasonPosition)} / ${seasonStandings.length}` : "—"}</strong>
               </div>
               <div>
-                <span>Team talks</span>
-                <strong>{season.boostsUsed}/{INVINCIBLE_TEAM_TALK_LIMIT}</strong>
+                <span>Record</span>
+                <strong>
+                  {seasonHumanStanding
+                    ? `${seasonHumanStanding.wins}W-${seasonHumanStanding.draws}D-${seasonHumanStanding.losses}L`
+                    : "—"}
+                </strong>
+              </div>
+              <div>
+                <span>Final-round move</span>
+                <strong>
+                  {(() => {
+                    const humanResults = season.results.filter(
+                      (result) => result.homeId === "human" || result.awayId === "human"
+                    );
+                    const latestRound = Math.max(...humanResults.map((result) => result.round));
+                    const previousIndex = computeStandings(
+                      season.managers,
+                      season.results.filter((result) => result.round < latestRound)
+                    ).findIndex((standing) => standing.managerId === "human");
+                    const previousPosition = previousIndex === -1 ? humanSeasonPosition : previousIndex + 1;
+                    const places = Math.abs(previousPosition - humanSeasonPosition);
+                    return previousPosition === humanSeasonPosition
+                      ? `Held #${humanSeasonPosition}`
+                      : previousPosition > humanSeasonPosition
+                        ? `↑ ${places} to #${humanSeasonPosition}`
+                        : `↓ ${places} to #${humanSeasonPosition}`;
+                  })()}
+                </strong>
+              </div>
+              <div>
+                <span>Points · GD</span>
+                <strong>
+                  {seasonHumanStanding
+                    ? `${seasonHumanStanding.points} · ${seasonHumanStanding.goalDifference >= 0 ? "+" : ""}${seasonHumanStanding.goalDifference}`
+                    : "—"}
+                </strong>
               </div>
               <p>
                 {season.officialAward && season.awardProduction !== false
@@ -3540,13 +3944,14 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                     ? "This was an unbeaten season, but official Invincible awards are only granted to randomly assigned attempts."
                     : "Only unbeaten seasons can qualify for the official Invincible award."}
                 {season.awardProduction === false ? " Local fallback mode was used, so production awards require the server gate." : ""}
+                {` Team talks used: ${season.boostsUsed}/${INVINCIBLE_TEAM_TALK_LIMIT}.`}
               </p>
             </div>
+            <button className="primary-button wide" type="button" onClick={startAnotherRun}>
+              <Shuffle size={18} />
+              Build another squad
+            </button>
             <div className="complete-actions">
-              <button className="primary-button" type="button" onClick={startAnotherRun}>
-                <Shuffle size={18} />
-                Build another squad
-              </button>
               <button className="secondary-button" type="button" onClick={startSeasonExhibition} disabled={!dataReady}>
                 <Users size={18} />
                 Community exhibition
@@ -3563,8 +3968,13 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                 }
               />
             </div>
+            <ResultSyncNotice
+              status={resultSyncStatus}
+              message={resultSyncMessage}
+              onRetry={retryCompletedResultSync}
+            />
           </div>
-          <StandingsPanel standings={seasonStandings} eyebrow="Be Invincible" title="Final table" />
+          <StandingsPanel standings={seasonStandings} managers={season.managers} eyebrow="Be Invincible" title="Final table" />
         </section>
       )}
 
@@ -3585,7 +3995,13 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
               homeGoals={exhibitionHomeGoals}
               awayGoals={exhibitionAwayGoals}
             />
-            <div className="commentary-log" aria-live="polite" ref={exhibitionCommentaryRef}>
+            <div
+              className="commentary-log"
+              role="log"
+              aria-live={exhibitionPlaying ? "polite" : "off"}
+              aria-relevant="additions"
+              ref={exhibitionCommentaryRef}
+            >
               {exhibitionEvents.map((event) => (
                 <div
                   className={`commentary-line${event.code === "goal" ? " goal-flash" : event.code === "red_card" ? " red-flash" : ""}`}
@@ -3606,6 +4022,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                     key={speed}
                     type="button"
                     className={matchSpeed === speed ? "active" : ""}
+                    aria-pressed={matchSpeed === speed}
                     onClick={() => setMatchSpeed(speed)}
                   >
                     {speed}x
@@ -3765,10 +4182,18 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                 <p>{copy.signInCopy}</p>
                 <div className="auth-x-choice">
                   <span>{copy.xLoginRecommended}</span>
-                  <button className="primary-button wide auth-x-primary" type="button" onClick={signInWithX}>
+                  <button
+                    className="primary-button wide auth-x-primary"
+                    type="button"
+                    onClick={signInWithX}
+                    disabled={phase !== "setup" && phase !== "draft"}
+                  >
                     <XLogo size={18} />
                     {copy.xLogin}
                   </button>
+                  {phase !== "setup" && phase !== "draft" && (
+                    <small>Use email sign-in during an active run. X sign-in returns between runs so your season stays safe.</small>
+                  )}
                 </div>
                 <p className="auth-divider"><span>{copy.emailLoginDivider}</span></p>
                 <form className="auth-stack" onSubmit={signInWithPassword}>
@@ -4137,18 +4562,34 @@ function MatchHeader({
   awayGoals: number;
   flashing?: boolean;
 }) {
+  const homeTeamCode = home?.picks.find((pick) => pick.target !== "SUB")?.teamCode ?? home?.id ?? "HOME";
+  const awayTeamCode = away?.picks.find((pick) => pick.target !== "SUB")?.teamCode ?? away?.id ?? "AWAY";
   return (
     <div className="scoreboard">
-      <div>
-        <span>{managerSourceLabel(home)}</span>
-        <strong>{home?.displayName}</strong>
+      <div className="scoreboard-team is-home">
+        <TeamBadge
+          teamCode={homeTeamCode}
+          teamName={home?.displayName}
+          monogram={home?.kind === "human" ? "YOU" : undefined}
+        />
+        <div className="scoreboard-team-copy">
+          <span>{managerSourceLabel(home)}</span>
+          <strong>{home?.displayName}</strong>
+        </div>
       </div>
       <div className={`score${flashing ? " flashing" : ""}`}>
         {started ? `${homeGoals} – ${awayGoals}` : "v"}
       </div>
-      <div>
-        <span>{managerSourceLabel(away)}</span>
-        <strong>{away?.displayName}</strong>
+      <div className="scoreboard-team is-away">
+        <TeamBadge
+          teamCode={awayTeamCode}
+          teamName={away?.displayName}
+          monogram={away?.kind === "human" ? "YOU" : undefined}
+        />
+        <div className="scoreboard-team-copy">
+          <span>{managerSourceLabel(away)}</span>
+          <strong>{away?.displayName}</strong>
+        </div>
       </div>
     </div>
   );
@@ -4164,15 +4605,18 @@ function managerSourceLabel(manager?: ManagerSquad): string {
 
 function StandingsPanel({
   standings,
+  managers,
   eyebrow = "Historical league",
   title = "Standings",
   scrollable = false
 }: {
   standings: ReturnType<typeof computeStandings>;
+  managers?: ManagerSquad[];
   eyebrow?: string;
   title?: string;
   scrollable?: boolean;
 }) {
+  const managerByStandingId = new Map(managers?.map((manager) => [manager.id, manager]) ?? []);
   return (
     <div className={`panel table-panel${scrollable ? " scrollable-table-panel" : ""}`}>
       <div className="panel-header">
@@ -4184,16 +4628,28 @@ function StandingsPanel({
       </div>
       <div className="table">
         <div className="table-row table-head">
+          <span>#</span>
           <span>Club</span>
           <span>P</span>
           <span>GD</span>
           <span>Pts</span>
         </div>
-        {standings.map((standing) => {
+        {standings.map((standing, index) => {
           const isYou = standing.managerId === "human";
+          const manager = managerByStandingId.get(standing.managerId);
+          const teamCode = isYou
+            ? "YOU"
+            : manager?.picks.find((pick) => pick.target !== "SUB")?.teamCode ?? manager?.picks[0]?.teamCode ?? standing.managerId;
           return (
             <div className={`table-row${isYou ? " is-you" : ""}`} key={standing.managerId}>
+              <span className="table-position">{index + 1}</span>
               <strong>
+                <TeamBadge
+                  teamCode={teamCode}
+                  teamName={standing.displayName}
+                  monogram={isYou ? "FR" : undefined}
+                  small
+                />
                 <span className="table-name">{standing.displayName}</span>
                 {isYou ? <span className="you-tag">YOU</span> : null}
               </strong>
@@ -4224,22 +4680,21 @@ function InjuryPanel({ managers }: { managers: ManagerSquad[] }) {
     }))
   );
   const all = [...injuries, ...suspensions];
+  if (all.length === 0) {
+    return null;
+  }
   return (
     <div className="panel injury-panel">
       <p className="eyebrow">Medical room</p>
-      {all.length === 0 ? (
-        <p className="muted">No injuries yet.</p>
-      ) : (
-        all.slice(0, 10).map(({ manager, pick, type }) => (
-          <div className="injury-row" key={`${manager.id}-${pick?.player.i}-${type}`}>
-            <span>{manager.displayName}</span>
-            <strong className={type === "suspended" ? "suspended-label" : "injury-label"}>
-              {type === "suspended" ? <span className="status-icon suspended-icon">🟥</span> : <HeartPulse size={14} className="status-icon injury-icon" />}
-              {pick?.player.n}
-            </strong>
-          </div>
-        ))
-      )}
+      {all.slice(0, 10).map(({ manager, pick, type }) => (
+        <div className="injury-row" key={`${manager.id}-${pick?.player.i}-${type}`}>
+          <span>{manager.displayName}</span>
+          <strong className={type === "suspended" ? "suspended-label" : "injury-label"}>
+            {type === "suspended" ? <span className="status-icon suspended-icon">🟥</span> : <HeartPulse size={14} className="status-icon injury-icon" />}
+            {pick?.player.n}
+          </strong>
+        </div>
+      ))}
     </div>
   );
 }
@@ -4327,6 +4782,7 @@ function SeasonPreMatchPanel({
   opponent,
   human,
   humanStanding,
+  humanPosition,
   decision,
   season,
   teamTalkActive,
@@ -4353,6 +4809,7 @@ function SeasonPreMatchPanel({
   opponent?: ManagerSquad;
   human: ManagerSquad;
   humanStanding?: ReturnType<typeof computeStandings>[number];
+  humanPosition: number;
   decision: SeasonPregameDecision | null;
   season: InvincibleSeason;
   teamTalkActive: boolean;
@@ -4400,9 +4857,57 @@ function SeasonPreMatchPanel({
         (!usedSubIds.has(pick.player.i) || pick.player.i === selectedForStarter)
     );
   };
-  const latestHumanResult = season.results
-    .filter((result) => result.homeId === "human" || result.awayId === "human")
+  const healthyHumanOverall = calculateSquadStrength({
+    ...human,
+    injuredPlayerIds: [],
+    suspendedPlayerIds: [],
+    substitutions: {}
+  }).overall;
+  const projectedReplacementOverall = (starterId: number, substituteId: number) =>
+    calculateSquadStrength({
+      ...human,
+      substitutions: { ...human.substitutions, [starterId]: substituteId }
+    }).overall;
+  const humanResults = season.results.filter(
+    (result) => result.homeId === "human" || result.awayId === "human"
+  );
+  const humanOutcomes = humanResults.map((result) => {
+    const humanGoals = result.homeId === "human" ? result.homeGoals : result.awayGoals;
+    const opponentGoals = result.homeId === "human" ? result.awayGoals : result.homeGoals;
+    return humanGoals > opponentGoals ? "W" : humanGoals === opponentGoals ? "D" : "L";
+  });
+  const firstLossIndex = humanOutcomes.indexOf("L");
+  const unbeatenAlive = firstLossIndex === -1;
+  const openingUnbeatenRun = unbeatenAlive ? humanOutcomes.length : firstLossIndex;
+  const seasonMatchesRemaining = Math.max(0, season.rounds.length - humanOutcomes.length);
+  const latestForm = humanOutcomes.slice(-5);
+  const latestHumanResult = humanResults.slice(-1)[0];
+  const latestOutcome = humanOutcomes.slice(-1)[0];
+  const latestWasFirstLoss = latestOutcome === "L" && humanOutcomes.slice(0, -1).every((outcome) => outcome !== "L");
+  const latestCasualty = latestHumanResult?.events
+    .filter(
+      (event) => event.teamId === "human" && (event.code === "injury" || event.code === "red_card")
+    )
     .slice(-1)[0];
+  const latestCasualtyGames = latestCasualty?.playerId === undefined
+    ? 0
+    : latestCasualty.code === "red_card"
+      ? season.suspensionGamesByPlayerId[latestCasualty.playerId] ?? 0
+      : season.injuryGamesByPlayerId[latestCasualty.playerId] ?? 0;
+  const turningPointTitle = latestCasualty
+    ? latestCasualty.code === "red_card"
+      ? `${latestCasualty.playerName ?? "A player"} saw red`
+      : `${latestCasualty.playerName ?? "A player"} left injured`
+    : latestWasFirstLoss
+      ? openingUnbeatenRun > 0
+        ? `${openingUnbeatenRun}-match unbeaten run ended`
+        : "The Invincible bid ended on Match 1"
+      : null;
+  const turningPointDetail = latestCasualty
+    ? `${latestCasualtyGames > 0 ? `Out for ${latestCasualtyGames} match${latestCasualtyGames === 1 ? "" : "es"}. ` : ""}${latestWasFirstLoss ? "The unbeaten run also ended, but the title chase is still alive. " : ""}Auto-play paused so you can reset the XI.`
+    : latestWasFirstLoss
+      ? "Auto-play paused. The league title and a new winning run are still there to chase."
+      : "";
   const latestSummary = latestHumanResult
     ? {
         opponentId: latestHumanResult.homeId === "human" ? latestHumanResult.awayId : latestHumanResult.homeId,
@@ -4447,7 +4952,34 @@ function SeasonPreMatchPanel({
               Last result · {latestSummary.humanGoals}–{latestSummary.opponentGoals} · {season.managers.find((manager) => manager.id === latestSummary.opponentId)?.displayName ?? latestSummary.opponentId}
             </small>
           )}
-          <div className="next-game-status" role="status" aria-live="polite">
+          <div className={`invincible-run-rail${unbeatenAlive ? " is-alive" : " is-recovery"}`}>
+            <div className="invincible-run-copy">
+              <span>{unbeatenAlive ? "Invincible run" : "Next target"}</span>
+              <strong>
+                {unbeatenAlive
+                  ? humanOutcomes.length === 0
+                    ? "38 matches. One clean slate."
+                    : `${humanOutcomes.length} unbeaten · ${seasonMatchesRemaining} to go`
+                  : openingUnbeatenRun > 0
+                    ? `Run ended at ${openingUnbeatenRun} · now #${humanPosition}`
+                    : `Reset the story · now #${humanPosition}`}
+              </strong>
+            </div>
+            <div className="invincible-form" aria-label={`Last five: ${latestForm.length > 0 ? latestForm.join(", ") : "no results yet"}`}>
+              {latestForm.length > 0
+                ? latestForm.map((outcome, index) => (
+                    <span className={`outcome-${outcome.toLowerCase()}`} key={`${outcome}-${index}`}>{outcome}</span>
+                  ))
+                : <span className="outcome-pending">–</span>}
+            </div>
+            <span className="invincible-progress" aria-hidden="true">
+              <span style={{ width: `${(humanOutcomes.length / season.rounds.length) * 100}%` }} />
+            </span>
+          </div>
+          <div className="next-game-status">
+            <span className="visually-hidden" aria-live="polite">
+              {autoplayStatus === "running" ? "Auto-play active." : autoplayMessage}
+            </span>
             {autoplayStatus === "running" ? (
               <span className="next-game-countdown">
                 <span>{countdownPrefix}</span>
@@ -4460,8 +4992,26 @@ function SeasonPreMatchPanel({
         <div className="next-game-actions">
           <button className="primary-button season-next-button" type="button" onClick={onStart} disabled={!canStart}>
             <Play size={18} />
-            {autoplayStatus === "failed" ? copy.retry : autoplayStatus === "saving" ? "Saving…" : copy.startNow}
+            {autoplayStatus === "failed"
+              ? copy.retry
+              : autoplayStatus === "saving"
+                ? "Saving…"
+                : humanOutcomes.length === 0 && autoplayPaused
+                  ? "Kick off season"
+                  : copy.startNow}
           </button>
+          {teamTalkAvailable && !teamTalkActive && (
+            <button className="secondary-button" type="button" onClick={onUseTeamTalk} title="Use your one-match boost for this half of the season">
+              <Sparkles size={16} />
+              Use team talk
+            </button>
+          )}
+          {teamTalkActive && (
+            <button className="secondary-button team-talk-active" type="button" onClick={onSkipTeamTalk}>
+              <Sparkles size={16} />
+              Team talk active · cancel
+            </button>
+          )}
           {autoplayStatus !== "failed" && autoplayStatus !== "saving" && autoplayStatus !== "complete" && (
             <button className="secondary-button" type="button" onClick={onToggleAutoplay}>
               {autoplayPaused ? <Play size={16} /> : <Pause size={16} />}
@@ -4484,6 +5034,13 @@ function SeasonPreMatchPanel({
           <span>Pts </span>{humanStanding?.points ?? 0}
         </div>
       </div>
+
+      {turningPointTitle && (
+        <div className="season-event-card danger season-turning-point">
+          <strong>{turningPointTitle}</strong>
+          <p>{turningPointDetail}</p>
+        </div>
+      )}
 
       {decision?.trainingInjury && (
         <div className="season-event-card danger">
@@ -4510,18 +5067,23 @@ function SeasonPreMatchPanel({
                     {options.length === 0 ? (
                       <p className="fine-print">No available substitutes.</p>
                     ) : (
-                      options.map((pick) => (
-                        <button
-                          key={pick.player.i}
-                          className={`sub-option${selectedSubId === pick.player.i ? " assistant-pick" : ""}`}
-                          type="button"
-                          onClick={() => onChooseSub(starter.player.i, pick.player.i)}
-                        >
-                          <span className="sub-option-num">{pick.player.num}</span>
-                          <span className="sub-option-name">{pick.player.n.split(/[\s.]+/).filter(Boolean).slice(-1)[0]}</span>
-                          <span className="sub-option-pos">{pick.benchRole ?? pick.player.p[0]}</span>
-                        </button>
-                      ))
+                      options.map((pick) => {
+                        const projectedOverall = projectedReplacementOverall(starter.player.i, pick.player.i);
+                        const strengthDelta = Math.round(projectedOverall - healthyHumanOverall);
+                        return (
+                          <button
+                            key={pick.player.i}
+                            className={`sub-option${selectedSubId === pick.player.i ? " assistant-pick" : ""}`}
+                            type="button"
+                            onClick={() => onChooseSub(starter.player.i, pick.player.i)}
+                          >
+                            <span className="sub-option-num">{pick.player.num}</span>
+                            <span className="sub-option-name">{pick.player.n.split(/[\s.]+/).filter(Boolean).slice(-1)[0]}</span>
+                            <span className="sub-option-pos">{pick.benchRole ?? pick.player.p[0]}</span>
+                            <span className="sub-option-impact">XI {Math.round(projectedOverall)} · {strengthDelta >= 0 ? "+" : ""}{strengthDelta}</span>
+                          </button>
+                        );
+                      })
                     )}
                   </div>
                 </div>
@@ -4558,27 +5120,11 @@ function SeasonPreMatchPanel({
         </div>
       )}
 
-      <div className={`season-event-card${teamTalkActive ? " active" : ""}`}>
-        <strong>Team talk</strong>
-        <p>
-          {teamTalkActive
-            ? "One-match boost active. It helps, but it will not force a win."
-            : teamTalkAvailable
-              ? `Available for the ${talkHalf === "first" ? "first" : "second"} half of the season. You get one team talk per half.`
-              : `The ${talkHalf === "first" ? "first" : "second"}-half team talk has already been used.`}
-        </p>
-        <div className="match-actions inline-actions">
-          <button className="secondary-button" type="button" onClick={onUseTeamTalk} disabled={teamTalkActive || !teamTalkAvailable}>
-            <Sparkles size={16} />
-            Use team talk
-          </button>
-          {teamTalkActive && (
-            <button className="secondary-button" type="button" onClick={onSkipTeamTalk}>
-              Cancel
-            </button>
-          )}
-        </div>
-      </div>
+      <p className="season-team-talk-note">
+        {teamTalkAvailable
+          ? `One team talk is available in the ${talkHalf === "first" ? "first" : "second"} half. Use it from the match controls above.`
+          : `The ${talkHalf === "first" ? "first" : "second"}-half team talk has been used.`}
+      </p>
     </div>
   );
 }
@@ -4590,7 +5136,7 @@ function SeasonResultsList({ season, managers }: { season: InvincibleSeason; man
     .reverse();
   const managerById = new Map(managers.map((manager) => [manager.id, manager]));
   return (
-    <div className="season-results">
+    <div className="panel season-results">
       <div className="panel-header compact-header">
         <div>
           <p className="eyebrow">Results</p>
@@ -4606,11 +5152,21 @@ function SeasonResultsList({ season, managers }: { season: InvincibleSeason; man
             const humanGoals = result.homeId === "human" ? result.homeGoals : result.awayGoals;
             const opponentGoals = result.homeId === "human" ? result.awayGoals : result.homeGoals;
             const outcome = humanGoals > opponentGoals ? "W" : humanGoals === opponentGoals ? "D" : "L";
+            const incident = result.events.find(
+              (event) => event.teamId === "human" && (event.code === "injury" || event.code === "red_card")
+            );
             return (
               <div className={`season-result-row outcome-${outcome.toLowerCase()}`} key={result.fixtureId}>
                 <span>{outcome}</span>
                 <strong>{humanGoals} – {opponentGoals}</strong>
-                <small>{managerById.get(opponentId)?.displayName ?? opponentId}</small>
+                <div className="season-result-meta">
+                  <small>{managerById.get(opponentId)?.displayName ?? opponentId}</small>
+                  {incident && (
+                    <span className={`season-result-incident ${incident.code}`}>
+                      {incident.code === "red_card" ? "Red" : "Injury"} · {incident.playerName ?? "Player"}
+                    </span>
+                  )}
+                </div>
               </div>
             );
           })}
@@ -4623,6 +5179,12 @@ function SeasonResultsList({ season, managers }: { season: InvincibleSeason; man
 function SeasonStatusPanel({ season }: { season: InvincibleSeason }) {
   const standings = computeStandings(season.managers, season.results);
   const human = standings.find((standing) => standing.managerId === "human");
+  const humanResults = season.results.filter((result) => result.homeId === "human" || result.awayId === "human");
+  const firstLossIndex = humanResults.findIndex((result) => {
+    const humanGoals = result.homeId === "human" ? result.homeGoals : result.awayGoals;
+    const opponentGoals = result.homeId === "human" ? result.awayGoals : result.homeGoals;
+    return humanGoals < opponentGoals;
+  });
   const injuries = Object.entries(season.injuryGamesByPlayerId).filter(([, games]) => games > 0);
   const suspensions = Object.entries(season.suspensionGamesByPlayerId).filter(([, games]) => games > 0);
   return (
@@ -4634,8 +5196,12 @@ function SeasonStatusPanel({ season }: { season: InvincibleSeason }) {
           <strong>{human ? `${human.wins}-${human.draws}-${human.losses}` : "0-0-0"}</strong>
         </div>
         <div>
-          <span>Unbeaten</span>
-          <strong>{(human?.losses ?? 0) === 0 ? "Alive" : "Gone"}</strong>
+          <span>{firstLossIndex === -1 ? "Invincible run" : "Unbeaten peak"}</span>
+          <strong>
+            {firstLossIndex === -1
+              ? `${humanResults.length}/38`
+              : `${firstLossIndex} match${firstLossIndex === 1 ? "" : "es"}`}
+          </strong>
         </div>
         <div>
           <span>Team talks</span>
@@ -4834,7 +5400,8 @@ function PersonalProgressScreen({
   expertUnlocked,
   profile,
   isAdmin,
-  locale
+  locale,
+  onSignOut
 }: {
   records: LeaderboardRecord[];
   managerScore: number;
@@ -4842,6 +5409,7 @@ function PersonalProgressScreen({
   profile: LocalProfile | null;
   isAdmin: boolean;
   locale: string;
+  onSignOut: () => void | Promise<void>;
 }) {
   const personalRecords = records.filter((record) => record.kind === "human");
   const miniRecords = personalRecords.filter((record) => record.competitionMode !== "invincible");
@@ -4877,20 +5445,6 @@ function PersonalProgressScreen({
           </div>
           <Activity size={22} />
         </div>
-
-        {profile && !profile.demo ? (
-          <MyHomeAccount
-            locale={locale}
-            isAdmin={isAdmin}
-            publicName={profile.displayName}
-            email={profile.email}
-          />
-        ) : (
-          <div className="personal-card">
-            <p className="eyebrow">Save your story</p>
-            <p className="muted">Sign in to track visits, active play time, mode history and optional football preferences across devices.</p>
-          </div>
-        )}
 
         <div className="personal-hero">
           <div>
@@ -4966,6 +5520,42 @@ function PersonalProgressScreen({
             </div>
           )}
         </div>
+
+        {profile && !profile.demo ? (
+          <details className="account-settings-disclosure">
+            <summary>
+              <div>
+                <span>Account & preferences</span>
+                <small>{profile.displayName} · identity, notifications and data controls</small>
+              </div>
+              <ChevronRight size={20} aria-hidden="true" />
+            </summary>
+            <MyHomeAccount
+              locale={locale}
+              isAdmin={isAdmin}
+              publicName={profile.displayName}
+              email={profile.email}
+            />
+          </details>
+        ) : profile?.demo ? (
+          <div className="personal-card demo-account-card">
+            <div>
+              <p className="eyebrow">Local demo profile</p>
+              <strong>{profile.displayName}</strong>
+              <p className="muted">Saved on this device only. Sign out to test another account or return to guest play.</p>
+            </div>
+            <button className="secondary-button" type="button" onClick={() => void onSignOut()}>
+              Sign out
+            </button>
+          </div>
+        ) : (
+          <div className="personal-card personal-sign-in-card">
+            <div>
+              <p className="eyebrow">Save your story</p>
+              <p className="muted">Sign in to keep your football career and preferences across devices.</p>
+            </div>
+          </div>
+        )}
       </div>
     </section>
   );

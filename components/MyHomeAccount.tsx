@@ -71,6 +71,7 @@ export default function MyHomeAccount({
   const experienceCopy = getProfileExperienceCopy(locale);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [saving, setSaving] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
   const [toast, setToast] = useState<SaveToast | null>(null);
   const [preferences, setPreferences] = useState({
     countryCode: "",
@@ -197,8 +198,29 @@ export default function MyHomeAccount({
   }
 
   async function signOut() {
-    await getSupabaseBrowserClient()?.auth.signOut();
-    window.location.assign(`/${locale}`);
+    setSigningOut(true);
+    try {
+      const supabase = getSupabaseBrowserClient();
+      const { error } = (await supabase?.auth.signOut()) ?? { error: null };
+      if (error) {
+        setToast({
+          kind: "error",
+          title: "Sign-out failed",
+          body: "Your session is still active. Check your connection and try again."
+        });
+        return;
+      }
+      window.localStorage.removeItem("footyrush.profile");
+      window.location.assign(`/${locale}`);
+    } catch {
+      setToast({
+        kind: "error",
+        title: "Sign-out failed",
+        body: "Your session is still active. Check your connection and try again."
+      });
+    } finally {
+      setSigningOut(false);
+    }
   }
 
   const activity = summary?.activity;
@@ -231,8 +253,8 @@ export default function MyHomeAccount({
                 <Database size={16} /> User database
               </a>
             )}
-            <button className="secondary-button" type="button" onClick={signOut}>
-              <LogOut size={16} /> Sign out
+            <button className="secondary-button" type="button" onClick={signOut} disabled={signingOut}>
+              <LogOut size={16} /> {signingOut ? "Signing out…" : "Sign out"}
             </button>
           </div>
         </section>

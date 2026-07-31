@@ -3,8 +3,28 @@ import {
   getInvincibleAttentionReason,
   getInvincibleAutoplayStatus,
   invincibleAutoplayTimerKey,
-  scheduleInvincibleCountdown
+  scheduleInvincibleCountdown,
+  shouldPauseAfterInvincibleResult
 } from "@/lib/game/invincible-autoplay";
+import type { FixtureResult } from "@/lib/game/types";
+
+function result(overrides: Partial<FixtureResult> = {}): FixtureResult {
+  return {
+    fixtureId: "fixture",
+    round: 1,
+    homeId: "human",
+    awayId: "opponent",
+    homeGoals: 1,
+    awayGoals: 0,
+    events: [],
+    homeInjuries: [],
+    awayInjuries: [],
+    homeRedCards: [],
+    awayRedCards: [],
+    playedAt: "2026-01-01T00:00:00.000Z",
+    ...overrides
+  };
+}
 
 afterEach(() => {
   vi.useRealTimers();
@@ -74,6 +94,62 @@ describe("Invincible autoplay", () => {
     expect(getInvincibleAutoplayStatus({ ...base, paused: true, attentionReason: "replacement" })).toBe("attention");
     expect(getInvincibleAutoplayStatus({ ...base, pending: true, error: "network" })).toBe("failed");
     expect(getInvincibleAutoplayStatus({ ...base, complete: true, error: "network" })).toBe("complete");
+  });
+
+  it("keeps the countdown stopped while a completed match is being presented", () => {
+    const base = {
+      complete: false,
+      hasNextMatch: true,
+      paused: false,
+      attentionReason: null,
+      pending: false,
+      presenting: true,
+      error: ""
+    } as const;
+
+    expect(getInvincibleAutoplayStatus(base)).toBe("presenting");
+    expect(getInvincibleAutoplayStatus({ ...base, hasNextMatch: false })).toBe("presenting");
+    expect(
+      getInvincibleAutoplayStatus({
+        ...base,
+        paused: true,
+        attentionReason: "replacement"
+      })
+    ).toBe("presenting");
+  });
+
+  it("keeps terminal, failure, and saving states ahead of presentation", () => {
+    const presenting = {
+      complete: false,
+      hasNextMatch: true,
+      paused: false,
+      attentionReason: null,
+      pending: false,
+      presenting: true,
+      error: ""
+    } as const;
+
+    expect(getInvincibleAutoplayStatus({ ...presenting, pending: true })).toBe("saving");
+    expect(getInvincibleAutoplayStatus({ ...presenting, error: "network" })).toBe("failed");
+    expect(getInvincibleAutoplayStatus({ ...presenting, complete: true })).toBe("complete");
+  });
+
+  it("pauses for the first loss and casualty aftermath, but not routine later losses", () => {
+    const win = result({ fixtureId: "win", homeGoals: 2, awayGoals: 0 });
+    const firstLoss = result({ fixtureId: "first-loss", homeGoals: 0, awayGoals: 1 });
+    const laterLoss = result({ fixtureId: "later-loss", homeGoals: 1, awayGoals: 3 });
+    const injuryWin = result({ fixtureId: "injury", homeInjuries: [42] });
+    const awayRed = result({
+      fixtureId: "away-red",
+      homeId: "opponent",
+      awayId: "human",
+      awayRedCards: [7]
+    });
+
+    expect(shouldPauseAfterInvincibleResult({ previousResults: [win], result: firstLoss })).toBe(true);
+    expect(shouldPauseAfterInvincibleResult({ previousResults: [firstLoss], result: laterLoss })).toBe(false);
+    expect(shouldPauseAfterInvincibleResult({ previousResults: [firstLoss], result: injuryWin })).toBe(true);
+    expect(shouldPauseAfterInvincibleResult({ previousResults: [win], result: awayRed })).toBe(true);
   });
 
   it("ticks visibly and elapses exactly once after three seconds", () => {

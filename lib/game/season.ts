@@ -12,10 +12,13 @@ export const INVINCIBLE_CONTENDER_XG_BONUS = 0.53;
 /** Keeps elite appointed managers valuable without letting their edge trivialize a 38-match title race. */
 export const INVINCIBLE_MANAGER_RATING_CAP = 75;
 export const SEASON_RED_CARD_SUSPENSION_GAMES = 3;
-/** Whole-season ceiling on human injuries + red cards combined; the actual count is a random 0..N. */
+/** Every full Invincible season contains at least this many human injuries + red cards. */
+export const INVINCIBLE_MIN_SEASON_CASUALTIES = 4;
+/** Whole-season ceiling on human injuries + red cards combined. */
 export const INVINCIBLE_MAX_SEASON_CASUALTIES = 5;
-/** Share of the season's casualties that are red cards rather than injuries. */
-export const INVINCIBLE_RED_CARD_SHARE = 0.18;
+/** Chance that each incident after the guaranteed red card is also a red card. */
+export const INVINCIBLE_RED_CARD_SHARE = 0.2;
+export const SEASON_OUT_OF_FORM_CHANCE = 0.06;
 /** Each season goal a player has scored multiplies how likely they are to be the casualty. */
 export const SEASON_CASUALTY_GOAL_WEIGHT = 2;
 /** Rating above this pivot adds a small "important player" tilt so key men are struck more often. */
@@ -192,9 +195,9 @@ export function invincibleContenderModifiers(
 }
 
 /**
- * Draws a whole-season casualty budget: a random 0..INVINCIBLE_MAX_SEASON_CASUALTIES injuries + red
- * cards, scattered across distinct matchdays so jeopardy is occasional rather than constant. Sometimes
- * returns an empty schedule (a lucky, casualty-free season).
+ * Builds a seeded incident arc across the playable portion of a season. One incident is drawn from each
+ * chronological stratum, the finale is kept clear, and full-size seasons leave at least two calm games
+ * between incidents. The incident deck always contains a red card; later cards remain possible but rare.
  */
 export function buildSeasonCasualtySchedule(params: {
   totalMatchdays: number;
@@ -202,16 +205,48 @@ export function buildSeasonCasualtySchedule(params: {
 }): Record<number, SeasonCasualtyKind> {
   const { totalMatchdays, rng } = params;
   const schedule: Record<number, SeasonCasualtyKind> = {};
-  if (totalMatchdays <= 0) {
+  const usableMatchdays = Math.max(0, totalMatchdays - 1);
+  if (usableMatchdays === 0) {
     return schedule;
   }
-  const count = Math.min(totalMatchdays, Math.floor(rng() * (INVINCIBLE_MAX_SEASON_CASUALTIES + 1)));
-  const matchdays = shuffle(
-    Array.from({ length: totalMatchdays }, (_, index) => index),
+
+  const desiredCount =
+    INVINCIBLE_MIN_SEASON_CASUALTIES +
+    Math.floor(rng() * (INVINCIBLE_MAX_SEASON_CASUALTIES - INVINCIBLE_MIN_SEASON_CASUALTIES + 1));
+  const unspacedCount = Math.min(usableMatchdays, desiredCount);
+  const maximumSpacedCount = Math.floor((usableMatchdays + 2) / 3);
+  // Preserve the incident minimum on very short seasons where recovery beats are impossible.
+  // Once four spaced incidents fit, cap a five-incident draw rather than abandoning spacing.
+  const count = maximumSpacedCount >= INVINCIBLE_MIN_SEASON_CASUALTIES
+    ? Math.min(unspacedCount, maximumSpacedCount)
+    : unspacedCount;
+  const minimumSpacedSpan = 1 + (count - 1) * 3;
+  const canLeaveTwoClearMatchdays = usableMatchdays >= minimumSpacedSpan;
+  const matchdays: number[] = [];
+
+  for (let index = 0; index < count; index += 1) {
+    const stratumStart = Math.floor((index * usableMatchdays) / count);
+    const stratumEnd = Math.floor(((index + 1) * usableMatchdays) / count) - 1;
+    const earliest = canLeaveTwoClearMatchdays
+      ? Math.max(stratumStart, (matchdays[index - 1] ?? -3) + 3)
+      : stratumStart;
+    const latest = canLeaveTwoClearMatchdays
+      ? Math.min(stratumEnd, usableMatchdays - 1 - (count - index - 1) * 3)
+      : stratumEnd;
+    matchdays.push(earliest + Math.floor(rng() * (latest - earliest + 1)));
+  }
+
+  const incidentDeck = shuffle<SeasonCasualtyKind>(
+    [
+      "redCard",
+      ...Array.from({ length: count - 1 }, () =>
+        rng() < INVINCIBLE_RED_CARD_SHARE ? ("redCard" as const) : ("injury" as const)
+      )
+    ],
     rng
-  ).slice(0, count);
-  for (const matchday of matchdays) {
-    schedule[matchday] = rng() < INVINCIBLE_RED_CARD_SHARE ? "redCard" : "injury";
+  );
+  for (let index = 0; index < matchdays.length; index += 1) {
+    schedule[matchdays[index]] = incidentDeck[index];
   }
   return schedule;
 }
@@ -302,11 +337,21 @@ export function seasonMissingRequiredSubstitutions(params: {
   suspensionGamesByPlayerId?: Record<number, number>;
 }): DraftPick[] {
   const unavailable = new Set(seasonUnavailablePlayerIds(params.injuryGamesByPlayerId, params.suspensionGamesByPlayerId ?? {}));
+  const benchIds = new Set(
+    params.human.picks
+      .filter((pick) => pick.target === "SUB")
+      .map((pick) => pick.player.i)
+  );
   const usedSubs = new Set<number>();
   const missing: DraftPick[] = [];
   seasonUnavailableStarters(params).forEach((starter) => {
     const chosenSubId = params.human.substitutions[starter.player.i];
-    if (!chosenSubId || unavailable.has(chosenSubId) || usedSubs.has(chosenSubId)) {
+    if (
+      !chosenSubId ||
+      !benchIds.has(chosenSubId) ||
+      unavailable.has(chosenSubId) ||
+      usedSubs.has(chosenSubId)
+    ) {
       missing.push(starter);
       return;
     }
@@ -337,6 +382,7 @@ export function createSeasonPregame(params: {
   human: ManagerSquad;
   matchday: number;
   injuryGamesByPlayerId: Record<number, number>;
+  suspensionGamesByPlayerId?: Record<number, number>;
   seed: string;
   trainingInjuryChance?: number;
   outOfFormChance?: number;
@@ -344,7 +390,10 @@ export function createSeasonPregame(params: {
   const rng = createRng(params.seed);
   const decision: SeasonPregameDecision = { matchday: params.matchday };
   const injuryGamesByPlayerId = { ...params.injuryGamesByPlayerId };
-  const unavailableBefore = new Set(seasonUnavailablePlayerIds(injuryGamesByPlayerId));
+  const suspensionGamesByPlayerId = params.suspensionGamesByPlayerId ?? {};
+  const unavailableBefore = new Set(
+    seasonUnavailablePlayerIds(injuryGamesByPlayerId, suspensionGamesByPlayerId)
+  );
   const starters = getStarterSlots(params.human.formationId)
     .map((slot) => params.human.picks.find((pick) => pick.slotId === slot.id))
     .filter((pick): pick is DraftPick => pick !== undefined && !unavailableBefore.has(pick.player.i));
@@ -365,11 +414,19 @@ export function createSeasonPregame(params: {
     };
   }
 
-  const unavailableAfter = new Set(seasonUnavailablePlayerIds(injuryGamesByPlayerId));
+  const unavailableAfter = new Set(
+    seasonUnavailablePlayerIds(injuryGamesByPlayerId, suspensionGamesByPlayerId)
+  );
   const availableStarters = starters.filter((pick) => !unavailableAfter.has(pick.player.i));
-  const hasBench = availableSeasonBench(params.human, injuryGamesByPlayerId).length > 0;
-  const outOfFormChance = params.outOfFormChance ?? 0;
-  if (availableStarters.length > 0 && hasBench && rng() < outOfFormChance) {
+  const hasBench =
+    availableSeasonBench(params.human, injuryGamesByPlayerId, [], suspensionGamesByPlayerId).length > 0;
+  const outOfFormChance = params.outOfFormChance ?? SEASON_OUT_OF_FORM_CHANCE;
+  if (
+    unavailableAfter.size === 0 &&
+    availableStarters.length > 0 &&
+    hasBench &&
+    rng() < outOfFormChance
+  ) {
     const pick = pickOne(availableStarters, rng);
     decision.outOfForm = {
       playerId: pick.player.i,
@@ -417,7 +474,7 @@ export function applySeasonFixtureInjuries(params: {
   const rng = createRng(params.seed);
   const injuryGamesByPlayerId = { ...params.injuryGamesByPlayerId };
   const newInjuries = injuredIds.map((playerId) => {
-    const games = 1 + Math.floor(rng() * 10);
+    const games = drawMatchInjuryDuration(rng);
     injuryGamesByPlayerId[playerId] = Math.max(injuryGamesByPlayerId[playerId] ?? 0, games);
     return {
       playerId,
@@ -426,6 +483,18 @@ export function applySeasonFixtureInjuries(params: {
     };
   });
   return { injuryGamesByPlayerId, newInjuries };
+}
+
+/** Most match injuries are short knocks; medium layoffs are occasional and long layoffs are rare. */
+function drawMatchInjuryDuration(rng: () => number): number {
+  const severity = rng();
+  if (severity < 0.7) {
+    return 1 + Math.floor(rng() * 3);
+  }
+  if (severity < 0.93) {
+    return 4 + Math.floor(rng() * 3);
+  }
+  return 7 + Math.floor(rng() * 4);
 }
 
 export interface SeasonSuspension {

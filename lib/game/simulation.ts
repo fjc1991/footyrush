@@ -1,6 +1,7 @@
 import { effectiveRating } from "./data";
 import { applyBoostToRating } from "./boosts";
 import { getStarterSlots } from "./formations";
+import { compareMatchEventsChronologically } from "./match-presentation";
 import { clamp, createRng, pickOne, weightedPick } from "./rng";
 import type { CasualtyDirective, DraftPick, Fixture, FixtureResult, FormationSlot, ManagerSquad, MatchEvent, Player, Standing } from "./types";
 
@@ -120,7 +121,7 @@ export function simulateFixture(params: {
   const homeRedCards = casualtyIds(homeOff, "redCard");
   const awayRedCards = casualtyIds(awayOff, "redCard");
   events.push(event(params.fixture.id, 90, "full_time", undefined, undefined, { homeGoals, awayGoals }));
-  events.sort((first, second) => first.second - second.second || first.id.localeCompare(second.id));
+  events.sort(compareMatchEventsChronologically);
   // A player can produce two otherwise-identical events (e.g. two goals in the same second);
   // suffix the sorted position so ids stay unique.
   const uniqueEvents = events.map((entry, index) => ({ ...entry, id: `${entry.id}-${index}` }));
@@ -229,7 +230,7 @@ function getActiveStarters(manager: ManagerSquad): ActivePlayer[] {
     const chosenSubId = manager.substitutions[starter.player.i];
     const chosenSub =
       chosenSubId && !out.includes(chosenSubId) && !usedReplacementIds.has(chosenSubId)
-        ? manager.picks.find((pick) => pick.player.i === chosenSubId) ?? null
+        ? manager.picks.find((pick) => pick.player.i === chosenSubId && pick.target === "SUB") ?? null
         : null;
     const replacement = chosenSub ?? selectBestSub(manager.picks, slot.target, [...out, ...usedReplacementIds]);
     if (replacement) {
@@ -302,7 +303,10 @@ function determineCasualties(
     if (eligible.length > 0) {
       const { entry, slot } = pickOne(eligible, rng);
       const second = 20 + Math.floor(rng() * 61);
-      const sub = selectBestSub(manager.picks, slot.target, [...out, entry.pick.player.i]);
+      const activePlayerIds = active.flatMap((activePlayer) =>
+        activePlayer.pick ? [activePlayer.pick.player.i] : []
+      );
+      const sub = selectBestSub(manager.picks, slot.target, [...out, ...activePlayerIds]);
       offMap.set(entry.pick.player.i, {
         kind: "injury",
         second,
@@ -355,7 +359,10 @@ function setForcedCasualty(
   const chosen = weightedPick(eligible, (candidate) => weightFor(candidate.pick.player.i), rng);
   if (directive.kind === "injury") {
     const second = 20 + Math.floor(rng() * 61);
-    const sub = selectBestSub(manager.picks, chosen.slot.target, [...out, chosen.pick.player.i]);
+    const activePlayerIds = active.flatMap((activePlayer) =>
+      activePlayer.pick ? [activePlayer.pick.player.i] : []
+    );
+    const sub = selectBestSub(manager.picks, chosen.slot.target, [...out, ...activePlayerIds]);
     offMap.set(chosen.pick.player.i, {
       kind: "injury",
       second,
@@ -393,7 +400,7 @@ function picksOnPitchAt(manager: ManagerSquad, second: number, offMap: Map<numbe
         return null;
       }
       const casualty = offMap.get(pick.player.i);
-      if (!casualty || second <= casualty.second) {
+      if (!casualty || second < casualty.second) {
         return pick;
       }
       if (casualty.replacementId == null || second < casualty.replacementOnSecond) {

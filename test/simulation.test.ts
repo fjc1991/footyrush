@@ -69,6 +69,86 @@ describe("match simulation", () => {
     }
   });
 
+  it("never brings on a substitute who is already replacing another unavailable starter", () => {
+    const { home, away, fixture } = makeManagers();
+    const casualtyTarget = home.picks.find(
+      (pick) => pick.target !== "SUB" && !pick.player.p.includes("GK")
+    )!;
+    const unavailableStarter = home.picks.find(
+      (pick) => pick.target !== "SUB" && pick.player.i !== casualtyTarget.player.i
+    )!;
+    const weightByPlayerId = Object.fromEntries(
+      home.picks.map((pick) => [pick.player.i, pick.player.i === casualtyTarget.player.i ? 1 : 0])
+    );
+    const healthyResult = simulateFixture({
+      fixture,
+      home,
+      away,
+      seed: "already-active-sub",
+      homeCasualty: { kind: "injury", weightByPlayerId },
+      awayCasualty: null
+    });
+    const preferredSubId = healthyResult.events.find(
+      (event) => event.teamId === home.id && event.code === "substitution"
+    )?.playerId;
+    expect(preferredSubId).toBeTypeOf("number");
+
+    const woundedHome = {
+      ...home,
+      injuredPlayerIds: [unavailableStarter.player.i],
+      substitutions: { [unavailableStarter.player.i]: preferredSubId! }
+    };
+    const result = simulateFixture({
+      fixture,
+      home: woundedHome,
+      away,
+      seed: "already-active-sub",
+      homeCasualty: { kind: "injury", weightByPlayerId },
+      awayCasualty: null
+    });
+    const inMatchSubId = result.events.find(
+      (event) => event.teamId === home.id && event.code === "substitution"
+    )?.playerId;
+
+    expect(result.homeInjuries).toEqual([casualtyTarget.player.i]);
+    expect(inMatchSubId).toBeTypeOf("number");
+    expect(inMatchSubId).not.toBe(preferredSubId);
+  });
+
+  it("orders a same-minute casualty before resumed play without reusing the player who went off", () => {
+    const home = autoDraftManager({
+      id: "human",
+      displayName: "Human",
+      formationId: "4-3-3",
+      seed: "audit-collision-home"
+    });
+    const away = autoDraftManager({
+      id: "away",
+      displayName: "Away",
+      formationId: "4-4-2",
+      seed: "audit-collision-away"
+    });
+    const result = simulateFixture({
+      fixture: { id: "collision-fixture", round: 1, homeId: "human", awayId: "away" },
+      home,
+      away,
+      seed: "collision-visible-537",
+      homeCasualty: { kind: "injury" },
+      awayCasualty: null
+    });
+    const injury = result.events.find((event) => event.teamId === "human" && event.code === "injury")!;
+    const sameMinuteOpenPlay = result.events.find(
+      (event) =>
+        event.second === injury.second &&
+        event.teamId === "human" &&
+        ["goal", "chance", "save", "near_miss"].includes(event.code)
+    );
+
+    expect(sameMinuteOpenPlay).toBeTruthy();
+    expect(sameMinuteOpenPlay?.playerId).not.toBe(injury.playerId);
+    expect(result.events.indexOf(injury)).toBeLessThan(result.events.indexOf(sameMinuteOpenPlay!));
+  });
+
   it("counts replacement ratings in the injured starter's tactical line", () => {
     const { home } = makeManagers();
     const attackSlot = getStarterSlots(home.formationId).find((slot) => slot.line === "attack")!;

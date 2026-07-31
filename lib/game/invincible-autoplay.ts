@@ -1,3 +1,5 @@
+import type { FixtureResult } from "./types";
+
 export const INVINCIBLE_AUTOPLAY_SECONDS = 3;
 
 export type InvincibleAttentionReason = "replacement" | "out_of_form" | null;
@@ -7,6 +9,7 @@ export type InvincibleAutoplayStatus =
   | "paused"
   | "attention"
   | "saving"
+  | "presenting"
   | "failed"
   | "complete";
 
@@ -38,6 +41,7 @@ export function getInvincibleAutoplayStatus(params: {
   paused: boolean;
   attentionReason: InvincibleAttentionReason;
   pending: boolean;
+  presenting?: boolean;
   error: string;
 }): InvincibleAutoplayStatus {
   if (params.complete) {
@@ -49,6 +53,9 @@ export function getInvincibleAutoplayStatus(params: {
   if (params.pending) {
     return "saving";
   }
+  if (params.presenting) {
+    return "presenting";
+  }
   if (params.attentionReason) {
     return "attention";
   }
@@ -59,6 +66,34 @@ export function getInvincibleAutoplayStatus(params: {
     return "complete";
   }
   return "running";
+}
+
+export function shouldPauseAfterInvincibleResult(params: {
+  previousResults: FixtureResult[];
+  result: FixtureResult;
+  humanId?: string;
+}): boolean {
+  const humanId = params.humanId ?? "human";
+  const humanScore = (result: FixtureResult): [number, number] | null => {
+    if (result.homeId === humanId) return [result.homeGoals, result.awayGoals];
+    if (result.awayId === humanId) return [result.awayGoals, result.homeGoals];
+    return null;
+  };
+  const score = humanScore(params.result);
+  if (!score) {
+    return false;
+  }
+
+  const alreadyLost = params.previousResults.some((result) => {
+    const previousScore = humanScore(result);
+    return previousScore ? previousScore[0] < previousScore[1] : false;
+  });
+  const firstLoss = !alreadyLost && score[0] < score[1];
+  const casualtyCount = params.result.homeId === humanId
+    ? params.result.homeInjuries.length + params.result.homeRedCards.length
+    : params.result.awayInjuries.length + params.result.awayRedCards.length;
+
+  return firstLoss || casualtyCount > 0;
 }
 
 interface CountdownOptions {
