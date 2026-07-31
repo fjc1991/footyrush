@@ -35,6 +35,7 @@
   --amber: #9a6700;
   --amber-bright: var(--gold-400);
   --danger: var(--rose-500);
+  --success: #16884a;
   --turf: var(--turf-700);
 
   /* buttons */
@@ -78,6 +79,7 @@
   --amber: #ffd166;
   --amber-bright: #ffe18b;
   --danger: #ff7081;
+  --success: #4ade80;
   --turf: #238b4b;
 
   --button: var(--accent-strong);
@@ -4389,6 +4391,702 @@ p {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+  }
+}
+
+/* ── Achievement-led club identity ─────────────────────────────── */
+
+.achievements-screen {
+  width: min(100%, 1480px);
+  margin-inline: auto;
+}
+
+.achievements-panel {
+  display: grid;
+  gap: clamp(18px, 2.2vw, 28px);
+}
+
+.achievements-hero {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  padding: clamp(6px, 1vw, 12px);
+}
+
+.achievements-hero > div:first-child {
+  max-width: 720px;
+}
+
+.achievements-hero h2 {
+  margin: 3px 0 8px;
+  font-size: clamp(2rem, 4vw, 3.35rem);
+}
+
+.achievements-hero p:last-child {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.achievement-total {
+  display: grid;
+  grid-template-columns: auto auto;
+  align-items: center;
+  gap: 1px 10px;
+  min-width: 142px;
+  padding: 14px 18px;
+  border: 1px solid color-mix(in srgb, var(--amber) 42%, var(--line));
+  border-radius: var(--r-lg);
+  background: color-mix(in srgb, var(--amber) 9%, var(--panel));
+  color: var(--amber);
+}
+
+.achievement-total > svg {
+  grid-row: 1 / 3;
+}
+
+.achievement-total strong {
+  color: var(--text);
+  font-family: var(--font-display), "Arial Narrow", sans-serif;
+  font-size: 1.55rem;
+  line-height: 1;
+}
+
+.achievement-total span {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.achievement-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.achievement-card {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
+  min-width: 0;
+  padding: 17px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: linear-gradient(145deg, color-mix(in srgb, var(--navy-700) 15%, var(--panel)), var(--panel));
+}
+
+.achievement-card.is-complete {
+  border-color: color-mix(in srgb, var(--success) 45%, var(--line));
+  background: linear-gradient(145deg, color-mix(in srgb, var(--success) 10%, var(--panel)), var(--panel));
+}
+
+.achievement-card-icon {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--panel-strong);
+  color: var(--muted);
+}
+
+.achievement-card.is-complete .achievement-card-icon {
+  border-color: color-mix(in srgb, var(--success) 60%, var(--line));
+  background: var(--success);
+  color: #061a11;
+}
+
+.achievement-card-copy > span {
+  color: var(--accent);
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.achievement-card.is-complete .achievement-card-copy > span {
+  color: var(--success);
+}
+
+.achievement-card h3 {
+  margin: 3px 0 5px;
+  font-size: 1.13rem;
+}
+
+.achievement-card p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.achievement-progress-copy {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.achievement-progress-copy strong {
+  color: var(--text);
+  text-align: right;
+}
+
+.achievement-progress-track {
+  grid-column: 1 / -1;
+  display: block;
+  height: 6px;
+  overflow: hidden;
+  border-radius: var(--r-pill);
+  background: color-mix(in srgb, var(--line) 70%, transparent);
+}
+
+.achievement-progress-track > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent), var(--accent-bright));
+  transition: width 240ms ease;
+}
+
+.achievement-card.is-complete .achievement-progress-track > span {
+  background: var(--success);
+}
+
+.club-customizer {
+  display: grid;
+  grid-template-columns: minmax(280px, 0.72fr) minmax(0, 1.28fr);
+  gap: 14px;
+}
+
+.club-preview,
+.club-controls {
+  min-width: 0;
+  padding: clamp(18px, 2.2vw, 26px);
+  border: 1px solid var(--line);
+  border-radius: var(--r-xl);
+  background: var(--panel);
+}
+
+.club-preview {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  align-content: space-between;
+  min-height: 410px;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 50% 45%, color-mix(in srgb, var(--team-primary) 28%, transparent), transparent 48%),
+    linear-gradient(150deg, color-mix(in srgb, var(--team-secondary) 11%, var(--panel)), var(--panel));
+}
+
+.club-preview::after {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: auto -20% -45% 20%;
+  height: 75%;
+  border-radius: 50%;
+  background: var(--team-pattern);
+  opacity: 0.08;
+  transform: rotate(-9deg);
+}
+
+.club-preview-heading,
+.club-control-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.club-preview-heading h3,
+.club-control-heading h3 {
+  margin: 4px 0 0;
+  font-size: clamp(1.35rem, 2.4vw, 2rem);
+}
+
+.club-preview-heading > svg,
+.club-control-heading > svg {
+  color: var(--accent);
+}
+
+.club-preview-stage {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(24px, 4vw, 54px);
+  min-height: 205px;
+}
+
+.club-preview-badge.team-badge {
+  width: 82px;
+  height: 92px;
+  font-size: 1.25rem;
+}
+
+.club-preview-kit {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 116px;
+  height: 126px;
+  filter: drop-shadow(0 12px 16px rgba(0, 0, 0, 0.28));
+}
+
+.club-preview-kit.team-kit::before {
+  content: "";
+  position: absolute;
+  inset: 14px 9px 8px;
+  z-index: 0;
+  clip-path: polygon(24% 0, 39% 8%, 61% 8%, 76% 0, 100% 22%, 85% 42%, 76% 35%, 76% 100%, 24% 100%, 24% 35%, 15% 42%, 0 22%);
+  background: var(--team-pattern);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.26);
+}
+
+.club-preview-kit .kit-icon {
+  width: 108px;
+  height: 108px;
+}
+
+.club-preview-kit .kit-num {
+  top: 53%;
+  font-size: 0.9rem;
+}
+
+.club-preview > p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+.club-controls {
+  display: grid;
+  gap: 18px;
+}
+
+.club-name-field {
+  display: grid;
+  gap: 7px;
+}
+
+.club-name-field > span,
+.club-choice-group legend {
+  color: var(--text);
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.club-name-field input {
+  min-height: 46px;
+  padding: 0 13px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--panel-strong);
+  color: var(--text);
+  font: inherit;
+  font-weight: 800;
+}
+
+.club-name-field input:focus-visible {
+  outline: 3px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.club-name-field input:disabled {
+  opacity: 0.68;
+  cursor: not-allowed;
+}
+
+.club-name-field small,
+.club-choice-group > small {
+  color: var(--muted);
+  font-size: 0.72rem;
+  line-height: 1.4;
+}
+
+.club-choice-group {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.club-choice-group legend {
+  margin-bottom: 9px;
+}
+
+.club-palette-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 7px;
+}
+
+.club-palette-choice,
+.club-style-choice {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  min-height: 46px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--panel-strong);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.74rem;
+  font-weight: 800;
+  text-align: left;
+  cursor: pointer;
+}
+
+.club-palette-choice:hover:not(:disabled),
+.club-style-choice:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.club-palette-choice.is-selected,
+.club-style-choice.is-selected {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 11%, var(--panel-strong));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+.club-palette-choice:disabled,
+.club-style-choice:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.club-palette-choice > svg,
+.club-style-choice > svg:last-child {
+  margin-left: auto;
+  flex: 0 0 auto;
+  color: var(--muted);
+}
+
+.club-palette-swatch {
+  width: 25px;
+  height: 25px;
+  flex: 0 0 auto;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 50%;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+}
+
+.club-style-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 7px;
+}
+
+.club-style-choice > svg:first-child {
+  flex: 0 0 auto;
+  color: var(--accent);
+}
+
+.club-customizer-error {
+  margin: -4px 0 0;
+  color: var(--danger);
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+
+.club-save-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.club-save-confirmation {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--success);
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+
+@media (max-width: 980px) {
+  .achievement-grid,
+  .club-customizer {
+    grid-template-columns: 1fr;
+  }
+
+  .club-preview {
+    min-height: 340px;
+  }
+}
+
+@media (max-width: 640px) {
+  .achievements-hero {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .achievement-total {
+    width: 100%;
+  }
+
+  .club-palette-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .club-style-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .club-preview-stage {
+    gap: 18px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .achievement-progress-track > span {
+    transition: none;
+  }
+}
+
+.squad-run-story {
+  display: grid;
+  gap: 12px;
+  margin: 14px 0;
+  padding: 15px;
+  border: 1px solid color-mix(in srgb, var(--amber) 38%, var(--line));
+  border-radius: var(--r-lg);
+  background:
+    radial-gradient(360px 120px at 100% 0%, color-mix(in srgb, var(--amber) 10%, transparent), transparent 72%),
+    var(--panel-strong);
+}
+
+.side-stack > .squad-run-story {
+  margin: 0;
+  background:
+    radial-gradient(360px 120px at 100% 0%, color-mix(in srgb, var(--amber) 10%, transparent), transparent 72%),
+    var(--panel);
+  box-shadow: var(--shadow);
+}
+
+.squad-story-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.squad-story-header h3 {
+  margin: 2px 0 0;
+  font-family: var(--font-display), "Arial Narrow", sans-serif;
+  font-size: clamp(1.2rem, 1.8vw, 1.5rem);
+  line-height: 1;
+}
+
+.squad-story-header > svg {
+  flex: 0 0 auto;
+  color: var(--amber);
+}
+
+.top-scorer-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 0.8fr);
+  gap: 12px;
+  align-items: stretch;
+}
+
+.top-scorer-card > div {
+  min-width: 0;
+  padding: 11px;
+  border-radius: var(--r-md);
+  background: var(--panel);
+}
+
+.top-scorer-card > div:first-child > span,
+.run-stat-strip span,
+.season-player-chase span {
+  display: block;
+  color: var(--muted);
+  font-size: 0.65rem;
+  font-weight: 850;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.top-scorer-card > div:first-child > strong {
+  display: block;
+  margin: 3px 0;
+  overflow: hidden;
+  font-size: 1.1rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.top-scorer-card > div:first-child > small {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.player-milestone-callout {
+  display: grid;
+  align-content: center;
+  gap: 5px;
+}
+
+.player-milestone-callout > strong {
+  color: var(--amber);
+  font-size: 1.15rem;
+}
+
+.player-milestone-callout > span:not(.player-milestone-track) {
+  color: var(--muted);
+  font-size: 0.7rem;
+  line-height: 1.35;
+}
+
+.player-milestone-track {
+  height: 5px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--line);
+}
+
+.player-milestone-track > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--amber), var(--accent));
+}
+
+.run-stat-strip {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.run-stat-strip > div {
+  min-width: 0;
+  padding: 8px;
+  border-radius: var(--r-sm);
+  background: var(--panel);
+}
+
+.run-stat-strip strong {
+  display: block;
+  margin-top: 2px;
+  font-size: 1rem;
+}
+
+.run-scorer-list {
+  display: grid;
+  gap: 4px;
+}
+
+.run-scorer-list > div {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  gap: 7px;
+  align-items: center;
+  min-height: 32px;
+  padding: 5px 8px;
+  border-radius: var(--r-sm);
+  background: var(--panel);
+}
+
+.run-scorer-list > div > span {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--amber) 18%, var(--panel-strong));
+  color: var(--amber);
+  font-size: 0.62rem;
+  font-weight: 950;
+}
+
+.run-scorer-list > div > strong {
+  overflow: hidden;
+  font-size: 0.75rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.run-scorer-list > div > em {
+  color: var(--accent);
+  font-size: 0.8rem;
+  font-style: normal;
+  font-weight: 950;
+}
+
+.squad-run-story.compact .top-scorer-card {
+  grid-template-columns: 1fr;
+}
+
+.squad-run-story.compact .run-stat-strip {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.squad-run-story.compact .run-stat-strip > div:nth-child(n + 4) {
+  display: none;
+}
+
+.season-player-chase {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 3px 10px;
+  align-items: center;
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--amber) 35%, var(--line));
+  border-radius: var(--r-md);
+  background: var(--panel-strong);
+}
+
+.season-player-chase > div strong {
+  display: block;
+  margin-top: 2px;
+  overflow: hidden;
+  font-size: 0.78rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.season-player-chase > strong {
+  color: var(--amber);
+  font-size: 0.8rem;
+}
+
+.season-player-chase > small {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 0.67rem;
+}
+
+@media (max-width: 560px) {
+  .top-scorer-card {
+    grid-template-columns: 1fr;
+  }
+
+  .run-stat-strip {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .run-stat-strip > div:nth-child(4),
+  .run-stat-strip > div:nth-child(5) {
+    grid-column: span 1;
   }
 }
 
@@ -9175,5 +9873,521 @@ main:has(.analytics-consent) .milestone-nudge {
 @media (max-width: 380px) {
   .personal-stat-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* Matchday decisions and return-loop progression */
+.mini-lineup-decision,
+.impact-sub-selector {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+  padding: 15px;
+  border: 1px solid color-mix(in srgb, var(--accent) 38%, var(--line));
+  border-radius: var(--r-lg);
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--accent) 9%, transparent), transparent 70%),
+    var(--panel-strong);
+}
+
+.mini-lineup-decision {
+  border-color: color-mix(in srgb, var(--danger) 48%, var(--line));
+  box-shadow: inset 3px 0 0 var(--danger);
+}
+
+.impact-sub-selector.is-spent {
+  border-color: var(--line);
+  background: var(--panel-strong);
+}
+
+.mini-decision-heading,
+.career-chase-header,
+.next-challenge-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.mini-decision-heading > div,
+.career-chase-header > div,
+.next-challenge-heading > div {
+  min-width: 0;
+}
+
+.mini-decision-heading span,
+.impact-sub-option > span,
+.next-mode-card > span {
+  display: block;
+  color: var(--accent);
+  font-size: 0.66rem;
+  font-style: normal;
+  font-weight: 900;
+  letter-spacing: 0.075em;
+  text-transform: uppercase;
+}
+
+.mini-decision-heading strong {
+  display: block;
+  margin-top: 2px;
+  font-size: 1rem;
+}
+
+.decision-count {
+  flex: 0 0 auto;
+  padding: 5px 9px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 14%, var(--panel));
+  color: var(--text) !important;
+  font-size: 0.7rem !important;
+  letter-spacing: 0 !important;
+  text-transform: none !important;
+}
+
+.mini-replacement-row {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.36fr) minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.mini-replacement-row > div:first-child span {
+  display: block;
+  margin-top: 3px;
+  color: var(--danger);
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+
+.impact-sub-selector > p,
+.season-impact-sub-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.season-impact-sub-note {
+  text-align: center;
+}
+
+.impact-sub-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 8px;
+}
+
+.impact-sub-option {
+  position: relative;
+  display: grid;
+  align-content: start;
+  gap: 3px;
+  min-height: 124px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--panel);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 140ms ease, background 140ms ease, transform 140ms ease;
+}
+
+.impact-sub-option:hover,
+.impact-sub-option:focus-visible,
+.impact-sub-option.active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 13%, var(--panel));
+  transform: translateY(-1px);
+}
+
+.impact-sub-option.active::after {
+  content: "Primed";
+  position: absolute;
+  top: 9px;
+  right: 9px;
+  padding: 3px 6px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #06110b;
+  font-size: 0.58rem;
+  font-weight: 950;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.impact-sub-option > strong {
+  padding-right: 42px;
+  line-height: 1.2;
+}
+
+.impact-sub-option > small {
+  color: var(--amber);
+  font-size: 0.75rem;
+  font-weight: 900;
+}
+
+.impact-sub-option > em {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-style: normal;
+  line-height: 1.35;
+}
+
+.match-turning-points {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--amber) 42%, var(--line));
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--amber) 6%, var(--panel-strong));
+}
+
+.match-turning-points > span {
+  color: var(--amber);
+  font-size: 0.67rem;
+  font-weight: 950;
+  letter-spacing: 0.075em;
+  text-transform: uppercase;
+}
+
+.match-turning-point {
+  padding: 9px 10px;
+  border-left: 3px solid var(--accent);
+  border-radius: 0 var(--r-sm) var(--r-sm) 0;
+  background: var(--panel);
+}
+
+.match-turning-point.red_card,
+.match-turning-point.injury {
+  border-left-color: var(--danger);
+}
+
+.match-turning-point p {
+  margin: 3px 0 0;
+  color: var(--muted);
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+
+.summary-fixture {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--panel-strong);
+}
+
+.summary-fixture .summary-row {
+  margin: 0;
+  border-radius: 0;
+}
+
+.summary-story-events {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 0 10px 10px;
+}
+
+.summary-story-events span {
+  padding: 4px 7px;
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 0.66rem;
+  font-weight: 850;
+}
+
+.summary-story-events .is-red,
+.summary-story-events .is-injury {
+  color: var(--danger);
+}
+
+.summary-story-events .is-impact {
+  color: var(--accent);
+}
+
+.complete-grid .intro-panel {
+  justify-content: flex-start;
+}
+
+.career-chase,
+.next-challenge {
+  display: grid;
+  gap: 13px;
+  margin: 14px 0;
+  padding: 16px;
+  border: 1px solid color-mix(in srgb, var(--accent) 36%, var(--line));
+  border-radius: var(--r-lg);
+  background:
+    radial-gradient(420px 130px at 100% 0%, color-mix(in srgb, var(--accent) 12%, transparent), transparent 72%),
+    var(--panel-strong);
+}
+
+.career-chase h3,
+.next-challenge h3 {
+  margin: 2px 0 0;
+  font-family: var(--font-display), "Arial Narrow", sans-serif;
+  font-size: clamp(1.25rem, 2vw, 1.65rem);
+  line-height: 1;
+}
+
+.career-summary-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.career-summary-strip > div {
+  min-width: 0;
+  padding: 10px;
+  border-radius: var(--r-sm);
+  background: var(--panel);
+}
+
+.career-summary-strip span,
+.career-milestone > div span {
+  display: block;
+  color: var(--muted);
+  font-size: 0.65rem;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.career-summary-strip strong {
+  display: block;
+  margin-top: 3px;
+  overflow: hidden;
+  font-size: 1.1rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.career-milestone-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 8px;
+}
+
+.career-milestone {
+  display: grid;
+  gap: 6px;
+  padding: 11px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--panel);
+}
+
+.career-milestone > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.career-milestone p {
+  min-height: 2.5em;
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+
+.career-milestone-track {
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--line);
+}
+
+.career-milestone-track > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent), var(--accent-strong));
+}
+
+.text-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 40px;
+  padding: 5px 8px;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font-size: 0.75rem;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.text-button:hover,
+.text-button:focus-visible {
+  color: var(--text);
+  text-decoration: underline;
+}
+
+.next-challenge {
+  border-color: color-mix(in srgb, var(--amber) 46%, var(--line));
+  background:
+    radial-gradient(420px 150px at 100% 0%, color-mix(in srgb, var(--amber) 13%, transparent), transparent 72%),
+    var(--panel-strong);
+}
+
+.next-challenge-heading > svg {
+  color: var(--amber);
+}
+
+.next-mode-grid,
+.personal-play-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.next-mode-card {
+  position: relative;
+  display: grid;
+  align-content: start;
+  gap: 5px;
+  min-height: 138px;
+  padding: 15px 42px 15px 15px;
+  border: 1px solid color-mix(in srgb, var(--accent) 48%, var(--line));
+  border-radius: var(--r-lg);
+  background:
+    linear-gradient(145deg, color-mix(in srgb, var(--accent) 15%, var(--panel)), var(--panel));
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  box-shadow: 0 9px 22px rgba(2, 12, 27, 0.1);
+  transition: transform 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.next-mode-card.invincible {
+  border-color: color-mix(in srgb, var(--amber) 58%, var(--line));
+  background:
+    linear-gradient(145deg, color-mix(in srgb, var(--amber) 13%, var(--panel)), var(--panel));
+}
+
+.next-mode-card.invincible > span {
+  color: var(--amber);
+}
+
+.next-mode-card:hover,
+.next-mode-card:focus-visible {
+  border-color: var(--accent-bright);
+  box-shadow: 0 13px 28px color-mix(in srgb, var(--accent) 13%, transparent);
+  transform: translateY(-2px);
+}
+
+.next-mode-card.invincible:hover,
+.next-mode-card.invincible:focus-visible {
+  border-color: var(--amber);
+}
+
+.next-mode-card > strong {
+  font-family: var(--font-display), "Arial Narrow", sans-serif;
+  font-size: clamp(1.2rem, 2.1vw, 1.55rem);
+  line-height: 1.05;
+}
+
+.next-mode-card > small {
+  color: var(--muted);
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+
+.next-mode-card > svg {
+  position: absolute;
+  right: 15px;
+  bottom: 15px;
+  color: var(--accent);
+}
+
+.next-mode-card.invincible > svg {
+  color: var(--amber);
+}
+
+.next-change-setup {
+  width: fit-content;
+  margin: -3px auto -5px;
+}
+
+.personal-play-actions {
+  margin-bottom: 14px;
+}
+
+.personal-play-actions .next-mode-card {
+  min-height: 116px;
+}
+
+.personal-play-actions .resume-current {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 700px) {
+  .mini-replacement-row,
+  .season-absence-row {
+    grid-template-columns: 1fr;
+  }
+
+  .career-chase-header,
+  .next-challenge-heading {
+    align-items: flex-start;
+  }
+
+  .career-chase-header {
+    flex-direction: column;
+  }
+
+  .career-chase-header .text-button {
+    justify-content: flex-start;
+    min-height: 32px;
+    padding: 0;
+  }
+
+  .next-mode-grid,
+  .personal-play-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .next-mode-card {
+    min-height: 112px;
+  }
+}
+
+@media (max-width: 480px) {
+  .career-summary-strip {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .career-summary-strip > div:last-child {
+    grid-column: 1 / -1;
+  }
+
+  .impact-sub-options,
+  .career-milestone-list {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .impact-sub-option,
+  .next-mode-card,
+  .career-milestone-track > span {
+    transition: none;
+  }
+
+  .impact-sub-option:hover,
+  .impact-sub-option:focus-visible,
+  .impact-sub-option.active,
+  .next-mode-card:hover,
+  .next-mode-card:focus-visible {
+    transform: none;
   }
 }

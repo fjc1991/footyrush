@@ -2,7 +2,14 @@ import { draftTeamSeasonSquad } from "./draft";
 import { getFootballData, getTeamName } from "./data";
 import { FORMATION_LIST } from "./formations";
 import { createRng, shuffle } from "./rng";
-import type { DraftMode, DraftPick, Fixture, ManagerSquad } from "./types";
+import type { ClubIdentity } from "./club-identity";
+import type { DraftMode, DraftPick, Fixture, ManagerSquad, SeasonCasualtyKind } from "./types";
+
+export interface MiniLeagueIncidentSchedule {
+  /** Zero-based round index. The finale stays clear so the table, not an interruption, owns the ending. */
+  round: number;
+  kind: SeasonCasualtyKind;
+}
 
 export function getSkillBand(completedLeagues: number, mmr: number): string {
   if (completedLeagues < 3) {
@@ -23,6 +30,7 @@ export function getSkillBand(completedLeagues: number, mmr: number): string {
 export function createMinileague(params: {
   humanPicks: DraftPick[];
   humanName: string;
+  humanClubIdentity?: ClubIdentity;
   formationId: string;
   mode: DraftMode;
   completedLeagues: number;
@@ -30,12 +38,19 @@ export function createMinileague(params: {
   /** The human's manager rating (0–100 quality, for the sim edge); defaults to an average 50. */
   managerRating?: number;
   seed: string;
-}): { id: string; managers: ManagerSquad[]; rounds: Fixture[][]; skillBand: string } {
+}): {
+  id: string;
+  managers: ManagerSquad[];
+  rounds: Fixture[][];
+  skillBand: string;
+  incidentSchedule: MiniLeagueIncidentSchedule;
+} {
   const rng = createRng(params.seed);
   const skillBand = getSkillBand(params.completedLeagues, params.mmr);
   const human: ManagerSquad = {
     id: "human",
-    displayName: params.humanName,
+    displayName: params.humanClubIdentity?.clubName ?? params.humanName,
+    clubIdentity: params.humanClubIdentity,
     kind: "human",
     source: "human",
     formationId: params.formationId,
@@ -68,7 +83,24 @@ export function createMinileague(params: {
     id: `league-${Date.now()}-${Math.floor(rng() * 10000)}`,
     managers,
     rounds: buildRoundRobin(managers),
-    skillBand
+    skillBand,
+    incidentSchedule: buildMiniLeagueIncidentSchedule(
+      createRng(`${params.seed}:mini-incident`)
+    )
+  };
+}
+
+/**
+ * A five-match run always gets one human turning point in rounds 2–4. Natural
+ * match incidents can still happen elsewhere, but the seeded beat prevents a
+ * whole league from passing without a lineup consequence.
+ */
+export function buildMiniLeagueIncidentSchedule(
+  rng: () => number
+): MiniLeagueIncidentSchedule {
+  return {
+    round: 1 + Math.floor(rng() * 3),
+    kind: rng() < 0.65 ? "injury" : "redCard"
   };
 }
 

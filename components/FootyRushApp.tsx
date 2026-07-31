@@ -1,6 +1,6 @@
 "use client";
 
-import { Activity, BarChart3, ChevronRight, Globe, Goal, HeartPulse, LogIn, Mail, Moon, Pause, Play, ShieldCheck, Shirt, Shuffle, Sparkles, Sun, Timer, Trophy, Users, X } from "lucide-react";
+import { Activity, ArrowRight, BarChart3, ChevronRight, Globe, Goal, HeartPulse, LogIn, Mail, Moon, Pause, Play, ShieldCheck, Shirt, Shuffle, Sparkles, Sun, Target, Timer, Trophy, Users, X } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { en } from "@/lib/i18n/en";
 import { createXOAuthCredentials } from "@/lib/auth/x-oauth";
@@ -15,7 +15,30 @@ import { FORMATION_LIST, getStarterSlots } from "@/lib/game/formations";
 import { autoDraftManager, getDraftSlots, getOpenDraftSlots, makeDraftPick } from "@/lib/game/draft";
 import { loadFootballData, spinForOpenSlots, getFootballData } from "@/lib/game/data";
 import { BOOST_LIMIT } from "@/lib/game/boosts";
+import {
+  nextCareerMilestones,
+  nextCareerMilestonesForMode,
+  normalizeCareerRecords,
+  summarizeCareer,
+  type CareerMilestone,
+  type CareerSummary
+} from "@/lib/game/career";
+import { achievementEntitlementGrants } from "@/lib/game/achievements";
+import {
+  DEFAULT_CLUB_IDENTITY,
+  normalizeClubIdentity,
+  validateClubIdentity,
+  type ClubIdentity
+} from "@/lib/game/club-identity";
+import {
+  INVINCIBLE_IMPACT_SUB_LIMIT,
+  MINILEAGUE_IMPACT_SUB_LIMIT,
+  availableImpactSubs,
+  impactSubEffectForPick,
+  remainingImpactSubs
+} from "@/lib/game/impact-sub";
 import { MANAGER_POOL, managerRatingForPosition } from "@/lib/game/managers";
+import { advanceMiniLeagueAvailability } from "@/lib/game/minileague-availability";
 import {
   invincibleMilestoneKind,
   miniLeagueMilestoneKind,
@@ -23,31 +46,30 @@ import {
 } from "@/lib/game/milestones";
 import { createMinileague } from "@/lib/game/matchmaking";
 import { canonicalAccountRunId } from "@/lib/game/result-id";
+import { aggregateRunStats, type RunStats } from "@/lib/game/run-stats";
 import { renderCommentary } from "@/lib/game/commentary";
 import { buildMatchFeedback, type MatchFeedback } from "@/lib/game/match-presentation";
 import { type MatchSpeed } from "@/lib/game/match-clock";
 import { useMatchClock } from "@/lib/game/use-match-clock";
 import {
-  INVINCIBLE_TEAM_TALK_LIMIT,
   OUT_OF_FORM_EXPECTED_GOALS_PENALTY,
-  TEAM_TALK_EXPECTED_GOALS_BONUS,
   applySeasonFixtureInjuries,
   applySeasonFixtureSuspensions,
   availableSeasonBench,
-  canUseSeasonTeamTalk,
+  canUseSeasonImpactSub,
   createInvincibleSeason,
   createSeasonPregame,
   currentHumanFixture as getCurrentSeasonHumanFixture,
   decrementSeasonAbsences,
   invincibleContenderModifiers,
-  markSeasonTeamTalkUsed,
+  markSeasonImpactSubUsed,
   managerForSeasonMatch,
-  remainingSeasonTeamTalks,
+  remainingSeasonImpactSubs,
   seasonCasualtyWeights,
   seasonMissingRequiredSubstitutions,
   seasonUnavailablePlayerIds,
   seasonUnavailableStarters,
-  teamTalkHalfForMatchday,
+  impactSubHalfForMatchday,
   type InvincibleSeason,
   type SeasonPregameDecision
 } from "@/lib/game/season";
@@ -61,7 +83,11 @@ import {
   shouldPauseAfterInvincibleResult,
   type InvincibleAutoplayStatus
 } from "@/lib/game/invincible-autoplay";
-import { getTeamMonogram, getTeamVisualStyle } from "@/lib/game/team-visuals";
+import {
+  getTeamMonogram,
+  getTeamVisualStyle,
+  resolveManagerIdentity
+} from "@/lib/game/team-visuals";
 import {
   EXPERT_SCORE_THRESHOLD,
   MIN_MANAGER_SCORE,
@@ -72,8 +98,6 @@ import {
   scoreDeltaForStanding
 } from "@/lib/game/progression";
 import {
-  applyFixtureInjuries,
-  applySubstitution,
   calculateSquadStrength,
   computeStandings,
   simulateFixture
@@ -82,6 +106,7 @@ import { getSupabaseBrowserClient, hasSupabaseConfig } from "@/lib/supabase/clie
 import { useAccountActivity } from "@/lib/user/account-activity";
 import MyHomeAccount from "@/components/MyHomeAccount";
 import MatchBroadcast from "@/components/MatchBroadcast";
+import AchievementsScreen from "@/components/AchievementsScreen";
 import ProfileCompletionReminder from "@/components/ProfileCompletionReminder";
 import type { Session } from "@supabase/supabase-js";
 import type {
@@ -100,8 +125,12 @@ import type {
 
 type Copy = typeof en;
 type Phase = "setup" | "draft" | "league" | "complete" | "exhibition" | "season" | "invincible_complete";
-type MainView = "play" | "leaderboards" | "personal";
+type MainView = "play" | "leaderboards" | "achievements" | "personal";
 type GameMode = "minileague" | "be_invincible";
+
+function canSafelyStartXLogin(phase: Phase): boolean {
+  return phase === "setup" || phase === "draft" || phase === "complete" || phase === "invincible_complete";
+}
 
 interface LocalProfile {
   id: string;
@@ -134,6 +163,7 @@ interface SeasonMatchReveal {
   feedback: MatchFeedback;
   managerCall?: string;
   hold: boolean;
+  compact: boolean;
 }
 
 function publicLocalProfile(profile: LocalProfile): LocalProfile {
@@ -238,6 +268,8 @@ interface LeagueState {
   skillBand: string;
   managers: ManagerSquad[];
   rounds: ReturnType<typeof createMinileague>["rounds"];
+  incidentSchedule: ReturnType<typeof createMinileague>["incidentSchedule"];
+  impactSubsUsed: number;
   currentRound: number;
   results: FixtureResult[];
 }
@@ -261,6 +293,7 @@ const legacyProgressClaimKey = "footyrush.progressLegacyClaimed";
 const SCORE_MODEL = "v3-zero-to-1000";
 const completedLeaguesKey = "footyrush.completedLeagues";
 const expertUnlockedKey = "footyrush.expertUnlocked";
+const clubIdentityKey = "footyrush.clubIdentity.v1";
 const oauthResumeKey = "footyrush.oauthResume.v1";
 const OAUTH_RESUME_MAX_AGE_MS = 60 * 60 * 1000;
 const AUTH_RESTORE_GRACE_MS = 1_500;
@@ -274,6 +307,10 @@ function activeRunStorageKey(profileId: string): string {
 
 function recordsStorageKey(profile: LocalProfile | null): string {
   return profileStorageKey(recordsKey, profile);
+}
+
+function clubIdentityStorageKey(profile: LocalProfile | null): string {
+  return profileStorageKey(clubIdentityKey, profile);
 }
 
 function profileStorageKey(baseKey: string, profile: LocalProfile | null): string {
@@ -414,6 +451,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
   const [picks, setPicks] = useState<DraftPick[]>([]);
   const [spin, setSpin] = useState<SpinResult | null>(null);
   const [profile, setProfile] = useState<LocalProfile | null>(null);
+  const [clubIdentity, setClubIdentity] = useState<ClubIdentity>({ ...DEFAULT_CLUB_IDENTITY });
   const recordAccountActivity = useAccountActivity(
     profile && !profile.demo ? profile.id : null,
     locale
@@ -456,7 +494,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     reset: resetLeagueClock,
     finish: finishLeagueClock
   } = useMatchClock(matchSpeed, () => setReadyToRecord(true));
-  const [selectedSub, setSelectedSub] = useState<string | null>(null);
+  const [miniImpactSubPlayerId, setMiniImpactSubPlayerId] = useState<number | null>(null);
   const [spinning, setSpinning] = useState(false);
   const [slotPickerCandidateId, setSlotPickerCandidateId] = useState<number | null>(null);
   const [showAllCandidates, setShowAllCandidates] = useState(false);
@@ -494,7 +532,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
   const [seasonDecision, setSeasonDecision] = useState<SeasonPregameDecision | null>(null);
   const [seasonOutOfFormChoice, setSeasonOutOfFormChoice] = useState<"keep" | "bench" | null>(null);
   const [seasonOutOfFormSubId, setSeasonOutOfFormSubId] = useState<number | null>(null);
-  const [seasonTeamTalkActive, setSeasonTeamTalkActive] = useState(false);
+  const [seasonImpactSubPlayerId, setSeasonImpactSubPlayerId] = useState<number | null>(null);
   const [seasonAttemptMessage, setSeasonAttemptMessage] = useState("");
   const [seasonAutoplayPaused, setSeasonAutoplayPaused] = useState(false);
   const [seasonAutoplayCountdown, setSeasonAutoplayCountdown] = useState(INVINCIBLE_AUTOPLAY_SECONDS);
@@ -837,6 +875,44 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
   const currentRoundFixtures = league?.rounds[league.currentRound] ?? [];
   const currentHumanFixture = currentRoundFixtures.find((fixture) => fixture.homeId === "human" || fixture.awayId === "human");
   const managerById = useMemo(() => new Map(league?.managers.map((manager) => [manager.id, manager]) ?? []), [league]);
+  const miniHumanManager = managerById.get("human");
+  const miniInjuryGamesByPlayerId = useMemo(
+    () => Object.fromEntries((miniHumanManager?.injuredPlayerIds ?? []).map((playerId) => [playerId, 1])),
+    [miniHumanManager]
+  );
+  const miniSuspensionGamesByPlayerId = useMemo(
+    () => Object.fromEntries((miniHumanManager?.suspendedPlayerIds ?? []).map((playerId) => [playerId, 1])),
+    [miniHumanManager]
+  );
+  const miniUnavailableStarters = useMemo(
+    () =>
+      miniHumanManager
+        ? seasonUnavailableStarters({
+            human: miniHumanManager,
+            injuryGamesByPlayerId: miniInjuryGamesByPlayerId,
+            suspensionGamesByPlayerId: miniSuspensionGamesByPlayerId
+          })
+        : [],
+    [miniHumanManager, miniInjuryGamesByPlayerId, miniSuspensionGamesByPlayerId]
+  );
+  const miniMissingSubstitutions = useMemo(
+    () =>
+      miniHumanManager
+        ? seasonMissingRequiredSubstitutions({
+            human: miniHumanManager,
+            injuryGamesByPlayerId: miniInjuryGamesByPlayerId,
+            suspensionGamesByPlayerId: miniSuspensionGamesByPlayerId
+          })
+        : [],
+    [miniHumanManager, miniInjuryGamesByPlayerId, miniSuspensionGamesByPlayerId]
+  );
+  const miniImpactSubOptions = useMemo(
+    () =>
+      miniHumanManager && remainingImpactSubs(league?.impactSubsUsed ?? 0, MINILEAGUE_IMPACT_SUB_LIMIT) > 0
+        ? availableImpactSubs(miniHumanManager)
+        : [],
+    [league?.impactSubsUsed, miniHumanManager]
+  );
   const seasonDisplayManagers = useMemo(
     () =>
       season
@@ -863,6 +939,15 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
   // Live score = goals that have actually happened by the current minute, not the final result.
   const liveHomeGoals = visibleEvents.filter((event) => event.code === "goal" && event.teamId === currentHumanFixture?.homeId).length;
   const liveAwayGoals = visibleEvents.filter((event) => event.code === "goal" && event.teamId === currentHumanFixture?.awayId).length;
+  const currentHumanTurningPoints = useMemo(
+    () =>
+      currentResult?.events.filter(
+        (event) =>
+          event.teamId === "human" &&
+          (event.code === "injury" || event.code === "red_card" || event.params.impactSub === 1)
+      ) ?? [],
+    [currentResult]
+  );
   const exhibitionEvents = useMemo(
     () => exhibition?.result.events.filter((event) => event.second <= exhibitionSecond) ?? [],
     [exhibition, exhibitionSecond]
@@ -910,6 +995,29 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
 
   // Cross-user board when available, else the local aggregate.
   const leaderboard = serverLeaderboard ?? localLeaderboard;
+  const careerRecords = useMemo(
+    () => normalizeCareerRecords(leaderboardRecords),
+    [leaderboardRecords]
+  );
+  const careerSummary = useMemo(() => summarizeCareer(careerRecords), [careerRecords]);
+  const clubAchievementGrants = useMemo(
+    () => achievementEntitlementGrants(careerRecords),
+    [careerRecords]
+  );
+  const effectiveClubIdentity = useMemo(() => {
+    const validation = validateClubIdentity(clubIdentity, clubAchievementGrants);
+    return validation.valid && validation.value
+      ? validation.value
+      : { ...DEFAULT_CLUB_IDENTITY };
+  }, [clubAchievementGrants, clubIdentity]);
+  const miniRunStats = useMemo(
+    () => aggregateRunStats({ mode: "minileague", results: league?.results ?? [] }),
+    [league?.results]
+  );
+  const invincibleRunStats = useMemo(
+    () => aggregateRunStats({ mode: "invincible", results: season?.results ?? [] }),
+    [season?.results]
+  );
 
   const expertUnlocked = hasExpertAccess(managerScore, expertUnlockedEarned);
   const draftMode: DraftMode = expertUnlocked ? "expert" : "classic";
@@ -920,7 +1028,8 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     return Math.round(
       calculateSquadStrength({
         id: "human",
-        displayName: profile?.displayName ?? "Guest Manager",
+        displayName: effectiveClubIdentity.clubName,
+        clubIdentity: effectiveClubIdentity,
         kind: "human",
         source: "human",
         formationId,
@@ -934,7 +1043,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
         substitutions: {}
       }).overall
     );
-  }, [completedLeagues, draftComplete, draftMode, formationId, managerScore, picks, profile?.displayName, selectedManager?.rating]);
+  }, [completedLeagues, draftComplete, draftMode, effectiveClubIdentity, formationId, managerScore, picks, selectedManager?.rating]);
   const humanStanding = standings.find((standing) => standing.managerId === "human");
   const seasonHumanStanding = seasonStandings.find((standing) => standing.managerId === "human");
   const seasonOutOfFormSubs = useMemo(() => {
@@ -964,6 +1073,28 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
           })
         : [],
     [season, seasonHumanManager]
+  );
+  const seasonMatchHumanPreview = useMemo(
+    () =>
+      season && seasonHumanManager
+        ? managerForSeasonMatch({
+            human: seasonHumanManager,
+            injuryGamesByPlayerId: season.injuryGamesByPlayerId,
+            suspensionGamesByPlayerId: season.suspensionGamesByPlayerId,
+            outOfFormPlayerId:
+              seasonOutOfFormChoice === "bench" ? seasonDecision?.outOfForm?.playerId : undefined,
+            outOfFormSubstituteId:
+              seasonOutOfFormChoice === "bench" ? seasonOutOfFormSubId ?? undefined : undefined
+          })
+        : null,
+    [season, seasonDecision?.outOfForm?.playerId, seasonHumanManager, seasonOutOfFormChoice, seasonOutOfFormSubId]
+  );
+  const seasonImpactSubOptions = useMemo(
+    () =>
+      season && seasonMatchHumanPreview && canUseSeasonImpactSub(season)
+        ? availableImpactSubs(seasonMatchHumanPreview)
+        : [],
+    [season, seasonMatchHumanPreview]
   );
   const seasonAttentionReason = getInvincibleAttentionReason({
     missingReplacementCount: seasonMissingSubstitutions.length,
@@ -996,10 +1127,6 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     [spin]
   );
   const visibleRankedCandidates = showAllCandidates ? rankedCandidates : rankedCandidates.slice(0, 8);
-  const latestHumanInjury = [...visibleEvents]
-    .reverse()
-    .find((event) => event.code === "injury" && event.teamId === "human" && !selectedSub);
-
   function loadData() {
     setDataError(false);
     loadFootballData()
@@ -1010,6 +1137,24 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
   useEffect(() => {
     loadData();
   }, []);
+
+  useEffect(() => {
+    if (
+      miniImpactSubPlayerId !== null &&
+      !miniImpactSubOptions.some((pick) => pick.player.i === miniImpactSubPlayerId)
+    ) {
+      setMiniImpactSubPlayerId(null);
+    }
+  }, [miniImpactSubOptions, miniImpactSubPlayerId]);
+
+  useEffect(() => {
+    if (
+      seasonImpactSubPlayerId !== null &&
+      !seasonImpactSubOptions.some((pick) => pick.player.i === seasonImpactSubPlayerId)
+    ) {
+      setSeasonImpactSubPlayerId(null);
+    }
+  }, [seasonImpactSubOptions, seasonImpactSubPlayerId]);
 
   useEffect(() => {
     const storedConsent = readAnalyticsConsent();
@@ -1032,7 +1177,12 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
   useEffect(() => {
     function applyHashView() {
       const hashView = window.location.hash.replace("#", "");
-      if (hashView === "leaderboards" || hashView === "personal" || hashView === "play") {
+      if (
+        hashView === "leaderboards" ||
+        hashView === "achievements" ||
+        hashView === "personal" ||
+        hashView === "play"
+      ) {
         setView(hashView);
       }
     }
@@ -1041,6 +1191,15 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     window.addEventListener("hashchange", applyHashView);
     return () => window.removeEventListener("hashchange", applyHashView);
   }, []);
+
+  useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem(clubIdentityStorageKey(profile));
+      setClubIdentity(stored ? normalizeClubIdentity(JSON.parse(stored)) : { ...DEFAULT_CLUB_IDENTITY });
+    } catch {
+      setClubIdentity({ ...DEFAULT_CLUB_IDENTITY });
+    }
+  }, [profile]);
 
   useEffect(() => {
     if (!langMenuOpen) return;
@@ -1526,7 +1685,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     setCurrentResult(null);
     resetLeagueClock();
     setReadyToRecord(false);
-    setSelectedSub(null);
+    setMiniImpactSubPlayerId(null);
     setSlotPickerCandidateId(null);
     setShowAllCandidates(false);
     setDraftReshufflesLeft(DRAFT_RESHUFFLE_LIMIT);
@@ -1536,7 +1695,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     setSeasonDecision(null);
     setSeasonOutOfFormChoice(null);
     setSeasonOutOfFormSubId(null);
-    setSeasonTeamTalkActive(false);
+    setSeasonImpactSubPlayerId(null);
     setSeasonAttemptMessage("");
     setSeasonAutoplayPaused(false);
     setSeasonAutoplayCountdown(INVINCIBLE_AUTOPLAY_SECONDS);
@@ -1551,9 +1710,10 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     setPhase(nextPhase);
   }
 
-  function startDraft() {
+  function beginDraft(nextGameMode: GameMode) {
     resetDraft("draft");
-    const mode = gameMode === "be_invincible" ? "invincible" : "minileague";
+    setGameMode(nextGameMode);
+    const mode = nextGameMode === "be_invincible" ? "invincible" : "minileague";
     const runId = crypto.randomUUID();
     activeRunRef.current = { id: runId, mode, matches: 0, completed: false };
     if (profile && !profile.demo) {
@@ -1568,6 +1728,17 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     });
   }
 
+  function startDraft() {
+    if (!selectedManager) {
+      return;
+    }
+    if (!TESTING_MODE && !profile && guestStatus.played) {
+      setShowAuthGate(true);
+      return;
+    }
+    beginDraft(gameMode);
+  }
+
   function switchView(nextView: MainView) {
     if (phase === "season" && nextView !== "play") {
       setSeasonAutoplayPaused(true);
@@ -1575,6 +1746,18 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     setView(nextView);
     const nextHash = nextView === "play" ? "" : `#${nextView}`;
     window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}${nextHash}`);
+  }
+
+  function saveClubIdentity(nextIdentity: ClubIdentity) {
+    const validation = validateClubIdentity(nextIdentity, clubAchievementGrants);
+    if (!validation.valid || !validation.value) {
+      return;
+    }
+    setClubIdentity(validation.value);
+    window.localStorage.setItem(
+      clubIdentityStorageKey(profile),
+      JSON.stringify(validation.value)
+    );
   }
 
   function runDraftSpin() {
@@ -1623,11 +1806,24 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     }, prefersReducedMotion ? 0 : 500);
   }
 
-  function handleSubSelection(injuredPlayerId: number, subPlayerId: number, subName: string) {
-    if (!league) return;
-    const updatedManagers = applySubstitution(league.managers, injuredPlayerId, subPlayerId);
-    setLeague({ ...league, managers: updatedManagers });
-    setSelectedSub(subName);
+  function chooseMiniReplacement(unavailablePlayerId: number, subPlayerId: number) {
+    setLeague((current) => {
+      if (!current) return current;
+      return {
+        ...current,
+        managers: current.managers.map((manager) =>
+          manager.id === "human"
+            ? {
+                ...manager,
+                substitutions: {
+                  ...manager.substitutions,
+                  [unavailablePlayerId]: subPlayerId
+                }
+              }
+            : manager
+        )
+      };
+    });
   }
 
   function choosePlayer(candidateIndex: number, slotId?: string) {
@@ -1700,7 +1896,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     setSeasonDecision(prepared.decision);
     setSeasonOutOfFormChoice(null);
     setSeasonOutOfFormSubId(null);
-    setSeasonTeamTalkActive(false);
+    setSeasonImpactSubPlayerId(null);
     return { ...nextSeason, injuryGamesByPlayerId: prepared.injuryGamesByPlayerId };
   }
 
@@ -1748,7 +1944,8 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
       }
       const nextSeason = createInvincibleSeason({
         humanPicks: picks,
-        humanName: profile?.displayName ?? "Guest Manager",
+        humanName: effectiveClubIdentity.clubName,
+        humanClubIdentity: effectiveClubIdentity,
         formationId,
         mode: draftMode,
         completedLeagues,
@@ -1767,7 +1964,8 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
 
     const nextLeague = createMinileague({
       humanPicks: picks,
-      humanName: profile?.displayName ?? "Guest Manager",
+      humanName: effectiveClubIdentity.clubName,
+      humanClubIdentity: effectiveClubIdentity,
       formationId,
       mode: draftMode,
       completedLeagues,
@@ -1776,15 +1974,16 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
       seed: `${Date.now()}:${profile?.id ?? "guest"}`
     });
 
-    setLeague({ ...nextLeague, currentRound: 0, results: [] });
+    setLeague({ ...nextLeague, impactSubsUsed: 0, currentRound: 0, results: [] });
     setCurrentResult(null);
     resetLeagueClock();
     setReadyToRecord(false);
+    setMiniImpactSubPlayerId(null);
     setPhase("league");
   }
 
   function startCurrentMatch() {
-    if (!league || !currentHumanFixture) {
+    if (!league || !currentHumanFixture || miniMissingSubstitutions.length > 0) {
       return;
     }
     const home = managerById.get(currentHumanFixture.homeId);
@@ -1792,16 +1991,33 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     if (!home || !away) {
       return;
     }
+    const selectedImpactSubId = miniImpactSubOptions.some(
+      (pick) => pick.player.i === miniImpactSubPlayerId
+    )
+      ? miniImpactSubPlayerId
+      : null;
+    const scheduledIncident =
+      league.incidentSchedule.round === league.currentRound
+        ? { kind: league.incidentSchedule.kind }
+        : undefined;
+    const humanIsHome = currentHumanFixture.homeId === "human";
     const result = simulateFixture({
       fixture: currentHumanFixture,
       home,
       away,
-      seed: `${league.id}:${currentHumanFixture.id}:${league.results.length}`
+      seed: `${league.id}:${currentHumanFixture.id}:${league.results.length}`,
+      homeImpactSubPlayerId: humanIsHome ? selectedImpactSubId : null,
+      awayImpactSubPlayerId: humanIsHome ? null : selectedImpactSubId,
+      homeCasualty: humanIsHome ? scheduledIncident : undefined,
+      awayCasualty: humanIsHome ? undefined : scheduledIncident
     });
+    if (selectedImpactSubId !== null) {
+      setLeague({ ...league, impactSubsUsed: league.impactSubsUsed + 1 });
+    }
     setCurrentResult(result);
     startLeagueClock();
     setReadyToRecord(false);
-    setSelectedSub(null);
+    setMiniImpactSubPlayerId(null);
     setLastFlashedGoalCount(0);
   }
 
@@ -1883,8 +2099,12 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
       const home = currentSeasonFixture.homeId === "human" ? matchHuman : baseHome;
       const away = currentSeasonFixture.awayId === "human" ? matchHuman : baseAway;
       const humanModifier =
-        (seasonTeamTalkActive ? TEAM_TALK_EXPECTED_GOALS_BONUS : 0) -
-        (seasonOutOfFormChoice === "keep" ? OUT_OF_FORM_EXPECTED_GOALS_PENALTY : 0);
+        seasonOutOfFormChoice === "keep" ? -OUT_OF_FORM_EXPECTED_GOALS_PENALTY : 0;
+      const selectedImpactSubId = availableImpactSubs(matchHuman).some(
+        (pick) => pick.player.i === seasonImpactSubPlayerId
+      )
+        ? seasonImpactSubPlayerId
+        : null;
       // The human's only injuries/red cards come from the whole-season casualty budget. If this matchday
       // is scheduled to strike, force it on the human's side (victim weighted by season contribution);
       // otherwise pass `null` so no random casualty can occur.
@@ -1899,10 +2119,31 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
         seed: `${season.id}:${currentSeasonFixture.id}:${season.results.length}`,
         homeExpectedGoalsModifier: currentSeasonFixture.homeId === "human" ? humanModifier : 0,
         awayExpectedGoalsModifier: currentSeasonFixture.awayId === "human" ? humanModifier : 0,
+        homeImpactSubPlayerId: currentSeasonFixture.homeId === "human" ? selectedImpactSubId : null,
+        awayImpactSubPlayerId: currentSeasonFixture.awayId === "human" ? selectedImpactSubId : null,
         homeCasualty: currentSeasonFixture.homeId === "human" ? humanCasualty : undefined,
         awayCasualty: currentSeasonFixture.awayId === "human" ? humanCasualty : undefined
       });
-      await recordSeasonMatchAndAdvance(result);
+      const unavailableStarterIds = new Set([
+        ...seasonUnavailablePlayerIds(
+          season.injuryGamesByPlayerId,
+          season.suspensionGamesByPlayerId
+        ),
+        ...(seasonOutOfFormChoice === "bench" && seasonDecision?.outOfForm
+          ? [seasonDecision.outOfForm.playerId]
+          : [])
+      ]);
+      const activeHumanPlayerIds = human.picks
+        .filter((pick) => pick.target !== "SUB")
+        .map((pick) => unavailableStarterIds.has(pick.player.i)
+          ? matchHuman.substitutions[pick.player.i]
+          : pick.player.i)
+        .filter((playerId): playerId is number => playerId !== undefined);
+      await recordSeasonMatchAndAdvance(
+        result,
+        selectedImpactSubId !== null,
+        activeHumanPlayerIds
+      );
     } catch (error) {
       if (activeSeasonIdRef.current === advancingSeasonId) {
         setSeasonAutoplayError(
@@ -2022,14 +2263,19 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     setPhase("invincible_complete");
   }
 
-  async function recordSeasonMatchAndAdvance(humanResult: FixtureResult) {
+  async function recordSeasonMatchAndAdvance(
+    humanResult: FixtureResult,
+    impactSubActivated = false,
+    activeHumanPlayerIds: readonly number[] = []
+  ) {
     if (!season) {
       return;
     }
 
     const revealNeedsAcknowledgement = shouldPauseAfterInvincibleResult({
       previousResults: season.results,
-      result: humanResult
+      result: humanResult,
+      humanStarterPlayerIds: activeHumanPlayerIds
     });
     if (revealNeedsAcknowledgement) {
       // Let turning points land. The next screen explains what happened and the
@@ -2084,21 +2330,31 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
       result: humanResult
     });
     const nextMatchday = season.currentMatchday + 1;
-    const nextTeamTalksUsedByHalf = seasonTeamTalkActive ? markSeasonTeamTalkUsed(season) : season.teamTalksUsedByHalf;
+    const impactSubEvent = humanResult.events.find(
+      (event) => event.teamId === "human" && event.params.impactSub === 1
+    );
+    const nextImpactSubsUsedByHalf = impactSubActivated
+      ? markSeasonImpactSubUsed(season)
+      : season.impactSubsUsedByHalf;
     let nextSeason: InvincibleSeason = {
       ...season,
       results: nextResults,
       currentMatchday: nextMatchday,
       injuryGamesByPlayerId: postMatchInjuries.injuryGamesByPlayerId,
       suspensionGamesByPlayerId: postMatchSuspensions.suspensionGamesByPlayerId,
-      teamTalksUsedByHalf: nextTeamTalksUsedByHalf,
-      boostsRemaining: remainingSeasonTeamTalks({ teamTalksUsedByHalf: nextTeamTalksUsedByHalf }),
-      boostsUsed: seasonTeamTalkActive ? season.boostsUsed + 1 : season.boostsUsed
+      impactSubsUsedByHalf: nextImpactSubsUsedByHalf,
+      boostsRemaining: remainingSeasonImpactSubs({
+        currentMatchday: nextMatchday,
+        impactSubsUsedByHalf: nextImpactSubsUsedByHalf
+      }),
+      boostsUsed: impactSubActivated ? season.boostsUsed + 1 : season.boostsUsed
     };
 
     const currentHuman = season.managers.find((manager) => manager.id === "human");
     const managerCalls = [
-      seasonTeamTalkActive ? "Team talk used" : "",
+      impactSubEvent
+        ? `${impactSubEvent.playerName ?? "Impact sub"} · ${String(impactSubEvent.params.impactLabel ?? "fresh legs")}`
+        : "",
       seasonDecision?.outOfForm && seasonOutOfFormChoice === "keep"
         ? `${seasonDecision.outOfForm.playerName} kept in the XI`
         : seasonDecision?.outOfForm && seasonOutOfFormChoice === "bench"
@@ -2110,25 +2366,36 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     const revealHome = season.managers.find((manager) => manager.id === humanResult.homeId);
     const revealAway = season.managers.find((manager) => manager.id === humanResult.awayId);
     if (revealHome && revealAway) {
+      const feedback = buildMatchFeedback({
+        previousHumanResults: season.results,
+        completedRoundResults,
+        previousStandings,
+        completedStandings,
+        currentHumanResult: humanResult
+      });
+      const hasHumanCasualty = humanResult.homeId === "human"
+        ? humanResult.homeInjuries.length + humanResult.homeRedCards.length > 0
+        : humanResult.awayInjuries.length + humanResult.awayRedCards.length > 0;
+      const isFinalMatch = nextMatchday >= season.rounds.length;
       setSeasonMatchReveal({
         result: humanResult,
         home: revealHome,
         away: revealAway,
-        feedback: buildMatchFeedback({
-          previousHumanResults: season.results,
-          completedRoundResults,
-          previousStandings,
-          completedStandings,
-          currentHumanResult: humanResult
-        }),
+        feedback,
         managerCall: managerCalls.join(" · ") || undefined,
-        hold: revealNeedsAcknowledgement || nextMatchday >= season.rounds.length
+        hold: revealNeedsAcknowledgement || isFinalMatch,
+        compact:
+          !seasonAutoplayPaused &&
+          !feedback.firstLoss &&
+          !hasHumanCasualty &&
+          managerCalls.length === 0 &&
+          !isFinalMatch
       });
     }
 
     setSeasonOutOfFormChoice(null);
     setSeasonOutOfFormSubId(null);
-    setSeasonTeamTalkActive(false);
+    setSeasonImpactSubPlayerId(null);
 
     if (nextMatchday >= season.rounds.length) {
       pendingSeasonCompletionRef.current = nextSeason;
@@ -2217,14 +2484,13 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
         { matchesPlayed: activeRunRef.current.matches }
       );
     }
-    let nextManagers = applyFixtureInjuries(league.managers, currentResult);
     const nextResults = [...league.results, currentResult];
     const otherFixtures = currentRoundFixtures.filter((fixture) => fixture.id !== currentResult.fixtureId);
     const roundFixtureResults: FixtureResult[] = [currentResult];
 
     otherFixtures.forEach((fixture) => {
-      const home = nextManagers.find((manager) => manager.id === fixture.homeId);
-      const away = nextManagers.find((manager) => manager.id === fixture.awayId);
+      const home = league.managers.find((manager) => manager.id === fixture.homeId);
+      const away = league.managers.find((manager) => manager.id === fixture.awayId);
       if (!home || !away) {
         return;
       }
@@ -2236,11 +2502,12 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
       });
       nextResults.push(result);
       roundFixtureResults.push(result);
-      nextManagers = applyFixtureInjuries(nextManagers, result);
     });
 
-    // Clear suspensions after one round
-    nextManagers = nextManagers.map((manager) => ({ ...manager, suspendedPlayerIds: [] }));
+    // Existing bans have now been served. The lifecycle helper clears those
+    // before applying this round's incidents, so a fresh dismissal reaches the
+    // next pre-match lineup instead of disappearing immediately.
+    const nextManagers = advanceMiniLeagueAvailability(league.managers, roundFixtureResults);
 
     const nextRound = league.currentRound + 1;
     const nextLeague = { ...league, managers: nextManagers, results: nextResults, currentRound: nextRound };
@@ -2248,7 +2515,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     setCurrentResult(null);
     resetLeagueClock();
     setReadyToRecord(false);
-    setSelectedSub(null);
+    setMiniImpactSubPlayerId(null);
 
     if (nextRound >= league.rounds.length) {
       completeLeague(nextLeague);
@@ -2442,7 +2709,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     const snapshot: ManagerSquad = {
       ...human,
       id: `snapshot-${Date.now()}`,
-      displayName: `${profile?.displayName ?? "Guest Manager"} XI`,
+      displayName: human.clubIdentity?.clubName ?? `${profile?.displayName ?? "Guest Manager"} XI`,
       kind: "reserve",
       source: "snapshot",
       injuredPlayerIds: [],
@@ -2485,6 +2752,9 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     }
     const clean: ManagerSquad = {
       ...squad,
+      // Custom club names stay private until the community path has moderation
+      // and server-authoritative cosmetic entitlement checks.
+      clubIdentity: undefined,
       kind: "reserve",
       source: "snapshot",
       injuredPlayerIds: [],
@@ -2514,6 +2784,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
         if (data.squad && Array.isArray(data.squad.picks) && data.squad.picks.length > 0) {
           return {
             ...data.squad,
+            clubIdentity: undefined,
             kind: "reserve",
             source: "snapshot",
             injuredPlayerIds: [],
@@ -2601,7 +2872,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
   }
 
   async function signInWithX() {
-    if (phase !== "setup" && phase !== "draft") {
+    if (!canSafelyStartXLogin(phase)) {
       setAuthMessage("X sign-in is available between matches so an active run is never lost. Use email sign-in here, or finish the run first.");
       return;
     }
@@ -2780,11 +3051,39 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     setAuthMessage("Demo profile saved locally.");
   }
 
-  function startAnotherRun() {
+  function startMode(mode: CompetitionMode, source: "completion" | "my_home") {
+    if (activeRunRef.current && !activeRunRef.current.completed) {
+      switchView("play");
+      return;
+    }
+    const nextGameMode: GameMode = mode === "invincible" ? "be_invincible" : "minileague";
+    setGameMode(nextGameMode);
+    void trackProductEvent("mode_selected", {
+      competitionMode: mode,
+      source
+    });
     if (!TESTING_MODE && !profile && guestStatus.played) {
+      resetDraft("setup");
       setShowAuthGate(true);
       return;
     }
+    if (!selectedManager) {
+      resetDraft("setup");
+      return;
+    }
+    beginDraft(nextGameMode);
+  }
+
+  function startModeFromCompletion(mode: CompetitionMode) {
+    startMode(mode, "completion");
+  }
+
+  function startModeFromProgress(mode: CompetitionMode) {
+    switchView("play");
+    startMode(mode, "my_home");
+  }
+
+  function changeSetupFromCompletion() {
     resetDraft("setup");
   }
 
@@ -2810,12 +3109,12 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
         : phase === "league"
           ? "These are historical opponents. Your season result goes to the real-player leaderboard."
           : phase === "season"
-            ? "Thirty-eight matches. Stay unbeaten, manage the knocks, and use team talks carefully."
+            ? "Thirty-eight matches. Stay unbeaten, manage the knocks, and time two Impact Subs carefully."
           : phase === "exhibition"
             ? "This exhibition is just for pride. No score, injuries or leaderboard points are changed."
             : phase === "invincible_complete"
               ? "Invincible season complete. The official award depends on the hidden eligibility gate."
-            : "Season recorded. Try the community exhibition or build another squad.";
+            : "Season recorded. Choose the next challenge and keep the career moving.";
 
   const leagueHumanResults = league?.results.filter(
     (result) => result.homeId === "human" || result.awayId === "human"
@@ -2863,9 +3162,20 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
         : phase === "complete" || phase === "invincible_complete"
           ? 100
           : (exhibitionSecond / 90) * 100;
+  const activeCareerRunMode: CompetitionMode | null = phase === "league"
+    ? "minileague"
+    : phase === "season"
+      ? "invincible"
+      : phase === "draft"
+        ? gameMode === "be_invincible" ? "invincible" : "minileague"
+        : null;
 
   return (
-    <main className="app-shell" data-app-ready={dataReady ? "true" : "false"}>
+    <main
+      className="app-shell"
+      data-app-ready={dataReady ? "true" : "false"}
+      data-game-mode={gameMode === "be_invincible" ? "invincible" : "minileague"}
+    >
       <header className="topbar">
         <a className="brand-lockup" href={`/${locale}`} aria-label={`${copy.appName} home`}>
           <FootyRushLogo />
@@ -2893,6 +3203,16 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
           >
             {copy.tabLeaderboards}
             {(isPlaying || exhibitionPlaying) && <span className="tab-lock">· {copy.tabLive}</span>}
+          </button>
+          <button
+            type="button"
+            className={`banner-tab${view === "achievements" ? " active" : ""}`}
+            onClick={() => !isPlaying && !exhibitionPlaying && switchView("achievements")}
+            disabled={isPlaying || exhibitionPlaying}
+            title={isPlaying || exhibitionPlaying ? copy.tabLockedHint : undefined}
+            aria-current={view === "achievements" ? "page" : undefined}
+          >
+            Achievements
           </button>
           <button
             type="button"
@@ -3019,14 +3339,27 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
         />
       )}
 
+      {view === "achievements" && (
+        <AchievementsScreen
+          records={careerRecords}
+          identity={effectiveClubIdentity}
+          activeRun={activeCareerRunMode !== null}
+          onSave={saveClubIdentity}
+        />
+      )}
+
       {view === "personal" && (
         <PersonalProgressScreen
-          records={leaderboardRecords}
+          records={careerRecords}
+          careerSummary={careerSummary}
           managerScore={managerScore}
           expertUnlocked={expertUnlocked}
           profile={profile}
           isAdmin={isAdmin}
           locale={locale}
+          activeRunMode={activeCareerRunMode}
+          onChooseMode={startModeFromProgress}
+          onResumeRun={() => switchView("play")}
           onSignOut={signOut}
         />
       )}
@@ -3528,8 +3861,19 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                 opponent={currentHumanFixture.homeId === "human"
                   ? managerById.get(currentHumanFixture.awayId)
                   : managerById.get(currentHumanFixture.homeId)}
+                human={miniHumanManager}
                 standings={standings}
                 fixtureId={currentHumanFixture.id}
+                impactSubOptions={miniImpactSubOptions}
+                impactSubsRemaining={remainingImpactSubs(
+                  league.impactSubsUsed,
+                  MINILEAGUE_IMPACT_SUB_LIMIT
+                )}
+                selectedImpactSubPlayerId={miniImpactSubPlayerId}
+                unavailableStarters={miniUnavailableStarters}
+                missingSubstitutions={miniMissingSubstitutions}
+                onChooseReplacement={chooseMiniReplacement}
+                onSelectImpactSub={setMiniImpactSubPlayerId}
                 onStart={startCurrentMatch}
               />
             )}
@@ -3557,56 +3901,42 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                   ))}
                 </div>
 
-                {latestHumanInjury && (
-                  (() => {
-                    const humanManager = league.managers.find((manager) => manager.id === "human");
-                    const availableSubs =
-                      humanManager?.picks
-                        .filter((pick) => pick.target === "SUB" && !humanManager.injuredPlayerIds.includes(pick.player.i))
-                        .slice(0, 5) ?? [];
-                    const assistantPick = [...availableSubs].sort((a, b) => b.effectiveRating - a.effectiveRating)[0];
-                    return (
-                      <div className="injury-prompt">
-                        <strong>Substitution needed</strong>
-                        <p>{latestHumanInjury.playerName} cannot continue. Pick a bench option or let the assistant choose.</p>
-                        <div className="sub-row">
-                          {availableSubs.map((pick) => (
-                            <button
-                              key={pick.player.i}
-                              type="button"
-                              className="sub-option"
-                              onClick={() => {
-                                if (latestHumanInjury?.playerId !== undefined) {
-                                  handleSubSelection(latestHumanInjury.playerId, pick.player.i, pick.player.n);
-                                } else {
-                                  setSelectedSub(pick.player.n);
-                                }
-                              }}
-                            >
-                              <span className="sub-option-num">{pick.player.num}</span>
-                              <span className="sub-option-name">{pick.player.n.split(/[\s.]+/).filter(Boolean).slice(-1)[0]}</span>
-                              <span className="sub-option-pos">{pick.player.p[0]}</span>
-                            </button>
-                          ))}
-                          <button
-                            type="button"
-                            className="sub-option assistant-pick"
-                            onClick={() => {
-                              if (latestHumanInjury?.playerId !== undefined && assistantPick) {
-                                handleSubSelection(latestHumanInjury.playerId, assistantPick.player.i, assistantPick.player.n);
-                              } else {
-                                setSelectedSub("Assistant");
-                              }
-                            }}
-                          >
-                            <span className="sub-option-num">AI</span>
-                            <span className="sub-option-name">Assistant</span>
-                            <span className="sub-option-pos">Pick</span>
-                          </button>
-                        </div>
+                {!isPlaying && readyToRecord && currentHumanTurningPoints.length > 0 && (
+                  <div className="match-turning-points" aria-label="Your match turning points">
+                    <span>Match decisions & consequences</span>
+                    {currentHumanTurningPoints.map((event) => {
+                      const affectedPick = miniHumanManager?.picks.find(
+                        (pick) => pick.player.i === event.playerId
+                      );
+                      const isBenchIncident = affectedPick?.target === "SUB";
+                      return (
+                      <div className={`match-turning-point ${event.code}`} key={event.id}>
+                        <strong>
+                          {event.params.impactSub === 1
+                            ? `Impact Sub · ${event.playerName ?? "Fresh legs"}`
+                            : event.code === "red_card"
+                              ? `${event.playerName ?? "A player"} saw red`
+                              : `${event.playerName ?? "A player"} left injured`}
+                        </strong>
+                        <p>
+                          {event.params.impactSub === 1
+                            ? `${String(event.params.impactLabel ?? "Touchline change")} entered the match story.`
+                            : event.code === "red_card"
+                              ? league.currentRound < league.rounds.length - 1
+                                ? isBenchIncident
+                                  ? "Suspended for the next match and unavailable from the bench."
+                                  : "Suspended for the next match. You will need to reshape the XI before kickoff."
+                                : "The dismissal landed in the final round."
+                              : league.currentRound < league.rounds.length - 1
+                                ? isBenchIncident
+                                  ? "Unavailable from the bench for the rest of this Mini League."
+                                  : "Unavailable for the rest of this Mini League. Choose the replacement before the next kickoff."
+                                : "The injury landed in the final round."}
+                        </p>
                       </div>
-                    );
-                  })()
+                      );
+                    })}
+                  </div>
                 )}
 
                 <div className="match-actions">
@@ -3639,6 +3969,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
 
           <div className="side-stack">
             <StandingsPanel standings={standings} managers={league.managers} />
+            {miniRunStats.matches > 0 && <SquadRunStory stats={miniRunStats} compact />}
             <InjuryPanel managers={league.managers} />
           </div>
         </section>
@@ -3658,6 +3989,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                 locale={locale}
                 managerCall={seasonMatchReveal.managerCall}
                 hold={seasonMatchReveal.hold}
+                compact={seasonMatchReveal.compact}
                 reducedMotion={prefersReducedMotion}
                 active={view === "play" && pageVisible && !showAuthGate}
                 onComplete={() => void finishSeasonMatchReveal()}
@@ -3673,7 +4005,8 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                 humanPosition={Math.max(1, seasonStandings.findIndex((standing) => standing.managerId === "human") + 1)}
                 decision={seasonDecision}
                 season={season}
-                teamTalkActive={seasonTeamTalkActive}
+                impactSubPlayerId={seasonImpactSubPlayerId}
+                impactSubOptions={seasonImpactSubOptions}
                 outOfFormChoice={seasonOutOfFormChoice}
                 outOfFormSubId={seasonOutOfFormSubId}
                 availableSubs={seasonOutOfFormSubs}
@@ -3685,8 +4018,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                 autoplayCountdown={seasonAutoplayCountdown}
                 autoplayError={seasonAutoplayError}
                 onChooseSub={handleSeasonSubSelection}
-                onUseTeamTalk={() => canUseSeasonTeamTalk(season) && setSeasonTeamTalkActive(true)}
-                onSkipTeamTalk={() => setSeasonTeamTalkActive(false)}
+                onSelectImpactSub={setSeasonImpactSubPlayerId}
                 onKeepOutOfForm={() => {
                   setSeasonOutOfFormChoice("keep");
                   setSeasonOutOfFormSubId(null);
@@ -3731,7 +4063,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
             </div>
 
             <div className="side-stack season-side-stack">
-              <SeasonStatusPanel season={season} />
+              <SeasonStatusPanel season={season} runStats={invincibleRunStats} />
               {season.results.some((result) => result.homeId === "human" || result.awayId === "human") && (
                 <SeasonResultsList season={season} managers={season.managers} />
               )}
@@ -3747,6 +4079,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                   <FormationPitch
                     picks={seasonHumanManager.picks}
                     formationId={seasonHumanManager.formationId}
+                    manager={seasonHumanManager}
                     injuredPlayerIds={seasonUnavailablePlayerIds(season.injuryGamesByPlayerId)}
                     suspendedPlayerIds={seasonUnavailablePlayerIds({}, season.suspensionGamesByPlayerId)}
                   />
@@ -3836,10 +4169,16 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                     : `${Math.max(0, EXPERT_SCORE_THRESHOLD - managerScore)} score to expert mode.`}
               </p>
             </div>
-            <button className="primary-button wide" type="button" onClick={startAnotherRun}>
-              <Shuffle size={18} />
-              Build another squad
-            </button>
+            <SquadRunStory stats={miniRunStats} complete />
+            <CareerChase
+              summary={careerSummary}
+              mode="minileague"
+              onViewAll={() => switchView("personal")}
+            />
+            <NextRunChooser
+              onChooseMode={startModeFromCompletion}
+              onChangeSetup={changeSetupFromCompletion}
+            />
             <div className="complete-actions">
               <button className="secondary-button" type="button" onClick={startExhibition} disabled={!dataReady}>
                 <Users size={18} />
@@ -3944,13 +4283,19 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                     ? "This was an unbeaten season, but official Invincible awards are only granted to randomly assigned attempts."
                     : "Only unbeaten seasons can qualify for the official Invincible award."}
                 {season.awardProduction === false ? " Local fallback mode was used, so production awards require the server gate." : ""}
-                {` Team talks used: ${season.boostsUsed}/${INVINCIBLE_TEAM_TALK_LIMIT}.`}
+                {` Impact Subs used: ${season.boostsUsed}/${INVINCIBLE_IMPACT_SUB_LIMIT}.`}
               </p>
             </div>
-            <button className="primary-button wide" type="button" onClick={startAnotherRun}>
-              <Shuffle size={18} />
-              Build another squad
-            </button>
+            <SquadRunStory stats={invincibleRunStats} complete />
+            <CareerChase
+              summary={careerSummary}
+              mode="invincible"
+              onViewAll={() => switchView("personal")}
+            />
+            <NextRunChooser
+              onChooseMode={startModeFromCompletion}
+              onChangeSetup={changeSetupFromCompletion}
+            />
             <div className="complete-actions">
               <button className="secondary-button" type="button" onClick={startSeasonExhibition} disabled={!dataReady}>
                 <Users size={18} />
@@ -4053,7 +4398,11 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                   <h2>{exhibition.away.displayName}</h2>
                 </div>
               </div>
-              <FormationPitch picks={exhibition.away.picks} formationId={exhibition.away.formationId} />
+              <FormationPitch
+                picks={exhibition.away.picks}
+                formationId={exhibition.away.formationId}
+                manager={exhibition.away}
+              />
             </div>
           </div>
         </section>
@@ -4126,11 +4475,35 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
               {roundSummaryData.fixtures.map((result) => {
                 const home = roundSummaryData.managers.find((m) => m.id === result.homeId);
                 const away = roundSummaryData.managers.find((m) => m.id === result.awayId);
+                const storyEvents = result.events.filter(
+                  (event) =>
+                    event.code === "injury" ||
+                    event.code === "red_card" ||
+                    event.params.impactSub === 1
+                );
                 return (
-                  <div className="summary-row" key={result.fixtureId}>
-                    <span className={result.homeId === "human" ? "you-label" : ""}>{home?.displayName ?? result.homeId}</span>
-                    <strong className="summary-score">{result.homeGoals} – {result.awayGoals}</strong>
-                    <span className={result.awayId === "human" ? "you-label" : ""}>{away?.displayName ?? result.awayId}</span>
+                  <div className="summary-fixture" key={result.fixtureId}>
+                    <div className="summary-row">
+                      <span className={result.homeId === "human" ? "you-label" : ""}>{home?.displayName ?? result.homeId}</span>
+                      <strong className="summary-score">{result.homeGoals} – {result.awayGoals}</strong>
+                      <span className={result.awayId === "human" ? "you-label" : ""}>{away?.displayName ?? result.awayId}</span>
+                    </div>
+                    {storyEvents.length > 0 && (
+                      <div className="summary-story-events">
+                        {storyEvents.map((event) => (
+                          <span
+                            className={event.code === "red_card" ? "is-red" : event.code === "injury" ? "is-injury" : "is-impact"}
+                            key={event.id}
+                          >
+                            {event.params.impactSub === 1
+                              ? `⚡ ${event.playerName ?? "Impact Sub"}`
+                              : event.code === "red_card"
+                                ? `🟥 ${event.playerName ?? "Player"} · next-match ban`
+                                : `✚ ${event.playerName ?? "Player"} · injured`}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -4186,12 +4559,12 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                     className="primary-button wide auth-x-primary"
                     type="button"
                     onClick={signInWithX}
-                    disabled={phase !== "setup" && phase !== "draft"}
+                    disabled={!canSafelyStartXLogin(phase)}
                   >
                     <XLogo size={18} />
                     {copy.xLogin}
                   </button>
-                  {phase !== "setup" && phase !== "draft" && (
+                  {!canSafelyStartXLogin(phase) && (
                     <small>Use email sign-in during an active run. X sign-in returns between runs so your season stays safe.</small>
                   )}
                 </div>
@@ -4305,21 +4678,28 @@ function TeamBadge({
   teamCode,
   teamName,
   monogram,
+  manager,
   small = false
 }: {
-  teamCode: string;
+  teamCode?: string;
   teamName?: string;
   monogram?: string;
+  manager?: ManagerSquad;
   small?: boolean;
 }) {
+  const resolved = manager ? resolveManagerIdentity(manager) : null;
+  const resolvedName = resolved?.clubName ?? teamName ?? teamCode ?? "FootyRush FC";
+  const resolvedMonogram = monogram
+    ?? resolved?.monogram
+    ?? getTeamMonogram(teamCode ?? "", resolvedName);
   return (
     <span
       className={`team-badge${small ? " team-badge--sm" : ""}`}
-      style={getTeamVisualStyle(teamCode) as CSSProperties}
+      style={(resolved?.style ?? getTeamVisualStyle(teamCode ?? "FR")) as CSSProperties}
       role="img"
-      aria-label={`${teamName ?? teamCode} colours`}
+      aria-label={`${resolvedName} colours`}
     >
-      {monogram ?? getTeamMonogram(teamCode, teamName)}
+      {resolvedMonogram}
     </span>
   );
 }
@@ -4410,14 +4790,17 @@ function SquadPanel({ picks, formationId, mode }: { picks: DraftPick[]; formatio
 function FormationPitch({
   picks,
   formationId,
+  manager,
   injuredPlayerIds = [],
   suspendedPlayerIds = []
 }: {
   picks: DraftPick[];
   formationId: string;
+  manager?: ManagerSquad;
   injuredPlayerIds?: number[];
   suspendedPlayerIds?: number[];
 }) {
+  const squadStyle = manager ? resolveManagerIdentity(manager).style : null;
   const slots = getStarterSlots(formationId);
   const lineYPct: Record<string, number> = { keeper: 88, defense: 66, midfield: 42, attack: 17 };
 
@@ -4481,7 +4864,10 @@ function FormationPitch({
                 style={{ left: `${xPct}%`, top: `${yPct}%` }}
                 title={`${pick.player.n} · ${pick.slotLabel} · ${pick.teamCode} '${String(pick.year).slice(2)}${pick.boostActive && pick.boost ? ` · ${pick.boost.label}` : ""}`}
               >
-                <span className={tokenClass} style={getTeamVisualStyle(pick.teamCode) as CSSProperties}>
+                <span
+                  className={tokenClass}
+                  style={(squadStyle ?? getTeamVisualStyle(pick.teamCode)) as CSSProperties}
+                >
                   <Shirt size={34} strokeWidth={1.5} className="kit-icon" />
                   <span className="kit-num">{pick.player.num}</span>
                   {isInjured && <span className="token-flag injury">＋</span>}
@@ -4562,19 +4948,19 @@ function MatchHeader({
   awayGoals: number;
   flashing?: boolean;
 }) {
-  const homeTeamCode = home?.picks.find((pick) => pick.target !== "SUB")?.teamCode ?? home?.id ?? "HOME";
-  const awayTeamCode = away?.picks.find((pick) => pick.target !== "SUB")?.teamCode ?? away?.id ?? "AWAY";
+  const homeIdentity = home ? resolveManagerIdentity(home) : null;
+  const awayIdentity = away ? resolveManagerIdentity(away) : null;
   return (
     <div className="scoreboard">
       <div className="scoreboard-team is-home">
         <TeamBadge
-          teamCode={homeTeamCode}
+          manager={home}
+          teamCode={home?.id ?? "HOME"}
           teamName={home?.displayName}
-          monogram={home?.kind === "human" ? "YOU" : undefined}
         />
         <div className="scoreboard-team-copy">
           <span>{managerSourceLabel(home)}</span>
-          <strong>{home?.displayName}</strong>
+          <strong>{homeIdentity?.clubName ?? home?.displayName}</strong>
         </div>
       </div>
       <div className={`score${flashing ? " flashing" : ""}`}>
@@ -4582,13 +4968,13 @@ function MatchHeader({
       </div>
       <div className="scoreboard-team is-away">
         <TeamBadge
-          teamCode={awayTeamCode}
+          manager={away}
+          teamCode={away?.id ?? "AWAY"}
           teamName={away?.displayName}
-          monogram={away?.kind === "human" ? "YOU" : undefined}
         />
         <div className="scoreboard-team-copy">
           <span>{managerSourceLabel(away)}</span>
-          <strong>{away?.displayName}</strong>
+          <strong>{awayIdentity?.clubName ?? away?.displayName}</strong>
         </div>
       </div>
     </div>
@@ -4637,20 +5023,20 @@ function StandingsPanel({
         {standings.map((standing, index) => {
           const isYou = standing.managerId === "human";
           const manager = managerByStandingId.get(standing.managerId);
-          const teamCode = isYou
-            ? "YOU"
-            : manager?.picks.find((pick) => pick.target !== "SUB")?.teamCode ?? manager?.picks[0]?.teamCode ?? standing.managerId;
+          const clubName = manager
+            ? resolveManagerIdentity(manager).clubName
+            : standing.displayName;
           return (
             <div className={`table-row${isYou ? " is-you" : ""}`} key={standing.managerId}>
               <span className="table-position">{index + 1}</span>
               <strong>
                 <TeamBadge
-                  teamCode={teamCode}
+                  manager={manager}
+                  teamCode={standing.managerId}
                   teamName={standing.displayName}
-                  monogram={isYou ? "FR" : undefined}
                   small
                 />
-                <span className="table-name">{standing.displayName}</span>
+                <span className="table-name">{clubName}</span>
                 {isYou ? <span className="you-tag">YOU</span> : null}
               </strong>
               <span>{standing.played}</span>
@@ -4715,13 +5101,29 @@ function hashStr(str: string): number {
 
 function PreMatchPanel({
   opponent,
+  human,
   standings,
   fixtureId,
+  impactSubOptions,
+  impactSubsRemaining,
+  selectedImpactSubPlayerId,
+  unavailableStarters,
+  missingSubstitutions,
+  onChooseReplacement,
+  onSelectImpactSub,
   onStart
 }: {
   opponent?: ManagerSquad;
+  human?: ManagerSquad;
   standings: ReturnType<typeof computeStandings>;
   fixtureId: string;
+  impactSubOptions: DraftPick[];
+  impactSubsRemaining: number;
+  selectedImpactSubPlayerId: number | null;
+  unavailableStarters: DraftPick[];
+  missingSubstitutions: DraftPick[];
+  onChooseReplacement: (unavailablePlayerId: number, subPlayerId: number) => void;
+  onSelectImpactSub: (playerId: number | null) => void;
   onStart: () => void;
 }) {
   if (!opponent) {
@@ -4736,6 +5138,26 @@ function PreMatchPanel({
   const oppStrength = calculateSquadStrength(opponent);
   const oppStanding = standings.find((s) => s.managerId === opponent.id);
   const quote = managerQuotes[hashStr(fixtureId) % managerQuotes.length];
+  const unavailableIds = new Set([
+    ...(human?.injuredPlayerIds ?? []),
+    ...(human?.suspendedPlayerIds ?? [])
+  ]);
+  const usedReplacementIds = new Set(
+    unavailableStarters
+      .map((starter) => human?.substitutions[starter.player.i])
+      .filter((playerId): playerId is number => playerId !== undefined)
+  );
+  const replacementOptions = (starter: DraftPick) => {
+    const selected = human?.substitutions[starter.player.i];
+    return (
+      human?.picks.filter(
+        (pick) =>
+          pick.target === "SUB" &&
+          !unavailableIds.has(pick.player.i) &&
+          (!usedReplacementIds.has(pick.player.i) || pick.player.i === selected)
+      ) ?? []
+    );
+  };
 
   return (
     <div className="prematch-panel">
@@ -4769,9 +5191,97 @@ function PreMatchPanel({
         )}
       </div>
       <ManagerAvatar mood="thinking" line={quote} />
-      <button className="primary-button wide" type="button" onClick={onStart}>
+
+      {unavailableStarters.length > 0 && human && (
+        <div className="mini-lineup-decision" role="group" aria-label="Required lineup changes">
+          <div className="mini-decision-heading">
+            <div>
+              <span>Lineup decision</span>
+              <strong>Replace unavailable starters</strong>
+            </div>
+            <span className="decision-count">{missingSubstitutions.length} left</span>
+          </div>
+          {unavailableStarters.map((starter) => {
+            const selected = human.substitutions[starter.player.i];
+            const absence = human.suspendedPlayerIds.includes(starter.player.i)
+              ? "Suspended this match"
+              : "Injured for the run";
+            const options = replacementOptions(starter);
+            return (
+              <div className="mini-replacement-row" key={starter.player.i}>
+                <div>
+                  <strong>{starter.player.n}</strong>
+                  <span>{absence}</span>
+                </div>
+                <div className="sub-row">
+                  {options.map((pick) => (
+                    <button
+                      key={pick.player.i}
+                      type="button"
+                      className={`sub-option${selected === pick.player.i ? " assistant-pick" : ""}`}
+                      onClick={() => onChooseReplacement(starter.player.i, pick.player.i)}
+                      aria-pressed={selected === pick.player.i}
+                    >
+                      <span className="sub-option-num">{pick.player.num}</span>
+                      <span className="sub-option-name">{pick.player.n.split(/[\s.]+/).filter(Boolean).slice(-1)[0]}</span>
+                      <span className="sub-option-pos">{pick.benchRole ?? pick.player.p[0]}</span>
+                    </button>
+                  ))}
+                  {options.length === 0 && (
+                    <span className="fine-print">No healthy substitute is available; the XI will play weakened.</span>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <div className={`impact-sub-selector${impactSubsRemaining === 0 ? " is-spent" : ""}`}>
+        <div className="mini-decision-heading">
+          <div>
+            <span>Touchline call</span>
+            <strong>Prime an Impact Sub</strong>
+          </div>
+          <span className="decision-count">{impactSubsRemaining}/{MINILEAGUE_IMPACT_SUB_LIMIT} left</span>
+        </div>
+        {impactSubsRemaining > 0 && impactSubOptions.length > 0 ? (
+          <>
+            <p>Optional. Choose the second-half change that fits the match story, or save both charges for later.</p>
+            <div className="impact-sub-options" role="group" aria-label="Impact Sub options">
+              {impactSubOptions.map((pick) => {
+                const effect = impactSubEffectForPick(pick);
+                const selected = selectedImpactSubPlayerId === pick.player.i;
+                return (
+                  <button
+                    key={pick.player.i}
+                    type="button"
+                    className={`impact-sub-option${selected ? " active" : ""}`}
+                    onClick={() => onSelectImpactSub(selected ? null : pick.player.i)}
+                    aria-pressed={selected}
+                  >
+                    <span>{pick.benchRole}</span>
+                    <strong>{pick.player.n}</strong>
+                    <small>{effect?.label}</small>
+                    <em>{effect?.description}</em>
+                  </button>
+                );
+              })}
+            </div>
+          </>
+        ) : (
+          <p>{impactSubsRemaining === 0 ? "Both Impact Subs have been used. The bench still covers injuries and suspensions." : "No healthy outfield bench player is free for an Impact Sub."}</p>
+        )}
+      </div>
+
+      <button
+        className="primary-button wide"
+        type="button"
+        onClick={onStart}
+        disabled={missingSubstitutions.length > 0}
+      >
         <Activity size={18} />
-        Kick off
+        {missingSubstitutions.length > 0 ? "Choose the lineup first" : "Kick off"}
       </button>
     </div>
   );
@@ -4785,7 +5295,8 @@ function SeasonPreMatchPanel({
   humanPosition,
   decision,
   season,
-  teamTalkActive,
+  impactSubPlayerId,
+  impactSubOptions,
   outOfFormChoice,
   outOfFormSubId,
   availableSubs,
@@ -4798,8 +5309,7 @@ function SeasonPreMatchPanel({
   autoplayError,
   canStart,
   onChooseSub,
-  onUseTeamTalk,
-  onSkipTeamTalk,
+  onSelectImpactSub,
   onKeepOutOfForm,
   onBenchOutOfForm,
   onStart,
@@ -4812,7 +5322,8 @@ function SeasonPreMatchPanel({
   humanPosition: number;
   decision: SeasonPregameDecision | null;
   season: InvincibleSeason;
-  teamTalkActive: boolean;
+  impactSubPlayerId: number | null;
+  impactSubOptions: DraftPick[];
   outOfFormChoice: "keep" | "bench" | null;
   outOfFormSubId: number | null;
   availableSubs: DraftPick[];
@@ -4825,16 +5336,15 @@ function SeasonPreMatchPanel({
   autoplayError: string;
   canStart: boolean;
   onChooseSub: (unavailablePlayerId: number, subPlayerId: number) => void;
-  onUseTeamTalk: () => void;
-  onSkipTeamTalk: () => void;
+  onSelectImpactSub: (playerId: number | null) => void;
   onKeepOutOfForm: () => void;
   onBenchOutOfForm: (subId: number) => void;
   onStart: () => void | Promise<void>;
   onToggleAutoplay: () => void;
 }) {
   const oppStrength = opponent ? calculateSquadStrength(opponent) : null;
-  const talkHalf = teamTalkHalfForMatchday(season.currentMatchday);
-  const teamTalkAvailable = canUseSeasonTeamTalk(season);
+  const impactSubHalf = impactSubHalfForMatchday(season.currentMatchday);
+  const impactSubAvailable = canUseSeasonImpactSub(season);
   const usedSubIds = new Set(
     unavailableStarters
       .map((starter) => human.substitutions[starter.player.i])
@@ -4906,7 +5416,7 @@ function SeasonPreMatchPanel({
   const turningPointDetail = latestCasualty
     ? `${latestCasualtyGames > 0 ? `Out for ${latestCasualtyGames} match${latestCasualtyGames === 1 ? "" : "es"}. ` : ""}${latestWasFirstLoss ? "The unbeaten run also ended, but the title chase is still alive. " : ""}Auto-play paused so you can reset the XI.`
     : latestWasFirstLoss
-      ? "Auto-play paused. The league title and a new winning run are still there to chase."
+      ? "The league title and a new winning run are still there to chase; auto-play keeps moving."
       : "";
   const latestSummary = latestHumanResult
     ? {
@@ -4915,11 +5425,10 @@ function SeasonPreMatchPanel({
         opponentGoals: latestHumanResult.homeId === "human" ? latestHumanResult.awayGoals : latestHumanResult.homeGoals
       }
     : null;
-  const opponentName = opponent?.displayName ?? "Opponent";
-  const opponentTeamCode = opponent?.picks[0]?.teamCode ?? opponent?.id ?? "OPP";
-  const humanTeamCode = human.picks[0]?.teamCode ?? "FR";
-  const homeName = humanIsHome ? human.displayName : opponentName;
-  const awayName = humanIsHome ? opponentName : human.displayName;
+  const humanClubName = resolveManagerIdentity(human).clubName;
+  const opponentName = opponent ? resolveManagerIdentity(opponent).clubName : "Opponent";
+  const homeName = humanIsHome ? humanClubName : opponentName;
+  const awayName = humanIsHome ? opponentName : humanClubName;
   const [countdownPrefix, countdownSuffix = ""] = copy.nextGameCountdown.split("{seconds}");
   const autoplayMessage =
     autoplayStatus === "paused"
@@ -4939,13 +5448,13 @@ function SeasonPreMatchPanel({
             {copy.nextGame} · Match {season.currentMatchday + 1} of {season.rounds.length} · {season.skillBand}
           </span>
           <div className="next-game-matchup-row">
-            <TeamBadge teamCode={humanTeamCode} teamName={human.displayName} monogram="YOU" />
+            <TeamBadge manager={human} teamName={humanClubName} />
             <div className="next-game-matchup" aria-label={`${homeName} versus ${awayName}`}>
               <span className={humanIsHome ? "next-game-human" : "next-game-opponent"}>{homeName}</span>
               <span className="next-game-vs" aria-hidden="true">v</span>
               <span className={humanIsHome ? "next-game-opponent" : "next-game-human"}>{awayName}</span>
             </div>
-            <TeamBadge teamCode={opponentTeamCode} teamName={opponentName} />
+            <TeamBadge manager={opponent} teamCode={opponent?.id ?? "OPP"} teamName={opponentName} />
           </div>
           {latestSummary && (
             <small className="next-game-last-result">
@@ -5000,18 +5509,6 @@ function SeasonPreMatchPanel({
                   ? "Kick off season"
                   : copy.startNow}
           </button>
-          {teamTalkAvailable && !teamTalkActive && (
-            <button className="secondary-button" type="button" onClick={onUseTeamTalk} title="Use your one-match boost for this half of the season">
-              <Sparkles size={16} />
-              Use team talk
-            </button>
-          )}
-          {teamTalkActive && (
-            <button className="secondary-button team-talk-active" type="button" onClick={onSkipTeamTalk}>
-              <Sparkles size={16} />
-              Team talk active · cancel
-            </button>
-          )}
           {autoplayStatus !== "failed" && autoplayStatus !== "saving" && autoplayStatus !== "complete" && (
             <button className="secondary-button" type="button" onClick={onToggleAutoplay}>
               {autoplayPaused ? <Play size={16} /> : <Pause size={16} />}
@@ -5028,7 +5525,7 @@ function SeasonPreMatchPanel({
           </div>
         )}
         <div className="prematch-stat">
-          <span>Talks </span>{remainingSeasonTeamTalks(season)}/2
+          <span>Impact </span>{remainingSeasonImpactSubs(season)}/{INVINCIBLE_IMPACT_SUB_LIMIT}
         </div>
         <div className="prematch-stat">
           <span>Pts </span>{humanStanding?.points ?? 0}
@@ -5041,6 +5538,52 @@ function SeasonPreMatchPanel({
           <p>{turningPointDetail}</p>
         </div>
       )}
+
+      <div className={`impact-sub-selector season-impact-sub-selector${impactSubAvailable ? "" : " is-spent"}`}>
+        <div className="mini-decision-heading">
+          <div>
+            <span>{impactSubHalf === "first" ? "First-half resource" : "Second-half resource"}</span>
+            <strong>Prime an Impact Sub</strong>
+          </div>
+          <span className="decision-count">
+            {remainingSeasonImpactSubs(season)}/{INVINCIBLE_IMPACT_SUB_LIMIT} left
+          </span>
+        </div>
+        {impactSubAvailable && impactSubOptions.length > 0 ? (
+          <>
+            <p>
+              Optional. Pick one healthy bench player for a tactical change around the hour.
+              {impactSubHalf === "first" ? " The first-half charge expires after Match 19." : " This is the final season charge."}
+            </p>
+            <div className="impact-sub-options" role="group" aria-label="Be Invincible Impact Sub options">
+              {impactSubOptions.map((pick) => {
+                const effect = impactSubEffectForPick(pick);
+                const selected = impactSubPlayerId === pick.player.i;
+                return (
+                  <button
+                    key={pick.player.i}
+                    type="button"
+                    className={`impact-sub-option${selected ? " active" : ""}`}
+                    onClick={() => onSelectImpactSub(selected ? null : pick.player.i)}
+                    aria-pressed={selected}
+                  >
+                    <span>{pick.benchRole}</span>
+                    <strong>{pick.player.n}</strong>
+                    <small>{effect?.label}</small>
+                    <em>{effect?.description}</em>
+                  </button>
+                );
+              })}
+            </div>
+          </>
+        ) : (
+          <p>
+            {impactSubAvailable
+              ? "No healthy outfield bench player is free for an Impact Sub."
+              : `The ${impactSubHalf === "first" ? "first" : "second"}-half Impact Sub has already been used.`}
+          </p>
+        )}
+      </div>
 
       {decision?.trainingInjury && (
         <div className="season-event-card danger">
@@ -5120,10 +5663,12 @@ function SeasonPreMatchPanel({
         </div>
       )}
 
-      <p className="season-team-talk-note">
-        {teamTalkAvailable
-          ? `One team talk is available in the ${talkHalf === "first" ? "first" : "second"} half. Use it from the match controls above.`
-          : `The ${talkHalf === "first" ? "first" : "second"}-half team talk has been used.`}
+      <p className="season-impact-sub-note">
+        {impactSubAvailable
+          ? impactSubHalf === "first"
+            ? "One first-half Impact Sub is available. Use it before Match 20; it does not carry over."
+            : "One second-half Impact Sub is available for the run-in."
+          : `The ${impactSubHalf === "first" ? "first" : "second"}-half Impact Sub has been used.`}
       </p>
     </div>
   );
@@ -5176,7 +5721,7 @@ function SeasonResultsList({ season, managers }: { season: InvincibleSeason; man
   );
 }
 
-function SeasonStatusPanel({ season }: { season: InvincibleSeason }) {
+function SeasonStatusPanel({ season, runStats }: { season: InvincibleSeason; runStats: RunStats }) {
   const standings = computeStandings(season.managers, season.results);
   const human = standings.find((standing) => standing.managerId === "human");
   const humanResults = season.results.filter((result) => result.homeId === "human" || result.awayId === "human");
@@ -5204,14 +5749,28 @@ function SeasonStatusPanel({ season }: { season: InvincibleSeason }) {
           </strong>
         </div>
         <div>
-          <span>Team talks</span>
-          <strong>{remainingSeasonTeamTalks(season)}/2</strong>
+          <span>Impact Subs</span>
+          <strong>{remainingSeasonImpactSubs(season)}/{INVINCIBLE_IMPACT_SUB_LIMIT}</strong>
         </div>
         <div>
           <span>Absences</span>
           <strong>{injuries.length + suspensions.length}</strong>
         </div>
       </div>
+      {runStats.topScorer && (
+        <div className="season-player-chase">
+          <div>
+            <span>Top scorer</span>
+            <strong>{runStats.topScorer.playerName}</strong>
+          </div>
+          <strong>{runStats.topScorer.goals} goal{runStats.topScorer.goals === 1 ? "" : "s"}</strong>
+          {runStats.nextPlayerGoalMilestone && (
+            <small>
+              {runStats.nextPlayerGoalMilestone.playerName}: {runStats.nextPlayerGoalMilestone.goalsRemaining} to the {runStats.nextPlayerGoalMilestone.targetGoals}-goal milestone
+            </small>
+          )}
+        </div>
+      )}
       <p className="fine-print">Official Invincible eligibility is hidden until the season ends.</p>
     </div>
   );
@@ -5396,31 +5955,39 @@ function LeaderboardsScreen({
 
 function PersonalProgressScreen({
   records,
+  careerSummary,
   managerScore,
   expertUnlocked,
   profile,
   isAdmin,
   locale,
+  activeRunMode,
+  onChooseMode,
+  onResumeRun,
   onSignOut
 }: {
   records: LeaderboardRecord[];
+  careerSummary: CareerSummary;
   managerScore: number;
   expertUnlocked: boolean;
   profile: LocalProfile | null;
   isAdmin: boolean;
   locale: string;
+  activeRunMode: CompetitionMode | null;
+  onChooseMode: (mode: CompetitionMode) => void;
+  onResumeRun: () => void;
   onSignOut: () => void | Promise<void>;
 }) {
   const personalRecords = records.filter((record) => record.kind === "human");
   const miniRecords = personalRecords.filter((record) => record.competitionMode !== "invincible");
   const invincibleRecords = personalRecords.filter((record) => record.competitionMode === "invincible");
-  const miniPoints = miniRecords.reduce((sum, record) => sum + record.matchPoints, 0);
-  const invinciblePoints = invincibleRecords.reduce((sum, record) => sum + record.matchPoints, 0);
+  const miniPoints = careerSummary.miniLeague.totalPoints;
+  const invinciblePoints = careerSummary.invincible.totalPoints;
   const totalGoalDifference = personalRecords.reduce((sum, record) => sum + record.goalDifference, 0);
   const totalGoalsFor = personalRecords.reduce((sum, record) => sum + record.goalsFor, 0);
-  const totalTitles = personalRecords.reduce((sum, record) => sum + record.leagueTitles, 0);
-  const miniTitles = miniRecords.reduce((sum, record) => sum + record.leagueTitles, 0);
-  const invincibleTitles = invincibleRecords.reduce((sum, record) => sum + record.leagueTitles, 0);
+  const totalTitles = careerSummary.totalTitles;
+  const miniTitles = careerSummary.miniLeague.titles;
+  const invincibleTitles = careerSummary.invincible.titles;
   const bestMiniPoints = bestRecordBy(miniRecords, (record) => record.matchPoints);
   const bestSeasonPoints = bestRecordBy(invincibleRecords, (record) => record.matchPoints);
   const bestGoalDifference = bestRecordBy(personalRecords, (record) => record.goalDifference);
@@ -5454,21 +6021,49 @@ function PersonalProgressScreen({
           </div>
           <div>
             <span>Mini leagues</span>
-            <strong>{miniRecords.length}</strong>
+            <strong>{careerSummary.miniLeague.runs}</strong>
             <p>{miniTitles} league win{miniTitles === 1 ? "" : "s"} recorded.</p>
           </div>
           <div>
             <span>Invincible seasons</span>
-            <strong>{invincibleRecords.length}</strong>
+            <strong>{careerSummary.invincible.runs}</strong>
             <p>{invincibleTitles} league title{invincibleTitles === 1 ? "" : "s"} won.</p>
           </div>
+        </div>
+
+        <CareerChase summary={careerSummary} />
+
+        <div className="personal-play-actions" aria-label={activeRunMode ? "Resume current campaign" : "Start a new campaign"}>
+          {activeRunMode ? (
+            <button className={`next-mode-card resume-current ${activeRunMode}`} type="button" onClick={onResumeRun}>
+              <span>Campaign in progress</span>
+              <strong>Resume {activeRunMode === "invincible" ? "Be Invincible" : "Mini League"}</strong>
+              <small>Your current squad and match progress are waiting.</small>
+              <ArrowRight size={20} aria-hidden="true" />
+            </button>
+          ) : (
+            <>
+              <button className="next-mode-card mini" type="button" onClick={() => onChooseMode("minileague")}>
+                <span>Five-match sprint</span>
+                <strong>Play Mini League</strong>
+                <small>Chase a new table finish and player record.</small>
+                <ArrowRight size={20} aria-hidden="true" />
+              </button>
+              <button className="next-mode-card invincible" type="button" onClick={() => onChooseMode("invincible")}>
+                <span>Full-season test</span>
+                <strong>Play Be Invincible</strong>
+                <small>Survive 38 matches without defeat.</small>
+                <ArrowRight size={20} aria-hidden="true" />
+              </button>
+            </>
+          )}
         </div>
 
         <div className="personal-stat-grid">
           <PersonalStat label="Mini league points" value={miniPoints} />
           <PersonalStat label="Invincible points" value={invinciblePoints} />
           <PersonalStat label="League wins" value={totalTitles} />
-          <PersonalStat label="Completed runs" value={personalRecords.length} />
+          <PersonalStat label="Completed runs" value={careerSummary.totalRuns} />
           <PersonalStat label="Goal difference" value={signedNumber(totalGoalDifference)} />
           <PersonalStat label="Goals scored" value={totalGoalsFor} />
         </div>
@@ -5490,12 +6085,12 @@ function PersonalProgressScreen({
               <div className="period-rank-row">
                 <span>Mini League</span>
                 <strong>{miniTitles}</strong>
-                <small>{miniRecords.length} run{miniRecords.length === 1 ? "" : "s"} · {miniPoints} pts</small>
+                <small>{careerSummary.miniLeague.runs} run{careerSummary.miniLeague.runs === 1 ? "" : "s"} · {miniPoints} pts</small>
               </div>
               <div className="period-rank-row">
                 <span>Invincible</span>
                 <strong>{invincibleTitles}</strong>
-                <small>{invincibleRecords.length} season{invincibleRecords.length === 1 ? "" : "s"} · {invinciblePoints} pts</small>
+                <small>{careerSummary.invincible.runs} season{careerSummary.invincible.runs === 1 ? "" : "s"} · {invinciblePoints} pts</small>
               </div>
             </div>
           </div>
@@ -5557,6 +6152,203 @@ function PersonalProgressScreen({
           </div>
         )}
       </div>
+    </section>
+  );
+}
+
+function SquadRunStory({
+  stats,
+  compact = false,
+  complete = false
+}: {
+  stats: RunStats;
+  compact?: boolean;
+  complete?: boolean;
+}) {
+  const milestone = stats.nextPlayerGoalMilestone;
+  const milestonePercent = milestone
+    ? Math.min(100, Math.round((milestone.currentGoals / milestone.targetGoals) * 100))
+    : 100;
+  return (
+    <section className={`squad-run-story${compact ? " compact" : ""}`} aria-label="Squad player statistics">
+      <div className="squad-story-header">
+        <div>
+          <p className="eyebrow">Player milestones</p>
+          <h3>{complete ? "The squad story you can beat" : "This run has a scorer to chase"}</h3>
+        </div>
+        <Target size={22} aria-hidden="true" />
+      </div>
+
+      {stats.topScorer ? (
+        <div className="top-scorer-card">
+          <div>
+            <span>Top scorer</span>
+            <strong>{stats.topScorer.playerName}</strong>
+            <small>{stats.topScorer.goals} goal{stats.topScorer.goals === 1 ? "" : "s"} in {stats.matches} match{stats.matches === 1 ? "" : "es"}</small>
+          </div>
+          {milestone ? (
+            <div className="player-milestone-callout">
+              <strong>{milestone.currentGoals} / {milestone.targetGoals}</strong>
+              <span>
+                {complete
+                  ? `Next squad target: take one scorer to ${milestone.targetGoals}.`
+                  : `${milestone.goalsRemaining} more for ${milestone.playerName} to reach ${milestone.targetGoals}.`}
+              </span>
+              <span className="player-milestone-track" aria-hidden="true">
+                <span style={{ width: `${milestonePercent}%` }} />
+              </span>
+            </div>
+          ) : (
+            <div className="player-milestone-callout is-complete">
+              <strong>Top tier</strong>
+              <span>{stats.topScorer.playerName} cleared every scorer milestone for this mode.</span>
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="top-scorer-card is-empty">
+          <div>
+            <span>Scorer chase</span>
+            <strong>{complete ? "Set the first mark next run" : "The first goal opens the ladder"}</strong>
+            <small>Every named scorer builds a target inside the run.</small>
+          </div>
+        </div>
+      )}
+
+      <div className="run-stat-strip">
+        <div><span>Goals</span><strong>{stats.goalsScored}</strong></div>
+        <div><span>Scorers</span><strong>{stats.uniqueScorers}</strong></div>
+        <div><span>Clean sheets</span><strong>{stats.cleanSheets}</strong></div>
+        <div><span>Incidents</span><strong>{stats.injuries + stats.redCards}</strong></div>
+        <div><span>Impact Subs</span><strong>{stats.impactSubUses}</strong></div>
+      </div>
+
+      {stats.scorers.length > 0 && (
+        <div className="run-scorer-list" aria-label="Run scorers">
+          {stats.scorers.slice(0, compact ? 3 : 5).map((scorer, index) => (
+            <div key={`${scorer.playerId ?? scorer.playerName}-${index}`}>
+              <span>{index + 1}</span>
+              <strong>{scorer.playerName}</strong>
+              <em>{scorer.goals}</em>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function CareerChase({
+  summary,
+  mode,
+  onViewAll
+}: {
+  summary: CareerSummary;
+  mode?: CompetitionMode;
+  onViewAll?: () => void;
+}) {
+  const modeSummary = mode === "invincible" ? summary.invincible : summary.miniLeague;
+  const allMilestones = mode
+    ? nextCareerMilestonesForMode(summary, mode)
+    : nextCareerMilestones(summary);
+  const milestones = mode
+    ? allMilestones
+        .sort((first, second) => {
+          const priority = (milestone: CareerMilestone) =>
+            milestone.metric === "best_points" ? 0 : milestone.metric === "titles" ? 1 : 2;
+          return priority(first) - priority(second) || first.remaining - second.remaining;
+        })
+        .slice(0, 2)
+    : [
+        allMilestones.find((milestone) => milestone.id === "career_runs"),
+        allMilestones.find((milestone) => milestone.id === "minileague_best_points") ??
+          allMilestones.find((milestone) => milestone.id === "minileague_titles"),
+        allMilestones.find((milestone) => milestone.id === "invincible_best_points") ??
+          allMilestones.find((milestone) => milestone.id === "invincible_titles")
+      ].filter((milestone): milestone is CareerMilestone => Boolean(milestone));
+
+  return (
+    <section className="career-chase" aria-label="Career milestones">
+      <div className="career-chase-header">
+        <div>
+          <p className="eyebrow">Career chase</p>
+          <h3>{mode ? "Your next targets" : "One run always feeds the next"}</h3>
+        </div>
+        {onViewAll && (
+          <button className="text-button" type="button" onClick={onViewAll}>
+            View all career stats <ChevronRight size={16} aria-hidden="true" />
+          </button>
+        )}
+      </div>
+      <div className="career-summary-strip">
+        <div>
+          <span>Campaigns</span>
+          <strong>{summary.totalRuns}</strong>
+        </div>
+        <div>
+          <span>Titles</span>
+          <strong>{summary.totalTitles}</strong>
+        </div>
+        <div>
+          <span>{mode === "invincible" ? "Season best" : mode === "minileague" ? "Mini best" : "Best Mini / Season"}</span>
+          <strong>
+            {mode
+              ? modeSummary.bestPoints === null ? "—" : `${modeSummary.bestPoints} pts`
+              : `${summary.miniLeague.bestPoints ?? "—"} / ${summary.invincible.bestPoints ?? "—"}`}
+          </strong>
+        </div>
+      </div>
+      <div className="career-milestone-list">
+        {milestones.map((milestone) => (
+          <div className="career-milestone" key={milestone.id}>
+            <div>
+              <strong>{milestone.label}</strong>
+              <span>{milestone.current} / {milestone.target}</span>
+            </div>
+            <p>{milestone.detail}</p>
+            <span className="career-milestone-track" aria-hidden="true">
+              <span style={{ width: `${milestone.progressPercent}%` }} />
+            </span>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function NextRunChooser({
+  onChooseMode,
+  onChangeSetup
+}: {
+  onChooseMode: (mode: CompetitionMode) => void;
+  onChangeSetup: () => void;
+}) {
+  return (
+    <section className="next-challenge" aria-labelledby="next-challenge-title">
+      <div className="next-challenge-heading">
+        <div>
+          <p className="eyebrow">Keep the run going</p>
+          <h3 id="next-challenge-title">Choose your next challenge</h3>
+        </div>
+        <Target size={24} aria-hidden="true" />
+      </div>
+      <div className="next-mode-grid">
+        <button className="next-mode-card mini" type="button" onClick={() => onChooseMode("minileague")}>
+          <span>Five matches · fast table chase</span>
+          <strong>Play Mini League</strong>
+          <small>Draft a fresh squad and set or beat your five-game best.</small>
+          <ArrowRight size={20} aria-hidden="true" />
+        </button>
+        <button className="next-mode-card invincible" type="button" onClick={() => onChooseMode("invincible")}>
+          <span>38 matches · every setback matters</span>
+          <strong>Start Be Invincible</strong>
+          <small>Take a new squad through the full unbeaten test.</small>
+          <ArrowRight size={20} aria-hidden="true" />
+        </button>
+      </div>
+      <button className="text-button next-change-setup" type="button" onClick={onChangeSetup}>
+        Change manager or formation
+      </button>
     </section>
   );
 }

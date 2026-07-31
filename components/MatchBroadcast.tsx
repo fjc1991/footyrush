@@ -7,7 +7,7 @@ import {
   type MatchFeedback,
   type MatchScoreBeat
 } from "@/lib/game/match-presentation";
-import { getTeamMonogram, getTeamVisualStyle } from "@/lib/game/team-visuals";
+import { resolveManagerIdentity } from "@/lib/game/team-visuals";
 import type { FixtureResult, ManagerSquad, MatchEvent } from "@/lib/game/types";
 
 interface MatchBroadcastProps {
@@ -18,6 +18,7 @@ interface MatchBroadcastProps {
   locale: string;
   managerCall?: string;
   hold: boolean;
+  compact?: boolean;
   reducedMotion?: boolean;
   active?: boolean;
   onComplete: () => void;
@@ -26,6 +27,7 @@ interface MatchBroadcastProps {
 type BroadcastStage = "revealing" | "full-time";
 
 const FULL_TIME_HOLD_MS = 1_400;
+const COMPACT_FULL_TIME_HOLD_MS = 850;
 
 const EVENT_LABELS: Record<MatchEvent["code"], string> = {
   kickoff: "Kick-off",
@@ -41,6 +43,9 @@ const EVENT_LABELS: Record<MatchEvent["code"], string> = {
 };
 
 function beatDelay(beat: MatchScoreBeat): number {
+  if (beat.event.params.impactSub === 1) {
+    return 900;
+  }
   switch (beat.event.code) {
     case "goal":
     case "injury":
@@ -54,29 +59,23 @@ function beatDelay(beat: MatchScoreBeat): number {
   }
 }
 
-function managerTeamCode(manager: ManagerSquad): string {
-  return manager.picks.find((pick) => pick.target !== "SUB")?.teamCode
-    ?? manager.picks[0]?.teamCode
-    ?? manager.id;
-}
-
 function TeamIdentity({ manager, side }: { manager: ManagerSquad; side: "home" | "away" }) {
-  const teamCode = managerTeamCode(manager);
+  const identity = resolveManagerIdentity(manager);
   return (
     <div
       className={`match-broadcast-team match-broadcast-team--${side}${manager.kind === "human" ? " is-human" : ""}`}
     >
       <span
         className="match-broadcast-badge team-badge"
-        style={getTeamVisualStyle(teamCode) as CSSProperties}
+        style={identity.style as CSSProperties}
         role="img"
-        aria-label={`${manager.displayName} colours`}
+        aria-label={`${identity.clubName} colours`}
       >
-        {getTeamMonogram(teamCode, manager.displayName)}
+        {identity.monogram}
       </span>
       <span className="match-broadcast-team-copy">
         <small>{manager.kind === "human" ? "You" : side === "home" ? "Home" : "Away"}</small>
-        <strong>{manager.displayName}</strong>
+        <strong>{identity.clubName}</strong>
       </span>
     </div>
   );
@@ -131,18 +130,20 @@ export default function MatchBroadcast({
   locale,
   managerCall,
   hold,
+  compact = false,
   reducedMotion = false,
   active = true,
   onComplete
 }: MatchBroadcastProps) {
   const timeline = useMemo(() => buildScoreTimeline(result), [result]);
-  const [beatIndex, setBeatIndex] = useState(0);
-  const [stage, setStage] = useState<BroadcastStage>(timeline.length > 0 ? "revealing" : "full-time");
+  const startsAtFullTime = compact || reducedMotion || timeline.length === 0;
+  const [beatIndex, setBeatIndex] = useState(startsAtFullTime ? Math.max(0, timeline.length - 1) : 0);
+  const [stage, setStage] = useState<BroadcastStage>(startsAtFullTime ? "full-time" : "revealing");
   const completionCalledRef = useRef(false);
   const onCompleteRef = useRef(onComplete);
   const stageRef = useRef<HTMLElement | null>(null);
   const continueRef = useRef<HTMLButtonElement | null>(null);
-  const effectiveHold = hold || reducedMotion;
+  const effectiveHold = hold;
 
   useEffect(() => {
     onCompleteRef.current = onComplete;
@@ -150,9 +151,9 @@ export default function MatchBroadcast({
 
   useEffect(() => {
     completionCalledRef.current = false;
-    setBeatIndex(0);
-    setStage(timeline.length > 0 ? "revealing" : "full-time");
-  }, [result.fixtureId, timeline.length]);
+    setBeatIndex(startsAtFullTime ? Math.max(0, timeline.length - 1) : 0);
+    setStage(startsAtFullTime ? "full-time" : "revealing");
+  }, [result.fixtureId, startsAtFullTime, timeline.length]);
 
   const currentBeat = timeline[beatIndex] ?? null;
 
@@ -183,10 +184,10 @@ export default function MatchBroadcast({
       if (completionCalledRef.current) return;
       completionCalledRef.current = true;
       onCompleteRef.current();
-    }, FULL_TIME_HOLD_MS);
+    }, compact ? COMPACT_FULL_TIME_HOLD_MS : FULL_TIME_HOLD_MS);
 
     return () => window.clearTimeout(timer);
-  }, [active, effectiveHold, result.fixtureId, stage]);
+  }, [active, compact, effectiveHold, result.fixtureId, stage]);
 
   useEffect(() => {
     if (!active) return;
@@ -215,7 +216,9 @@ export default function MatchBroadcast({
     : event?.teamId === away.id
       ? " is-away-event"
       : "";
-  const decisiveEvent = isFullTime || event?.code === "goal" || event?.code === "injury" || event?.code === "red_card";
+  const isImpactSub = event?.params.impactSub === 1;
+  const currentEventLabel = isImpactSub ? "Impact Sub" : event ? EVENT_LABELS[event.code] : "Match event";
+  const decisiveEvent = isFullTime || event?.code === "goal" || event?.code === "injury" || event?.code === "red_card" || isImpactSub;
   const human = home.kind === "human" ? home : away.kind === "human" ? away : null;
   const humanInjuryIds = !human
     ? []
@@ -227,17 +230,27 @@ export default function MatchBroadcast({
     : human.id === result.homeId
       ? result.homeRedCards
       : result.awayRedCards;
-  const playerNames = (ids: number[]) => ids.map(
-    (playerId) => human?.picks.find((pick) => pick.player.i === playerId)?.player.n ?? "A starter"
-  );
+  const incidentPlayer = (playerId: number) => human?.picks.find((pick) => pick.player.i === playerId);
   const incidentSummary = [
-    ...playerNames(humanInjuryIds).map((name) => `${name} injured — replacement required`),
-    ...playerNames(humanRedCardIds).map((name) => `${name} sent off — three-match suspension`)
+    ...humanInjuryIds.map((playerId) => {
+      const pick = incidentPlayer(playerId);
+      const name = pick?.player.n ?? "A player";
+      return pick?.target === "SUB"
+        ? `${name} injured — unavailable from the bench`
+        : `${name} injured — replacement required`;
+    }),
+    ...humanRedCardIds.map((playerId) => {
+      const pick = incidentPlayer(playerId);
+      const name = pick?.player.n ?? "A player";
+      return pick?.target === "SUB"
+        ? `${name} sent off — unavailable from the bench for three matches`
+        : `${name} sent off — three-match suspension`;
+    })
   ].join(" · ");
   const liveAnnouncement = decisiveEvent
     ? isFullTime
       ? `Full time. ${home.displayName} ${result.homeGoals}, ${away.displayName} ${result.awayGoals}. ${outcomeCopy(feedback.outcome)}. ${feedback.pointsEarned} point${feedback.pointsEarned === 1 ? "" : "s"}. ${tablePositionCopy(feedback)}. ${unbeatenCopy(feedback)}.${incidentSummary ? ` Turning point: ${incidentSummary}.` : ""}${managerCall ? ` Manager call: ${managerCall}` : ""}`
-      : `${EVENT_LABELS[event!.code]}, ${event!.second} minutes. ${renderCommentary(event!, locale)} Score ${homeGoals} to ${awayGoals}.`
+      : `${currentEventLabel}, ${event!.second} minutes. ${renderCommentary(event!, locale)} Score ${homeGoals} to ${awayGoals}.`
     : "";
 
   function finish() {
@@ -287,7 +300,7 @@ export default function MatchBroadcast({
           {event ? (
             <>
               <span className="match-broadcast-event-meta">
-                <strong>{EVENT_LABELS[event.code]}</strong>
+                <strong>{currentEventLabel}</strong>
                 <small>{event.second}′</small>
               </span>
               <p>{renderCommentary(event, locale)}</p>

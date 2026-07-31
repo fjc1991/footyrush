@@ -1,3 +1,9 @@
+import {
+  clubIdentityToTeamVisual,
+  normalizeClubIdentity
+} from "./club-identity";
+import type { ManagerSquad } from "./types";
+
 export const TEAM_CODES = [
   "MUN",
   "CHE",
@@ -38,7 +44,15 @@ export const TEAM_CODES = [
 ] as const;
 
 export type KnownTeamCode = (typeof TEAM_CODES)[number];
-export type TeamPattern = "solid" | "stripes" | "hoops" | "sash" | "halves" | "pinstripes" | "quarters";
+export type TeamPattern =
+  | "solid"
+  | "stripes"
+  | "hoops"
+  | "sash"
+  | "halves"
+  | "sleeves"
+  | "pinstripes"
+  | "quarters";
 
 export interface TeamVisual {
   primary: `#${string}`;
@@ -56,26 +70,26 @@ export const TEAM_VISUALS: Record<KnownTeamCode, TeamVisual> = {
   MUN: { primary: "#B51A28", secondary: "#F5C400", text: "#FFFFFF", pattern: "solid" },
   CHE: { primary: "#034694", secondary: "#F5F7FA", text: "#FFFFFF", pattern: "solid" },
   MCI: { primary: "#86C5E6", secondary: "#17345C", text: "#07162F", pattern: "solid" },
-  ARS: { primary: "#C8102E", secondary: "#F5F7FA", text: "#FFFFFF", pattern: "halves" },
+  ARS: { primary: "#C8102E", secondary: "#F5F7FA", text: "#FFFFFF", pattern: "sleeves" },
   TOT: { primary: "#F5F7FA", secondary: "#132257", text: "#07162F", pattern: "solid" },
-  LIV: { primary: "#B71532", secondary: "#00A398", text: "#FFFFFF", pattern: "solid" },
+  LIV: { primary: "#B71532", secondary: "#F5F7FA", text: "#FFFFFF", pattern: "solid" },
   EVE: { primary: "#003399", secondary: "#F5F7FA", text: "#FFFFFF", pattern: "solid" },
   STK: { primary: "#C8102E", secondary: "#F5F7FA", text: "#FFFFFF", pattern: "stripes" },
   SWA: { primary: "#F5F7FA", secondary: "#111820", text: "#07162F", pattern: "solid" },
-  WHU: { primary: "#6C1D45", secondary: "#79BDE8", text: "#FFFFFF", pattern: "halves" },
+  WHU: { primary: "#6C1D45", secondary: "#79BDE8", text: "#FFFFFF", pattern: "sleeves" },
   SOU: { primary: "#C8102E", secondary: "#F5F7FA", text: "#FFFFFF", pattern: "stripes" },
-  AVL: { primary: "#670E36", secondary: "#95BFE5", text: "#FFFFFF", pattern: "halves" },
+  AVL: { primary: "#670E36", secondary: "#95BFE5", text: "#FFFFFF", pattern: "sleeves" },
   QPR: { primary: "#0054A6", secondary: "#F5F7FA", text: "#FFFFFF", pattern: "hoops" },
   NEW: { primary: "#111820", secondary: "#F5F7FA", text: "#FFFFFF", pattern: "stripes" },
   HUL: { primary: "#F5A300", secondary: "#111820", text: "#07162F", pattern: "stripes" },
   WBA: { primary: "#122F67", secondary: "#F5F7FA", text: "#FFFFFF", pattern: "stripes" },
   LEI: { primary: "#003090", secondary: "#F5C400", text: "#FFFFFF", pattern: "solid" },
   SUN: { primary: "#C8102E", secondary: "#F5F7FA", text: "#FFFFFF", pattern: "stripes" },
-  CRY: { primary: "#1B458F", secondary: "#C4122E", text: "#FFFFFF", pattern: "halves" },
-  BUR: { primary: "#6C1D45", secondary: "#79BDE8", text: "#FFFFFF", pattern: "solid" },
+  CRY: { primary: "#1B458F", secondary: "#C4122E", text: "#FFFFFF", pattern: "stripes" },
+  BUR: { primary: "#6C1D45", secondary: "#79BDE8", text: "#FFFFFF", pattern: "sleeves" },
   BOU: { primary: "#B50E12", secondary: "#111820", text: "#FFFFFF", pattern: "stripes" },
   NOR: { primary: "#F4D600", secondary: "#08783D", text: "#07162F", pattern: "halves" },
-  WAT: { primary: "#F4D600", secondary: "#B50E12", text: "#07162F", pattern: "stripes" },
+  WAT: { primary: "#F4D600", secondary: "#111820", text: "#07162F", pattern: "solid" },
   MID: { primary: "#C8102E", secondary: "#F5F7FA", text: "#FFFFFF", pattern: "solid" },
   BHA: { primary: "#0057B8", secondary: "#F5F7FA", text: "#FFFFFF", pattern: "stripes" },
   HUD: { primary: "#0072CE", secondary: "#F5F7FA", text: "#FFFFFF", pattern: "stripes" },
@@ -88,7 +102,7 @@ export const TEAM_VISUALS: Record<KnownTeamCode, TeamVisual> = {
   NFO: { primary: "#C8102E", secondary: "#F5F7FA", text: "#FFFFFF", pattern: "solid" },
   LUT: { primary: "#E65A00", secondary: "#132257", text: "#07162F", pattern: "halves" },
   IPS: { primary: "#0044A7", secondary: "#F5F7FA", text: "#FFFFFF", pattern: "solid" },
-  BLB: { primary: "#1675D1", secondary: "#F5F7FA", text: "#FFFFFF", pattern: "quarters" }
+  BLB: { primary: "#1675D1", secondary: "#F5F7FA", text: "#FFFFFF", pattern: "halves" }
 };
 
 const fallbackPalettes: readonly TeamVisual[] = [
@@ -145,6 +159,8 @@ export function getTeamPatternBackground(visual: TeamVisual): string {
       return `linear-gradient(135deg, ${primary} 0 39%, ${secondary} 39% 57%, ${primary} 57% 100%)`;
     case "halves":
       return `linear-gradient(90deg, ${primary} 0 50%, ${secondary} 50% 100%)`;
+    case "sleeves":
+      return `linear-gradient(90deg, ${secondary} 0 24%, ${primary} 24% 76%, ${secondary} 76% 100%)`;
     case "pinstripes":
       return `repeating-linear-gradient(90deg, ${primary} 0 15%, ${secondary} 15% 18%, ${primary} 18% 33%)`;
     case "quarters":
@@ -155,12 +171,90 @@ export function getTeamPatternBackground(visual: TeamVisual): string {
 }
 
 /** CSS custom properties consumed by `.team-badge` and `.team-kit`. */
-export function getTeamVisualStyle(teamCode: string): Record<string, string> {
-  const visual = getTeamVisual(teamCode);
+export type TeamVisualStyle = Record<
+  "--team-primary" | "--team-secondary" | "--team-ink" | "--team-pattern",
+  string
+>;
+
+export function getTeamVisualStyle(teamCodeOrVisual: string | TeamVisual): TeamVisualStyle {
+  const visual = typeof teamCodeOrVisual === "string"
+    ? getTeamVisual(teamCodeOrVisual)
+    : teamCodeOrVisual;
   return {
     "--team-primary": visual.primary,
     "--team-secondary": visual.secondary,
     "--team-ink": visual.text,
     "--team-pattern": getTeamPatternBackground(visual)
+  };
+}
+
+export interface ResolvedManagerIdentity {
+  /** Public club identity; the account/manager name remains `ManagerSquad.displayName`. */
+  clubName: string;
+  monogram: string;
+  /** Present only when the identity came from a real historical club. */
+  teamCode: string | null;
+  visual: TeamVisual;
+  style: TeamVisualStyle;
+}
+
+function historicalManagerTeamCode(manager: ManagerSquad): string | null {
+  const picks = manager.picks.filter((pick) => pick.teamCode.trim().length > 0);
+  const starter = picks.find((pick) => pick.target !== "SUB") ?? picks[0];
+  if (!starter) return null;
+
+  if (manager.source === "historical") {
+    return normalizeTeamCode(starter.teamCode);
+  }
+
+  // Old historical snapshots predate `source`. Preserve their real club when
+  // every pick comes from the same side, without making mixed fantasy squads
+  // depend on whichever player happens to be first.
+  const codes = new Set(picks.map((pick) => normalizeTeamCode(pick.teamCode)));
+  return manager.kind === "reserve" && manager.source !== "snapshot" && codes.size === 1
+    ? [...codes][0]
+    : null;
+}
+
+/**
+ * Resolve one stable badge/kit identity for a whole squad.
+ *
+ * Custom squads use their controlled persisted identity. Real
+ * historical squads keep the source club's canonical colours. Mixed legacy
+ * squads get a deterministic manager fallback, never a pick-order-dependent
+ * player's club identity.
+ */
+export function resolveManagerIdentity(manager: ManagerSquad): ResolvedManagerIdentity {
+  if (manager.clubIdentity || manager.kind === "human") {
+    const identity = normalizeClubIdentity(manager.clubIdentity);
+    const visual = clubIdentityToTeamVisual(identity);
+    return {
+      clubName: identity.clubName,
+      monogram: getTeamMonogram("", identity.clubName),
+      teamCode: null,
+      visual,
+      style: getTeamVisualStyle(visual)
+    };
+  }
+
+  const historicalTeamCode = historicalManagerTeamCode(manager);
+  if (historicalTeamCode) {
+    const visual = getTeamVisual(historicalTeamCode);
+    return {
+      clubName: manager.displayName,
+      monogram: getTeamMonogram(historicalTeamCode, manager.displayName),
+      teamCode: historicalTeamCode,
+      visual,
+      style: getTeamVisualStyle(visual)
+    };
+  }
+
+  const visual = getTeamVisual(manager.id);
+  return {
+    clubName: manager.displayName,
+    monogram: getTeamMonogram("", manager.displayName),
+    teamCode: null,
+    visual,
+    style: getTeamVisualStyle(visual)
   };
 }

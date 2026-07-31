@@ -23,6 +23,15 @@ describe("draft rules", () => {
     expect(candidates.every((candidate) => candidate.fit > 0)).toBe(true);
   });
 
+  it("uses the reduced 2026 rating for Gabriel Martinelli", () => {
+    const slot: FormationSlot = { id: "LW", label: "LW", target: "LW", line: "attack" };
+    const martinelli = getCandidates("ARS", 2026, slot, new Set())
+      .find((candidate) => candidate.player.n === "Gabriel Martinelli");
+
+    expect(martinelli?.player.o).toBe(82);
+    expect(Math.round(martinelli?.effectiveRating ?? 0)).toBe(83);
+  });
+
   it("auto-redraws until a draw has legal options", () => {
     const slot = getDraftSlots("4-3-3").find((candidate) => candidate.id === "GK");
     expect(slot).toBeDefined();

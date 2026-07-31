@@ -1,11 +1,11 @@
 import { getStarterSlots } from "./formations";
+import { INVINCIBLE_IMPACT_SUB_LIMIT } from "./impact-sub";
 import { buildRoundRobin, createHistoricalOpponent, getSkillBand } from "./matchmaking";
 import { createRng, pickOne, shuffle } from "./rng";
 import { calculateSquadStrength } from "./simulation";
+import type { ClubIdentity } from "./club-identity";
 import type { DraftMode, DraftPick, Fixture, FixtureResult, ManagerSquad, MatchEvent, SeasonCasualtyKind } from "./types";
 
-export const INVINCIBLE_TEAM_TALK_LIMIT = 2;
-export const TEAM_TALK_EXPECTED_GOALS_BONUS = 0.18;
 export const OUT_OF_FORM_EXPECTED_GOALS_PENALTY = 0.12;
 /** Calibrated to a 54.8% elite-human title rate across 500 full deterministic seasons. */
 export const INVINCIBLE_CONTENDER_XG_BONUS = 0.53;
@@ -55,7 +55,7 @@ export interface InvincibleSeason {
   casualtySchedule: Record<number, SeasonCasualtyKind>;
   boostsRemaining: number;
   boostsUsed: number;
-  teamTalksUsedByHalf: {
+  impactSubsUsedByHalf: {
     first: boolean;
     second: boolean;
   };
@@ -67,6 +67,7 @@ export interface InvincibleSeason {
 export function createInvincibleSeason(params: {
   humanPicks: DraftPick[];
   humanName: string;
+  humanClubIdentity?: ClubIdentity;
   formationId: string;
   mode: DraftMode;
   completedLeagues: number;
@@ -79,7 +80,8 @@ export function createInvincibleSeason(params: {
   const skillBand = getSkillBand(params.completedLeagues, params.mmr);
   const human: ManagerSquad = {
     id: "human",
-    displayName: params.humanName,
+    displayName: params.humanClubIdentity?.clubName ?? params.humanName,
+    clubIdentity: params.humanClubIdentity,
     kind: "human",
     source: "human",
     formationId: params.formationId,
@@ -122,9 +124,9 @@ export function createInvincibleSeason(params: {
     injuryGamesByPlayerId: {},
     suspensionGamesByPlayerId: {},
     casualtySchedule,
-    boostsRemaining: INVINCIBLE_TEAM_TALK_LIMIT,
+    boostsRemaining: INVINCIBLE_IMPACT_SUB_LIMIT,
     boostsUsed: 0,
-    teamTalksUsedByHalf: { first: false, second: false },
+    impactSubsUsedByHalf: { first: false, second: false },
     attemptId: params.attemptId,
     officialAward: null,
     awardProduction: null
@@ -342,6 +344,9 @@ export function seasonMissingRequiredSubstitutions(params: {
       .filter((pick) => pick.target === "SUB")
       .map((pick) => pick.player.i)
   );
+  const availableBenchCount = Array.from(benchIds).filter(
+    (playerId) => !unavailable.has(playerId)
+  ).length;
   const usedSubs = new Set<number>();
   const missing: DraftPick[] = [];
   seasonUnavailableStarters(params).forEach((starter) => {
@@ -357,25 +362,40 @@ export function seasonMissingRequiredSubstitutions(params: {
     }
     usedSubs.add(chosenSubId);
   });
-  return missing;
+  // A heavily depleted squad must never deadlock the run. Require a choice for
+  // every healthy bench place that can still be filled; if no substitute remains,
+  // simulation applies its explicit weakened-lineup penalty instead.
+  return missing.slice(0, Math.max(0, availableBenchCount - usedSubs.size));
 }
 
-export function teamTalkHalfForMatchday(matchday: number): "first" | "second" {
+export function impactSubHalfForMatchday(matchday: number): "first" | "second" {
   return matchday < 19 ? "first" : "second";
 }
 
-export function canUseSeasonTeamTalk(season: Pick<InvincibleSeason, "currentMatchday" | "teamTalksUsedByHalf">): boolean {
-  return !season.teamTalksUsedByHalf[teamTalkHalfForMatchday(season.currentMatchday)];
+export function canUseSeasonImpactSub(
+  season: Pick<InvincibleSeason, "currentMatchday" | "impactSubsUsedByHalf">
+): boolean {
+  return !season.impactSubsUsedByHalf[impactSubHalfForMatchday(season.currentMatchday)];
 }
 
-export function remainingSeasonTeamTalks(season: Pick<InvincibleSeason, "teamTalksUsedByHalf">): number {
-  return Number(!season.teamTalksUsedByHalf.first) + Number(!season.teamTalksUsedByHalf.second);
+export function remainingSeasonImpactSubs(
+  season: Pick<InvincibleSeason, "impactSubsUsedByHalf"> &
+    Partial<Pick<InvincibleSeason, "currentMatchday">>
+): number {
+  const secondHalfStarted = (season.currentMatchday ?? 0) >= 19;
+  return (
+    (secondHalfStarted ? 0 : Number(!season.impactSubsUsedByHalf.first)) +
+    Number(!season.impactSubsUsedByHalf.second)
+  );
 }
 
-export function markSeasonTeamTalkUsed(
-  season: Pick<InvincibleSeason, "currentMatchday" | "teamTalksUsedByHalf">
-): InvincibleSeason["teamTalksUsedByHalf"] {
-  return { ...season.teamTalksUsedByHalf, [teamTalkHalfForMatchday(season.currentMatchday)]: true };
+export function markSeasonImpactSubUsed(
+  season: Pick<InvincibleSeason, "currentMatchday" | "impactSubsUsedByHalf">
+): InvincibleSeason["impactSubsUsedByHalf"] {
+  return {
+    ...season.impactSubsUsedByHalf,
+    [impactSubHalfForMatchday(season.currentMatchday)]: true
+  };
 }
 
 export function createSeasonPregame(params: {

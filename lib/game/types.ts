@@ -1,3 +1,5 @@
+import type { ClubIdentity } from "./club-identity";
+
 export type Position =
   | "GK"
   | "RB"
@@ -122,6 +124,8 @@ export interface DraftCandidate {
 export interface ManagerSquad {
   id: string;
   displayName: string;
+  /** Stable club name and earned cosmetic choices, independent of the account display name. */
+  clubIdentity?: ClubIdentity;
   kind: ManagerKind;
   source?: ManagerSource;
   formationId: string;

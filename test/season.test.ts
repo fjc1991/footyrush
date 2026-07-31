@@ -4,7 +4,6 @@ import { seedFootballData } from "@/lib/game/data";
 import { autoDraftManager } from "@/lib/game/draft";
 import { createMinileague } from "@/lib/game/matchmaking";
 import {
-  TEAM_TALK_EXPECTED_GOALS_BONUS,
   INVINCIBLE_CONTENDER_XG_BONUS,
   INVINCIBLE_MANAGER_RATING_CAP,
   INVINCIBLE_MAX_SEASON_CASUALTIES,
@@ -15,15 +14,15 @@ import {
   availableSeasonBench,
   buildDoubleRoundRobin,
   buildSeasonCasualtySchedule,
-  canUseSeasonTeamTalk,
+  canUseSeasonImpactSub,
   createInvincibleSeason,
   createSeasonPregame,
   decrementSeasonAbsences,
   decrementSeasonInjuries,
   invincibleContenderModifiers,
-  markSeasonTeamTalkUsed,
+  markSeasonImpactSubUsed,
   managerForSeasonMatch,
-  remainingSeasonTeamTalks,
+  remainingSeasonImpactSubs,
   seasonMissingRequiredSubstitutions
 } from "@/lib/game/season";
 import { createRng } from "@/lib/game/rng";
@@ -258,6 +257,31 @@ describe("Be Invincible season", () => {
     expect(unknownSub.map((pick) => pick.player.i)).toContain(starter.player.i);
   });
 
+  it("does not deadlock when absences outnumber the healthy bench", () => {
+    const base = human("depleted-bench-human");
+    const starters = base.picks.filter((pick) => pick.target !== "SUB").slice(0, 2);
+    const bench = base.picks.filter((pick) => pick.target === "SUB");
+    const onlyHealthySub = bench[0];
+    const unavailable = Object.fromEntries([
+      ...starters.map((pick) => [pick.player.i, 2]),
+      ...bench.slice(1).map((pick) => [pick.player.i, 2])
+    ]);
+    const oneChoice = seasonMissingRequiredSubstitutions({
+      human: base,
+      injuryGamesByPlayerId: unavailable
+    });
+    const resolvedCapacity = seasonMissingRequiredSubstitutions({
+      human: {
+        ...base,
+        substitutions: { [oneChoice[0].player.i]: onlyHealthySub.player.i }
+      },
+      injuryGamesByPlayerId: unavailable
+    });
+
+    expect(oneChoice).toHaveLength(1);
+    expect(resolvedCapacity).toHaveLength(0);
+  });
+
   it("caps the appointed-manager advantage for the full-season challenge", () => {
     const base = human("manager-cap-human");
     const season = createInvincibleSeason({
@@ -352,8 +376,8 @@ describe("Be Invincible season", () => {
     ).toEqual({ homeExpectedGoalsModifier: 0, awayExpectedGoalsModifier: 0 });
   });
 
-  it("limits team talks to one per half of the season", () => {
-    const base = human("talks-human");
+  it("limits impact substitutes to one per half of the season", () => {
+    const base = human("impact-sub-human");
     const season = createInvincibleSeason({
       humanPicks: base.picks,
       humanName: "Tester",
@@ -362,19 +386,27 @@ describe("Be Invincible season", () => {
       completedLeagues: 0,
       mmr: 200,
       managerRating: 55,
-      attemptId: "attempt-talks",
-      seed: "season-talks"
+      attemptId: "attempt-impact-subs",
+      seed: "season-impact-subs"
     });
 
-    expect(remainingSeasonTeamTalks(season)).toBe(2);
-    expect(canUseSeasonTeamTalk(season)).toBe(true);
-    const firstUsed = { ...season, teamTalksUsedByHalf: markSeasonTeamTalkUsed(season) };
-    expect(canUseSeasonTeamTalk(firstUsed)).toBe(false);
-    expect(remainingSeasonTeamTalks(firstUsed)).toBe(1);
+    expect(remainingSeasonImpactSubs(season)).toBe(2);
+    expect(canUseSeasonImpactSub(season)).toBe(true);
+    const firstUsed = { ...season, impactSubsUsedByHalf: markSeasonImpactSubUsed(season) };
+    expect(canUseSeasonImpactSub(firstUsed)).toBe(false);
+    expect(remainingSeasonImpactSubs(firstUsed)).toBe(1);
     const secondHalf = { ...firstUsed, currentMatchday: 19 };
-    expect(canUseSeasonTeamTalk(secondHalf)).toBe(true);
-    const allUsed = { ...secondHalf, teamTalksUsedByHalf: markSeasonTeamTalkUsed(secondHalf) };
-    expect(remainingSeasonTeamTalks(allUsed)).toBe(0);
+    expect(canUseSeasonImpactSub(secondHalf)).toBe(true);
+    expect(remainingSeasonImpactSubs(secondHalf)).toBe(1);
+    expect(
+      remainingSeasonImpactSubs({
+        ...season,
+        currentMatchday: 19,
+        impactSubsUsedByHalf: { first: false, second: false }
+      })
+    ).toBe(1);
+    const allUsed = { ...secondHalf, impactSubsUsedByHalf: markSeasonImpactSubUsed(secondHalf) };
+    expect(remainingSeasonImpactSubs(allUsed)).toBe(0);
   });
 
   it("supports one-match out-of-form substitutions without permanently changing the manager", () => {
@@ -470,32 +502,4 @@ describe("Be Invincible season", () => {
     expect(decisions).toBeLessThanOrEqual(80);
   });
 
-  it("team talks improve outcomes modestly without guaranteeing wins", () => {
-    const home = human("boost-home");
-    const away = autoDraftManager({ id: "away", displayName: "Away", formationId: "4-3-3", seed: "boost-away" });
-    const fixture = { id: "boost-fx", round: 1, homeId: "human", awayId: "away" };
-    let basePoints = 0;
-    let boostedPoints = 0;
-    let boostedWins = 0;
-    let boostedLosses = 0;
-
-    for (let index = 0; index < 900; index += 1) {
-      const base = simulateFixture({ fixture, home, away, seed: `boost-${index}` });
-      const boosted = simulateFixture({
-        fixture,
-        home,
-        away,
-        seed: `boost-${index}`,
-        homeExpectedGoalsModifier: TEAM_TALK_EXPECTED_GOALS_BONUS
-      });
-      basePoints += base.homeGoals > base.awayGoals ? 3 : base.homeGoals === base.awayGoals ? 1 : 0;
-      boostedPoints += boosted.homeGoals > boosted.awayGoals ? 3 : boosted.homeGoals === boosted.awayGoals ? 1 : 0;
-      if (boosted.homeGoals > boosted.awayGoals) boostedWins += 1;
-      if (boosted.homeGoals < boosted.awayGoals) boostedLosses += 1;
-    }
-
-    expect(boostedPoints).toBeGreaterThan(basePoints);
-    expect(boostedWins).toBeLessThan(900);
-    expect(boostedLosses).toBeGreaterThan(0);
-  });
 });

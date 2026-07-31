@@ -1,6 +1,6 @@
 import type { FixtureResult } from "./types";
 
-export const INVINCIBLE_AUTOPLAY_SECONDS = 3;
+export const INVINCIBLE_AUTOPLAY_SECONDS = 1;
 
 export type InvincibleAttentionReason = "replacement" | "out_of_form" | null;
 
@@ -72,28 +72,26 @@ export function shouldPauseAfterInvincibleResult(params: {
   previousResults: FixtureResult[];
   result: FixtureResult;
   humanId?: string;
+  humanStarterPlayerIds?: readonly number[];
 }): boolean {
   const humanId = params.humanId ?? "human";
-  const humanScore = (result: FixtureResult): [number, number] | null => {
-    if (result.homeId === humanId) return [result.homeGoals, result.awayGoals];
-    if (result.awayId === humanId) return [result.awayGoals, result.homeGoals];
-    return null;
-  };
-  const score = humanScore(params.result);
-  if (!score) {
+  const casualtyPlayerIds = params.result.homeId === humanId
+    ? [...params.result.homeInjuries, ...params.result.homeRedCards]
+    : params.result.awayId === humanId
+      ? [...params.result.awayInjuries, ...params.result.awayRedCards]
+      : [];
+  if (casualtyPlayerIds.length === 0) {
     return false;
   }
 
-  const alreadyLost = params.previousResults.some((result) => {
-    const previousScore = humanScore(result);
-    return previousScore ? previousScore[0] < previousScore[1] : false;
-  });
-  const firstLoss = !alreadyLost && score[0] < score[1];
-  const casualtyCount = params.result.homeId === humanId
-    ? params.result.homeInjuries.length + params.result.homeRedCards.length
-    : params.result.awayInjuries.length + params.result.awayRedCards.length;
-
-  return firstLoss || casualtyCount > 0;
+  // Callers that know the active XI can ignore bench-only incidents, which do not
+  // require a lineup decision. Omitting the list preserves the earlier behavior
+  // where every human casualty was considered actionable.
+  if (params.humanStarterPlayerIds === undefined) {
+    return true;
+  }
+  const starterIds = new Set(params.humanStarterPlayerIds);
+  return casualtyPlayerIds.some((playerId) => starterIds.has(playerId));
 }
 
 interface CountdownOptions {

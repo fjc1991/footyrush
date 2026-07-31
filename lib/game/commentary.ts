@@ -249,6 +249,17 @@ const pt: Record<MatchEvent["code"], Pool | ((e: MatchEvent) => string)> = {
 
 const localeMap: Record<string, typeof en> = { en, es, fr, pt };
 
+function impactSubCommentary(event: MatchEvent, locale: string): string {
+  const player = event.playerName ?? "The substitute";
+  const off = String(event.params.off ?? "a teammate");
+  const manager = String(event.params.manager ?? "the team");
+  const label = String(event.params.impactLabel ?? "fresh impetus");
+  if (locale === "es") return `Cambio de impacto: ${player} sustituye a ${off} para ${manager}. Plan: ${label}.`;
+  if (locale === "fr") return `Impact Sub : ${player} remplace ${off} pour ${manager}. Plan : ${label}.`;
+  if (locale === "pt") return `Substituição de impacto: ${player} entra no lugar de ${off} para ${manager}. Plano: ${label}.`;
+  return `Impact Sub: ${player} replaces ${off} for ${manager}. The call is ${label}.`;
+}
+
 function resolve(pool: Pool | ((e: MatchEvent) => string), event: MatchEvent): string {
   if (typeof pool === "function") return pool(event);
   const template = pool[hashPick(event.id, pool.length)];
@@ -274,6 +285,9 @@ function fill(template: string, event: MatchEvent): string {
 }
 
 export function renderCommentary(event: MatchEvent, locale = "en"): string {
+  if (event.code === "substitution" && event.params.impactSub === 1) {
+    return impactSubCommentary(event, locale);
+  }
   const dict = localeMap[locale] ?? en;
   const pool = dict[event.code];
   if (!pool) return fill(resolve(en[event.code] ?? en.chance, event), event);

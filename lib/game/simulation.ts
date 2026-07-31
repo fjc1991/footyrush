@@ -1,6 +1,7 @@
 import { effectiveRating } from "./data";
 import { applyBoostToRating } from "./boosts";
 import { getStarterSlots } from "./formations";
+import { createImpactSubPlan, type ImpactSubPlan } from "./impact-sub";
 import { compareMatchEventsChronologically } from "./match-presentation";
 import { clamp, createRng, pickOne, weightedPick } from "./rng";
 import type { CasualtyDirective, DraftPick, Fixture, FixtureResult, FormationSlot, ManagerSquad, MatchEvent, Player, Standing } from "./types";
@@ -50,6 +51,10 @@ export function simulateFixture(params: {
   seed: string;
   homeExpectedGoalsModifier?: number;
   awayExpectedGoalsModifier?: number;
+  /** Healthy outfield bench player to prime for a deterministic second-half impact change. */
+  homeImpactSubPlayerId?: number | null;
+  /** Healthy outfield bench player to prime for a deterministic second-half impact change. */
+  awayImpactSubPlayerId?: number | null;
   /**
    * Overrides the default random casualty rolls for a side. A `CasualtyDirective` forces exactly that
    * casualty (choosing the victim by weight); `null` guarantees the side takes no casualty this match;
@@ -59,6 +64,16 @@ export function simulateFixture(params: {
   awayCasualty?: CasualtyDirective | null;
 }): FixtureResult {
   const rng = createRng(params.seed);
+  const homeImpactSubPlan = createImpactSubPlan({
+    manager: params.home,
+    playerId: params.homeImpactSubPlayerId,
+    seed: params.seed
+  });
+  const awayImpactSubPlan = createImpactSubPlan({
+    manager: params.away,
+    playerId: params.awayImpactSubPlayerId,
+    seed: params.seed
+  });
   const homeStrength = calculateSquadStrength(params.home);
   const awayStrength = calculateSquadStrength(params.away);
   // Slight edge from manager quality: a full ~48-point rating gap (0–100 scale) shifts each
@@ -83,39 +98,110 @@ export function simulateFixture(params: {
     0.15,
     3.6
   );
-  const homeGoals = sampleGoals(homeExpected, rng);
-  const awayGoals = sampleGoals(awayExpected, rng);
+  const baseHomeGoals = sampleGoals(homeExpected, rng);
+  const baseAwayGoals = sampleGoals(awayExpected, rng);
   const events: MatchEvent[] = [
     event(params.fixture.id, 1, "kickoff", undefined, undefined, { home: params.home.displayName, away: params.away.displayName })
   ];
 
   // Decide injuries/red cards up front so later events (goals, chances, near misses)
   // never feature a player after the second they left the pitch.
-  const homeOff = determineCasualties(params.home, rng, params.homeCasualty);
-  const awayOff = determineCasualties(params.away, rng, params.awayCasualty);
+  const homeOff = determineCasualties(
+    params.home,
+    rng,
+    params.homeCasualty,
+    homeImpactSubPlan
+  );
+  const awayOff = determineCasualties(
+    params.away,
+    rng,
+    params.awayCasualty,
+    awayImpactSubPlan
+  );
+  // Casualties can empty the intended tactical line or force the primed player
+  // on early. Resolve that interaction once, then use the same actual entry for
+  // narration, lineups and the post-entry score modifier.
+  const homeImpactSub = resolveImpactSubTransition(
+    params.home,
+    homeOff,
+    homeImpactSubPlan
+  );
+  const awayImpactSub = resolveImpactSubTransition(
+    params.away,
+    awayOff,
+    awayImpactSubPlan
+  );
+  reconcileImpactSubCasualties(homeOff, homeImpactSub);
+  reconcileImpactSubCasualties(awayOff, awayImpactSub);
   pushCasualtyEvents(events, params.fixture.id, params.home, homeOff);
   pushCasualtyEvents(events, params.fixture.id, params.away, awayOff);
+  pushImpactSubEvent(events, params.fixture.id, params.home, homeOff, homeImpactSub);
+  pushImpactSubEvent(events, params.fixture.id, params.away, awayOff, awayImpactSub);
 
   let homeGoalsAtBreak = 0;
   let awayGoalsAtBreak = 0;
 
-  const goalSchedule = [
-    ...Array.from({ length: homeGoals }, () => ({ manager: params.home, off: homeOff })),
-    ...Array.from({ length: awayGoals }, () => ({ manager: params.away, off: awayOff }))
+  let goalSchedule: ScheduledGoal[] = [
+    ...Array.from({ length: baseHomeGoals }, () => ({ manager: params.home, off: homeOff, impactSub: homeImpactSub })),
+    ...Array.from({ length: baseAwayGoals }, () => ({ manager: params.away, off: awayOff, impactSub: awayImpactSub }))
   ]
     .map((goal) => ({ ...goal, second: 8 + Math.floor(rng() * 78), order: rng() }))
     .sort((first, second) => first.second - second.second || first.order - second.order);
 
-  goalSchedule.forEach(({ manager, off, second }) => {
-    const player = chooseScorerAt(manager, second, off, rng);
+  // Impact Subs alter only the part of the score story after they enter. Base
+  // goals keep the same seeded schedule, while positive threat adds post-entry
+  // goals and defensive threat can suppress only post-entry opposition goals.
+  // This makes the advertised around-the-hour decision temporally honest.
+  goalSchedule = applyImpactGoalModifier({
+    schedule: goalSchedule,
+    target: params.home,
+    targetOff: homeOff,
+    targetImpactSub: homeImpactSub,
+    activation: homeImpactSub,
+    modifier: homeImpactSub?.ownExpectedGoalsModifier ?? 0,
+    seed: `${params.seed}:impact:home-own`
+  });
+  goalSchedule = applyImpactGoalModifier({
+    schedule: goalSchedule,
+    target: params.away,
+    targetOff: awayOff,
+    targetImpactSub: awayImpactSub,
+    activation: awayImpactSub,
+    modifier: awayImpactSub?.ownExpectedGoalsModifier ?? 0,
+    seed: `${params.seed}:impact:away-own`
+  });
+  goalSchedule = applyImpactGoalModifier({
+    schedule: goalSchedule,
+    target: params.home,
+    targetOff: homeOff,
+    targetImpactSub: homeImpactSub,
+    activation: awayImpactSub,
+    modifier: awayImpactSub?.opponentExpectedGoalsModifier ?? 0,
+    seed: `${params.seed}:impact:away-on-home`
+  });
+  goalSchedule = applyImpactGoalModifier({
+    schedule: goalSchedule,
+    target: params.away,
+    targetOff: awayOff,
+    targetImpactSub: awayImpactSub,
+    activation: homeImpactSub,
+    modifier: homeImpactSub?.opponentExpectedGoalsModifier ?? 0,
+    seed: `${params.seed}:impact:home-on-away`
+  }).sort((first, second) => first.second - second.second || first.order - second.order);
+
+  const homeGoals = goalSchedule.filter((goal) => goal.manager.id === params.home.id).length;
+  const awayGoals = goalSchedule.filter((goal) => goal.manager.id === params.away.id).length;
+
+  goalSchedule.forEach(({ manager, off, impactSub, second }) => {
+    const player = chooseScorerAt(manager, second, off, impactSub, rng);
     if (manager.id === params.home.id && second <= 45) homeGoalsAtBreak += 1;
     if (manager.id === params.away.id && second <= 45) awayGoalsAtBreak += 1;
     events.push(event(params.fixture.id, second, "goal", manager.id, player, { manager: manager.displayName }));
   });
   events.push(event(params.fixture.id, 45, "half_time", undefined, undefined, { homeGoals: homeGoalsAtBreak, awayGoals: awayGoalsAtBreak }));
 
-  addChances(events, params.fixture.id, params.home, params.away, homeOff, awayOff, rng);
-  addNearMisses(events, params.fixture.id, params.home, params.away, homeOff, awayOff, rng);
+  addChances(events, params.fixture.id, params.home, params.away, homeOff, awayOff, homeImpactSub, awayImpactSub, rng);
+  addNearMisses(events, params.fixture.id, params.home, params.away, homeOff, awayOff, homeImpactSub, awayImpactSub, rng);
   const homeInjuries = casualtyIds(homeOff, "injury");
   const awayInjuries = casualtyIds(awayOff, "injury");
   const homeRedCards = casualtyIds(homeOff, "redCard");
@@ -272,11 +358,65 @@ interface Casualty {
   replacementOnSecond: number;
 }
 
+interface ScheduledGoal {
+  manager: ManagerSquad;
+  off: Map<number, Casualty>;
+  impactSub: ImpactSubPlan | null;
+  second: number;
+  order: number;
+}
+
+function applyImpactGoalModifier(params: {
+  schedule: ScheduledGoal[];
+  target: ManagerSquad;
+  targetOff: Map<number, Casualty>;
+  targetImpactSub: ImpactSubPlan | null;
+  activation: ImpactSubPlan | null;
+  modifier: number;
+  seed: string;
+}): ScheduledGoal[] {
+  if (!params.activation || params.modifier === 0) return params.schedule;
+  const rng = createRng(params.seed);
+  const firstAffectedSecond = Math.min(89, params.activation.minute + 1);
+
+  if (params.modifier > 0) {
+    const extraGoals = sampleGoals(params.modifier, rng);
+    if (extraGoals === 0) return params.schedule;
+    const remainingSeconds = Math.max(1, 90 - firstAffectedSecond);
+    return [
+      ...params.schedule,
+      ...Array.from({ length: extraGoals }, (): ScheduledGoal => ({
+        manager: params.target,
+        off: params.targetOff,
+        impactSub: params.targetImpactSub,
+        second: firstAffectedSecond + Math.floor(rng() * remainingSeconds),
+        order: rng()
+      }))
+    ];
+  }
+
+  const suppressions = sampleGoals(Math.abs(params.modifier), rng);
+  if (suppressions === 0) return params.schedule;
+  const candidates = params.schedule
+    .map((goal, index) => ({ goal, index, order: rng() }))
+    .filter(
+      ({ goal }) =>
+        goal.manager.id === params.target.id &&
+        goal.second >= firstAffectedSecond
+    )
+    .sort((first, second) => first.order - second.order)
+    .slice(0, suppressions);
+  if (candidates.length === 0) return params.schedule;
+  const removed = new Set(candidates.map(({ index }) => index));
+  return params.schedule.filter((_, index) => !removed.has(index));
+}
+
 /** Decide which (if any) starter is injured or sent off this match, and who replaces them. */
 function determineCasualties(
   manager: ManagerSquad,
   rng: () => number,
-  directive?: CasualtyDirective | null
+  directive?: CasualtyDirective | null,
+  impactSub: ImpactSubPlan | null = null
 ): Map<number, Casualty> {
   const offMap = new Map<number, Casualty>();
   // `null` = a controlled side (e.g. the human in a Be Invincible season) with no scheduled casualty
@@ -289,7 +429,16 @@ function determineCasualties(
   const active = getActiveStarters(manager);
 
   if (directive) {
-    setForcedCasualty(offMap, manager, active, slots, out, rng, directive);
+    setForcedCasualty(
+      offMap,
+      manager,
+      active,
+      slots,
+      out,
+      rng,
+      directive,
+      impactSub
+    );
     return offMap;
   }
 
@@ -306,7 +455,13 @@ function determineCasualties(
       const activePlayerIds = active.flatMap((activePlayer) =>
         activePlayer.pick ? [activePlayer.pick.player.i] : []
       );
-      const sub = selectBestSub(manager.picks, slot.target, [...out, ...activePlayerIds]);
+      const sub = selectInjuryReplacement(
+        manager.picks,
+        slot.target,
+        [...out, ...activePlayerIds],
+        second,
+        impactSub
+      );
       offMap.set(entry.pick.player.i, {
         kind: "injury",
         second,
@@ -339,7 +494,8 @@ function setForcedCasualty(
   slots: FormationSlot[],
   out: number[],
   rng: () => number,
-  directive: CasualtyDirective
+  directive: CasualtyDirective,
+  impactSub: ImpactSubPlan | null
 ): void {
   const weightFor = (playerId: number) => directive.weightByPlayerId?.[playerId] ?? 1;
   const eligible = active.flatMap((entry, index) => {
@@ -362,7 +518,13 @@ function setForcedCasualty(
     const activePlayerIds = active.flatMap((activePlayer) =>
       activePlayer.pick ? [activePlayer.pick.player.i] : []
     );
-    const sub = selectBestSub(manager.picks, chosen.slot.target, [...out, ...activePlayerIds]);
+    const sub = selectInjuryReplacement(
+      manager.picks,
+      chosen.slot.target,
+      [...out, ...activePlayerIds],
+      second,
+      impactSub
+    );
     offMap.set(chosen.pick.player.i, {
       kind: "injury",
       second,
@@ -373,6 +535,36 @@ function setForcedCasualty(
   }
   const second = 30 + Math.floor(rng() * 58);
   offMap.set(chosen.pick.player.i, { kind: "redCard", second, replacementId: null, replacementOnSecond: Infinity });
+}
+
+/**
+ * Keep the primed player available for the tactical change whenever another
+ * healthy substitute can cover an injury. If they are the only viable option
+ * before the planned change, the injury substitution becomes their real Impact
+ * entry. After the planned minute they are already committed to the pitch and
+ * cannot also be an ordinary injury replacement.
+ */
+function selectInjuryReplacement(
+  picks: DraftPick[],
+  target: DraftPick["target"],
+  excludedIds: number[],
+  casualtySecond: number,
+  impactSub: ImpactSubPlan | null
+): DraftPick | null {
+  if (!impactSub) {
+    return selectBestSub(picks, target, excludedIds);
+  }
+
+  const alternate = selectBestSub(picks, target, [
+    ...excludedIds,
+    impactSub.playerId
+  ]);
+  if (alternate) {
+    return alternate;
+  }
+  return casualtySecond <= impactSub.minute
+    ? selectBestSub(picks, target, excludedIds)
+    : null;
 }
 
 function pushCasualtyEvents(events: MatchEvent[], fixtureId: string, manager: ManagerSquad, offMap: Map<number, Casualty>): void {
@@ -386,33 +578,265 @@ function pushCasualtyEvents(events: MatchEvent[], fixtureId: string, manager: Ma
   });
 }
 
+/**
+ * Once the actual Impact change is known, a later casualty for the player who
+ * really went off lands on the player who replaced them. This covers both the
+ * originally planned change and an early-red fallback without narrating an
+ * injury or dismissal for somebody who is already on the bench.
+ */
+function reconcileImpactSubCasualties(
+  offMap: Map<number, Casualty>,
+  impactSub: ImpactSubPlan | null
+): void {
+  if (!impactSub) return;
+  const casualty = offMap.get(impactSub.offPlayerId);
+  if (!casualty || casualty.second <= impactSub.minute) return;
+
+  offMap.delete(impactSub.offPlayerId);
+  offMap.set(impactSub.playerId, {
+    ...casualty,
+    // The impact player cannot replace themselves after being injured.
+    replacementId:
+      casualty.replacementId === impactSub.playerId ? null : casualty.replacementId
+  });
+}
+
+function impactSubLineupChange(
+  manager: ManagerSquad,
+  second: number,
+  offMap: Map<number, Casualty>,
+  impactSub: ImpactSubPlan
+): { selected: DraftPick; off: DraftPick } | null {
+  const selected = manager.picks.find(
+    (pick) => pick.player.i === impactSub.playerId && pick.target === "SUB"
+  );
+  if (!selected) return null;
+
+  const lineup = activeLineupAt(manager, second, offMap, null);
+  if (lineup.some((entry) => entry.pick?.player.i === selected.player.i)) {
+    return null;
+  }
+  const plannedOff = lineup.find(
+    (entry) => entry.pick?.player.i === impactSub.offPlayerId
+  );
+  const fallbackOff = lineup
+    .filter(
+      (entry): entry is ActivePlayer & { pick: DraftPick } =>
+        entry.pick !== null && entry.slot.line === impactSub.targetLine
+    )
+    .sort(
+      (first, secondEntry) =>
+        first.rating - secondEntry.rating ||
+        first.pick.player.i - secondEntry.pick.player.i
+    )[0];
+  const fallbackOutfielder = lineup
+    .filter(
+      (entry): entry is ActivePlayer & { pick: DraftPick } =>
+        entry.pick !== null && entry.slot.line !== "keeper"
+    )
+    .sort(
+      (first, secondEntry) =>
+        first.rating - secondEntry.rating ||
+        first.pick.player.i - secondEntry.pick.player.i
+    )[0];
+  const off = plannedOff?.pick ?? fallbackOff?.pick ?? fallbackOutfielder?.pick ?? null;
+  return off ? { selected, off } : null;
+}
+
+/**
+ * Turn the pre-match intention into the one authoritative in-match transition.
+ * A forced early injury may already have introduced the primed player; otherwise
+ * the planned player, same-line fallback or lowest-rated outfielder makes way at
+ * the planned minute. The returned plan is the source of truth for every later
+ * event and lineup calculation.
+ */
+function resolveImpactSubTransition(
+  manager: ManagerSquad,
+  offMap: Map<number, Casualty>,
+  impactSub: ImpactSubPlan | null
+): ImpactSubPlan | null {
+  if (!impactSub) return null;
+
+  const injuryEntry = Array.from(offMap.entries())
+    .filter(
+      ([, casualty]) =>
+        casualty.kind === "injury" &&
+        casualty.replacementId === impactSub.playerId &&
+        casualty.second <= impactSub.minute
+    )
+    .sort(
+      (first, second) =>
+        first[1].replacementOnSecond - second[1].replacementOnSecond ||
+        first[0] - second[0]
+    )[0];
+  if (injuryEntry) {
+    const [offPlayerId, casualty] = injuryEntry;
+    const off = manager.picks.find((pick) => pick.player.i === offPlayerId);
+    if (!off) return null;
+    return {
+      ...impactSub,
+      minute: casualty.replacementOnSecond,
+      offPlayerId,
+      offPlayerName: off.player.n
+    };
+  }
+
+  const change = impactSubLineupChange(
+    manager,
+    impactSub.minute,
+    offMap,
+    impactSub
+  );
+  if (!change) return null;
+  return {
+    ...impactSub,
+    offPlayerId: change.off.player.i,
+    offPlayerName: change.off.player.n
+  };
+}
+
+function pushImpactSubEvent(
+  events: MatchEvent[],
+  fixtureId: string,
+  manager: ManagerSquad,
+  offMap: Map<number, Casualty>,
+  impactSub: ImpactSubPlan | null
+): void {
+  if (!impactSub) return;
+  const change = impactSubLineupChange(
+    manager,
+    impactSub.minute,
+    offMap,
+    impactSub
+  );
+  if (!change) {
+    // A first-half injury may have brought the selected player on early. Mark that
+    // real change as the impact moment instead of emitting a duplicate substitution.
+    const existing = events.find(
+      (entry) =>
+        entry.code === "substitution" &&
+        entry.teamId === manager.id &&
+        entry.playerId === impactSub.playerId
+    );
+    if (existing) {
+      existing.params = {
+        ...existing.params,
+        impactSub: 1,
+        impactRole: impactSub.role,
+        impactLabel: impactSub.label
+      };
+    }
+    return;
+  }
+  events.push(
+    event(
+      fixtureId,
+      impactSub.minute,
+      "substitution",
+      manager.id,
+      change.selected.player,
+      {
+        manager: manager.displayName,
+        off: change.off.player.n,
+        impactSub: 1,
+        impactRole: impactSub.role,
+        impactLabel: impactSub.label
+      }
+    )
+  );
+}
+
 function casualtyIds(offMap: Map<number, Casualty>, kind: Casualty["kind"]): number[] {
   return Array.from(offMap.entries())
     .filter(([, info]) => info.kind === kind)
     .map(([playerId]) => playerId);
 }
 
-/** The XI actually on the pitch at a given second, accounting for in-match injuries/red cards. */
-function picksOnPitchAt(manager: ManagerSquad, second: number, offMap: Map<number, Casualty>): DraftPick[] {
-  return getActiveStarters(manager)
-    .map(({ pick }) => {
-      if (!pick) {
-        return null;
-      }
-      const casualty = offMap.get(pick.player.i);
-      if (!casualty || second < casualty.second) {
-        return pick;
-      }
-      if (casualty.replacementId == null || second < casualty.replacementOnSecond) {
-        return null;
-      }
-      return manager.picks.find((candidate) => candidate.player.i === casualty.replacementId) ?? null;
-    })
+function applyCasualtiesToLineup(
+  manager: ManagerSquad,
+  lineup: ActivePlayer[],
+  second: number,
+  offMap: Map<number, Casualty>,
+  applies: (casualty: Casualty) => boolean
+): ActivePlayer[] {
+  return lineup.map((entry) => {
+    const pick = entry.pick;
+    if (!pick) return entry;
+    const casualty = offMap.get(pick.player.i);
+    if (!casualty || casualty.second > second || !applies(casualty)) {
+      return entry;
+    }
+    if (casualty.replacementId == null || second < casualty.replacementOnSecond) {
+      return { ...entry, pick: null };
+    }
+    const replacement = manager.picks.find(
+      (candidate) => candidate.player.i === casualty.replacementId
+    );
+    return replacement ? { ...entry, pick: replacement } : { ...entry, pick: null };
+  });
+}
+
+function activeLineupAt(
+  manager: ManagerSquad,
+  second: number,
+  offMap: Map<number, Casualty>,
+  impactSub: ImpactSubPlan | null
+): ActivePlayer[] {
+  let lineup = getActiveStarters(manager);
+  if (!impactSub || second < impactSub.minute) {
+    return applyCasualtiesToLineup(manager, lineup, second, offMap, () => true);
+  }
+
+  // Same-minute stoppages precede the tactical substitution in match chronology.
+  lineup = applyCasualtiesToLineup(
+    manager,
+    lineup,
+    second,
+    offMap,
+    (casualty) => casualty.second <= impactSub.minute
+  );
+  const change = impactSubLineupChange(
+    manager,
+    impactSub.minute,
+    offMap,
+    impactSub
+  );
+  if (change) {
+    lineup = lineup.map((entry) =>
+      entry.pick?.player.i === change.off.player.i
+        ? { ...entry, pick: change.selected }
+        : entry
+    );
+  }
+  return applyCasualtiesToLineup(
+    manager,
+    lineup,
+    second,
+    offMap,
+    (casualty) => casualty.second > impactSub.minute
+  );
+}
+
+/** The XI actually on the pitch at a given second, accounting for casualties and an impact change. */
+function picksOnPitchAt(
+  manager: ManagerSquad,
+  second: number,
+  offMap: Map<number, Casualty>,
+  impactSub: ImpactSubPlan | null
+): DraftPick[] {
+  return activeLineupAt(manager, second, offMap, impactSub)
+    .map((entry) => entry.pick)
     .filter((pick): pick is DraftPick => pick !== null);
 }
 
-function chooseScorerAt(manager: ManagerSquad, second: number, offMap: Map<number, Casualty>, rng: () => number): Player {
-  const onPitch = picksOnPitchAt(manager, second, offMap);
+function chooseScorerAt(
+  manager: ManagerSquad,
+  second: number,
+  offMap: Map<number, Casualty>,
+  impactSub: ImpactSubPlan | null,
+  rng: () => number
+): Player {
+  const onPitch = picksOnPitchAt(manager, second, offMap, impactSub);
   const availablePicks = onPitch.length > 0 ? onPitch : manager.picks.filter((pick) => !unavailable(manager).includes(pick.player.i));
   const picks = availablePicks.length > 0 ? availablePicks : manager.picks;
   const outfieldPicks = picks.filter((pick) => !pick.player.p.includes("GK"));
@@ -437,8 +861,14 @@ function chooseScorerAt(manager: ManagerSquad, second: number, offMap: Map<numbe
   return pickOne(scorerPicks, rng).player;
 }
 
-function chooseEventPlayerAt(manager: ManagerSquad, second: number, offMap: Map<number, Casualty>, rng: () => number): Player {
-  const onPitch = picksOnPitchAt(manager, second, offMap);
+function chooseEventPlayerAt(
+  manager: ManagerSquad,
+  second: number,
+  offMap: Map<number, Casualty>,
+  impactSub: ImpactSubPlan | null,
+  rng: () => number
+): Player {
+  const onPitch = picksOnPitchAt(manager, second, offMap, impactSub);
   const availablePicks = onPitch.length > 0 ? onPitch : manager.picks.filter((pick) => !unavailable(manager).includes(pick.player.i));
   return pickOne(availablePicks.length > 0 ? availablePicks : manager.picks, rng).player;
 }
@@ -450,17 +880,19 @@ function addChances(
   away: ManagerSquad,
   homeOff: Map<number, Casualty>,
   awayOff: Map<number, Casualty>,
+  homeImpactSub: ImpactSubPlan | null,
+  awayImpactSub: ImpactSubPlan | null,
   rng: () => number
 ): void {
   const sides = [
-    { manager: home, off: homeOff },
-    { manager: away, off: awayOff }
+    { manager: home, off: homeOff, impactSub: homeImpactSub },
+    { manager: away, off: awayOff, impactSub: awayImpactSub }
   ];
   const count = 4 + Math.floor(rng() * 4);
   for (let index = 0; index < count; index += 1) {
     const side = pickOne(sides, rng);
     const second = 6 + Math.floor(rng() * 80);
-    const player = chooseEventPlayerAt(side.manager, second, side.off, rng);
+    const player = chooseEventPlayerAt(side.manager, second, side.off, side.impactSub, rng);
     events.push(event(fixtureId, second, rng() > 0.45 ? "chance" : "save", side.manager.id, player, { manager: side.manager.displayName }));
   }
 }
@@ -472,17 +904,19 @@ function addNearMisses(
   away: ManagerSquad,
   homeOff: Map<number, Casualty>,
   awayOff: Map<number, Casualty>,
+  homeImpactSub: ImpactSubPlan | null,
+  awayImpactSub: ImpactSubPlan | null,
   rng: () => number
 ): void {
   const sides = [
-    { manager: home, off: homeOff },
-    { manager: away, off: awayOff }
+    { manager: home, off: homeOff, impactSub: homeImpactSub },
+    { manager: away, off: awayOff, impactSub: awayImpactSub }
   ];
   const count = 1 + Math.floor(rng() * 3);
   for (let index = 0; index < count; index += 1) {
     const side = pickOne(sides, rng);
     const second = 10 + Math.floor(rng() * 76);
-    const player = chooseEventPlayerAt(side.manager, second, side.off, rng);
+    const player = chooseEventPlayerAt(side.manager, second, side.off, side.impactSub, rng);
     events.push(event(fixtureId, second, "near_miss", side.manager.id, player, { manager: side.manager.displayName }));
   }
 }

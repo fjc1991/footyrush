@@ -134,8 +134,9 @@ describe("Invincible autoplay", () => {
     expect(getInvincibleAutoplayStatus({ ...presenting, complete: true })).toBe("complete");
   });
 
-  it("pauses for the first loss and casualty aftermath, but not routine later losses", () => {
+  it("keeps routine results and losses moving, but pauses for human casualties", () => {
     const win = result({ fixtureId: "win", homeGoals: 2, awayGoals: 0 });
+    const draw = result({ fixtureId: "draw", homeGoals: 1, awayGoals: 1 });
     const firstLoss = result({ fixtureId: "first-loss", homeGoals: 0, awayGoals: 1 });
     const laterLoss = result({ fixtureId: "later-loss", homeGoals: 1, awayGoals: 3 });
     const injuryWin = result({ fixtureId: "injury", homeInjuries: [42] });
@@ -146,26 +147,74 @@ describe("Invincible autoplay", () => {
       awayRedCards: [7]
     });
 
-    expect(shouldPauseAfterInvincibleResult({ previousResults: [win], result: firstLoss })).toBe(true);
+    expect(shouldPauseAfterInvincibleResult({ previousResults: [], result: win })).toBe(false);
+    expect(shouldPauseAfterInvincibleResult({ previousResults: [win], result: draw })).toBe(false);
+    expect(shouldPauseAfterInvincibleResult({ previousResults: [win], result: firstLoss })).toBe(false);
     expect(shouldPauseAfterInvincibleResult({ previousResults: [firstLoss], result: laterLoss })).toBe(false);
     expect(shouldPauseAfterInvincibleResult({ previousResults: [firstLoss], result: injuryWin })).toBe(true);
     expect(shouldPauseAfterInvincibleResult({ previousResults: [win], result: awayRed })).toBe(true);
   });
 
-  it("ticks visibly and elapses exactly once after three seconds", () => {
+  it("only pauses for casualties suffered by a human starter when the active XI is supplied", () => {
+    const benchInjury = result({ fixtureId: "bench-injury", homeInjuries: [42] });
+    const starterRed = result({ fixtureId: "starter-red", homeRedCards: [7] });
+    const awayStarterInjury = result({
+      fixtureId: "away-starter-injury",
+      homeId: "opponent",
+      awayId: "human",
+      awayInjuries: [9]
+    });
+    const opponentCasualty = result({
+      fixtureId: "opponent-casualty",
+      homeId: "opponent-a",
+      awayId: "opponent-b",
+      homeInjuries: [7]
+    });
+
+    expect(
+      shouldPauseAfterInvincibleResult({
+        previousResults: [],
+        result: benchInjury,
+        humanStarterPlayerIds: [7, 9]
+      })
+    ).toBe(false);
+    expect(
+      shouldPauseAfterInvincibleResult({
+        previousResults: [],
+        result: starterRed,
+        humanStarterPlayerIds: [7, 9]
+      })
+    ).toBe(true);
+    expect(
+      shouldPauseAfterInvincibleResult({
+        previousResults: [],
+        result: awayStarterInjury,
+        humanStarterPlayerIds: [7, 9]
+      })
+    ).toBe(true);
+    expect(
+      shouldPauseAfterInvincibleResult({
+        previousResults: [],
+        result: opponentCasualty,
+        humanStarterPlayerIds: [7, 9]
+      })
+    ).toBe(false);
+  });
+
+  it("ticks visibly and elapses exactly once after one second by default", () => {
     vi.useFakeTimers();
     const ticks: number[] = [];
     const elapsed = vi.fn();
 
     scheduleInvincibleCountdown({ onTick: (value) => ticks.push(value), onElapsed: elapsed });
-    expect(ticks).toEqual([3]);
+    expect(ticks).toEqual([1]);
 
-    vi.advanceTimersByTime(2999);
-    expect(ticks).toEqual([3, 2, 1]);
+    vi.advanceTimersByTime(999);
+    expect(ticks).toEqual([1]);
     expect(elapsed).not.toHaveBeenCalled();
 
     vi.advanceTimersByTime(1);
-    expect(ticks).toEqual([3, 2, 1, 0]);
+    expect(ticks).toEqual([1, 0]);
     expect(elapsed).toHaveBeenCalledTimes(1);
 
     vi.advanceTimersByTime(5000);
@@ -175,7 +224,7 @@ describe("Invincible autoplay", () => {
   it("cancels without advancing and cleanup is idempotent", () => {
     vi.useFakeTimers();
     const elapsed = vi.fn();
-    const cancel = scheduleInvincibleCountdown({ onTick: () => undefined, onElapsed: elapsed });
+    const cancel = scheduleInvincibleCountdown({ seconds: 3, onTick: () => undefined, onElapsed: elapsed });
 
     vi.advanceTimersByTime(1000);
     cancel();

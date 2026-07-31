@@ -1,4 +1,27 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
+
+async function draftCompleteSquad(page: Page) {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.getByRole("button", { name: "Shuffle manager", exact: true }).click();
+  const startDraft = page.getByRole("button", { name: "Start draft", exact: true });
+  await expect(startDraft).toBeEnabled({ timeout: 5_000 });
+  await startDraft.click();
+  await page.getByRole("button", { name: "Spin", exact: true }).click();
+
+  for (let pick = 0; pick < 16; pick += 1) {
+    const expectedPick = pick + 1;
+    await expect(page.locator(".game-hud-phase > strong")).toHaveText(
+      `Pick ${expectedPick} of 16`,
+      { timeout: 8_000 }
+    );
+    await page.locator(".candidate-card").first().click();
+    const roleDialog = page.getByRole("dialog", { name: /Assign a role to/i });
+    await expect(roleDialog).toBeVisible();
+    await roleDialog.locator(".slot-option").first().click();
+  }
+
+  await expect(page.getByRole("heading", { name: "Your matchday squad is ready" })).toBeVisible();
+}
 
 /**
  * Smoke coverage for the critical path that the build/runtime break (the missing
@@ -61,7 +84,118 @@ test("home renders without runtime errors and both modes are selectable", async 
   await page.getByRole("button", { name: "My home", exact: true }).click();
   await expect(page.getByRole("heading", { name: "My home", exact: true })).toBeVisible();
   await expect(page.getByText("Invincible seasons", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: /Play Mini League/i }).click();
+  await expect(page.getByRole("button", { name: "Shuffle manager", exact: true })).toBeVisible();
+  await expect(page.locator(".draft-grid")).toHaveCount(0);
 
+  expect(pageErrors, `Unexpected runtime errors: ${pageErrors.join("; ")}`).toEqual([]);
+});
+
+test("Mini League decisions lead into prominent mode choices and player milestones", async ({ page }) => {
+  test.setTimeout(90_000);
+  const pageErrors: string[] = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  await page.addInitScript(() => window.localStorage.setItem("footyrush.analyticsConsent", "denied"));
+  await page.goto("/en");
+  await expect(page.locator("[data-app-ready='true']")).toBeVisible({ timeout: 15_000 });
+  await draftCompleteSquad(page);
+  await page.getByRole("button", { name: "Enter minileague", exact: true }).click();
+
+  let sawIncident = false;
+  let sawRequiredLineupChoice = false;
+
+  for (let round = 0; round < 5; round += 1) {
+    const lineupDecision = page.locator(".mini-lineup-decision");
+    if (await lineupDecision.isVisible().catch(() => false)) {
+      sawRequiredLineupChoice = true;
+      const rows = lineupDecision.locator(".mini-replacement-row");
+      for (let row = 0; row < await rows.count(); row += 1) {
+        const option = rows.nth(row).locator(".sub-option").first();
+        if (await option.count()) {
+          await option.click();
+          await expect(option).toHaveAttribute("aria-pressed", "true");
+        }
+      }
+    }
+
+    if (round === 0) {
+      await expect(page.locator(".impact-sub-option").first()).toBeVisible();
+      await page.locator(".impact-sub-option").first().click();
+      await expect(page.locator(".impact-sub-option.active")).toHaveCount(1);
+    }
+
+    const kickOff = page.getByRole("button", { name: "Kick off", exact: true });
+    await expect(kickOff).toBeEnabled();
+    await kickOff.click();
+    await page.getByRole("button", { name: "Finish now", exact: true }).click();
+
+    if (round === 0) {
+      await expect(page.locator(".match-turning-point").filter({ hasText: "Impact Sub" })).toBeVisible();
+    }
+    if (await page.locator(".match-turning-point.red_card, .match-turning-point.injury").count()) {
+      sawIncident = true;
+    }
+
+    await page.getByRole("button", { name: "Continue league", exact: true }).click();
+    if (round < 4) {
+      const summary = page.getByRole("dialog").filter({ hasText: "Full-time scores" });
+      await expect(summary).toBeVisible();
+      await summary.getByRole("button", { name: "Next round →", exact: true }).click();
+    }
+  }
+
+  expect(sawIncident).toBe(true);
+  expect(sawRequiredLineupChoice).toBe(true);
+  await expect(page.getByRole("heading", { name: "Choose your next challenge", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Play Mini League/i })).toBeVisible();
+  const invincibleChoice = page.getByRole("button", { name: /Start Be Invincible/i });
+  await expect(invincibleChoice).toBeVisible();
+  await expect(page.getByRole("heading", { name: "The squad story you can beat", exact: true })).toBeVisible();
+  await expect(page.getByText("Career chase", { exact: true })).toBeVisible();
+
+  const milestoneNudge = page.locator(".milestone-nudge-close");
+  if (await milestoneNudge.isVisible().catch(() => false)) {
+    await milestoneNudge.click();
+  }
+  await page.locator(".profile-pill").click();
+  const completionAuthDialog = page.getByRole("dialog", { name: "Create your manager ID", exact: true });
+  await expect(completionAuthDialog.getByRole("button", { name: "Continue with X", exact: true })).toBeEnabled();
+  await completionAuthDialog.getByRole("button", { name: "Close sign-in", exact: true }).click();
+
+  await invincibleChoice.click();
+  await expect(page.locator("[data-game-mode='invincible']")).toBeVisible();
+  await expect(page.locator(".draft-grid")).toBeVisible();
+  await page.getByRole("button", { name: "My home", exact: true }).click();
+  const resumeSeason = page.getByRole("button", { name: /Resume Be Invincible/i });
+  await expect(resumeSeason).toBeVisible();
+  await expect(page.getByRole("button", { name: /Play Mini League/i })).toHaveCount(0);
+  await resumeSeason.click();
+  await expect(page.locator(".draft-grid")).toBeVisible();
+  expect(pageErrors, `Unexpected runtime errors: ${pageErrors.join("; ")}`).toEqual([]);
+});
+
+test("reduced-motion Invincible auto-play advances routine matches without a manual continue", async ({ page }) => {
+  test.setTimeout(60_000);
+  const pageErrors: string[] = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  await page.addInitScript(() => {
+    window.localStorage.setItem("footyrush.analyticsConsent", "denied");
+    Date.now = () => 1_700_000_000_000;
+  });
+  await page.goto("/en");
+  await expect(page.locator("[data-app-ready='true']")).toBeVisible({ timeout: 15_000 });
+  await page.getByRole("button", { name: /Be Invincible/i }).click();
+  await draftCompleteSquad(page);
+  await page.getByRole("button", { name: "Start Be Invincible season", exact: true }).click();
+
+  const outOfFormDecision = page.locator(".season-event-card").filter({ hasText: "Out of form" });
+  if (await outOfFormDecision.isVisible().catch(() => false)) {
+    await outOfFormDecision.locator(".sub-option").first().click();
+  }
+
+  await page.getByRole("button", { name: "Kick off season", exact: true }).click();
+  await expect(page.getByText("Match 2 of 38", { exact: true })).toBeVisible({ timeout: 8_000 });
+  await expect(page.getByRole("button", { name: "Continue", exact: true })).toHaveCount(0);
   expect(pageErrors, `Unexpected runtime errors: ${pageErrors.join("; ")}`).toEqual([]);
 });
 
