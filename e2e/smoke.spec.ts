@@ -65,8 +65,8 @@ test("home renders without runtime errors and both modes are selectable", async 
   await page.getByRole("button", { name: "UNLOCKS", exact: true }).click();
   await expect(page.getByRole("heading", { name: "UNLOCKS", exact: true })).toBeVisible();
   await expect(page.getByLabel("Personalization unlock progress").getByRole("progressbar")).toHaveCount(4);
-  await expect(page.getByText("FootyRush Supporter Edition", { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Support checkout coming soon", exact: true })).toBeDisabled();
+  await expect(page.getByRole("heading", { name: "FootyRush Supporter Edition — Founders’ Rush", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "£4.99 checkout coming soon", exact: true })).toBeDisabled();
   await page.getByRole("button", { name: "Play", exact: true }).click();
 
   // Both modes are selectable.
@@ -223,6 +223,13 @@ test("UNLOCKS keeps long-term paths independent and preserves legacy links", asy
       demo: true
     }));
     if (window.localStorage.getItem("footyrush.unlockE2EPhase") === "complete") return;
+    window.localStorage.setItem("footyrush.clubIdentity.v1", JSON.stringify({
+      clubName: "FootyRush FC",
+      paletteId: "red_white",
+      kitStyle: "stripes",
+      badgeStyle: "round",
+      editionId: "supporter"
+    }));
     const records = Array.from({ length: 99 }, (_, index) => ({
       id: `unlock-seed-${index}`,
       userId: "unlock-seed",
@@ -265,11 +272,21 @@ test("UNLOCKS keeps long-term paths independent and preserves legacy links", asy
   await expect(page.getByRole("button", { name: /Red & white/ })).toBeDisabled();
   await expect(page.getByRole("button", { name: /Stripes/ })).toBeDisabled();
   await expect(page.getByRole("button", { name: /Roundel/ })).toBeDisabled();
-  await expect(page.getByRole("button", { name: "Support checkout coming soon", exact: true })).toBeDisabled();
-  const supporterMarks = page.locator(".supporter-preview .footyrush-mark");
-  await expect(supporterMarks).toHaveCount(2);
-  await expect(supporterMarks.first()).toBeVisible();
-  await expect(supporterMarks.last()).toBeVisible();
+  await expect(page.getByRole("button", { name: "£4.99 checkout coming soon", exact: true })).toBeDisabled();
+  await expect.poll(() => page.evaluate(() => {
+    const stored = JSON.parse(window.localStorage.getItem("footyrush.clubIdentity.v1") ?? "{}") as { editionId?: string };
+    return stored.editionId;
+  })).toBe("supporter");
+
+  const mainClubPreview = page.locator(".club-preview");
+  await expect(mainClubPreview).not.toHaveClass(/is-supporter/);
+  await expect(mainClubPreview.locator("[data-supporter-artwork]")).toHaveCount(0);
+  await expect(mainClubPreview.locator(".club-preview-badge")).toBeVisible();
+  await expect(mainClubPreview.locator(".club-preview-kit")).toBeVisible();
+
+  const supporterPreview = page.getByRole("group", { name: "Supporter Edition badge and kit preview", exact: true });
+  await expect(supporterPreview.locator('svg[data-supporter-artwork="badge"]')).toBeVisible();
+  await expect(supporterPreview.locator('svg[data-supporter-artwork="kit"]')).toBeVisible();
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBe(0);
 
   // Cross every threshold independently, then prove the earned choices persist.
@@ -325,7 +342,7 @@ test("UNLOCKS keeps long-term paths independent and preserves legacy links", asy
   await expect(page.getByRole("button", { name: "Red & white", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByRole("button", { name: "Stripes", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByRole("button", { name: "FR Roundel", exact: true })).toHaveAttribute("aria-pressed", "true");
-  await expect(page.getByRole("button", { name: "Support checkout coming soon", exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "£4.99 checkout coming soon", exact: true })).toBeDisabled();
 });
 
 test("X account legal pages are public and connected", async ({ page }) => {

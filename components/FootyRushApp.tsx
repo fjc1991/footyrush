@@ -24,6 +24,7 @@ import {
   type CareerSummary
 } from "@/lib/game/career";
 import { unlockEntitlementGrants } from "@/lib/game/achievements";
+import { getEmailRisk, validateEmailFormat } from "@/lib/game/anti-abuse";
 import {
   DEFAULT_CLUB_IDENTITY,
   applyClubEntitlements,
@@ -111,6 +112,8 @@ import MatchBroadcast from "@/components/MatchBroadcast";
 import UnlocksScreen from "@/components/AchievementsScreen";
 import FootyRushMark from "@/components/FootyRushMark";
 import ProfileCompletionReminder from "@/components/ProfileCompletionReminder";
+import SupporterBadge from "@/components/supporter/SupporterBadge";
+import SupporterKit from "@/components/supporter/SupporterKit";
 import type { Session } from "@supabase/supabase-js";
 import type {
   CompetitionMode,
@@ -1574,14 +1577,11 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     const updateVisibility = () => {
       const visible = !document.hidden;
       setPageVisible(visible);
-      if (!visible && phase === "season") {
-        setSeasonAutoplayPaused(true);
-      }
     };
     updateVisibility();
     document.addEventListener("visibilitychange", updateVisibility);
     return () => document.removeEventListener("visibilitychange", updateVisibility);
-  }, [phase]);
+  }, []);
 
   useEffect(() => {
     if (phase === "season" && showAuthGate) {
@@ -2398,10 +2398,8 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
         managerCall: managerCalls.join(" · ") || undefined,
         hold: revealNeedsAcknowledgement || isFinalMatch,
         compact:
-          !seasonAutoplayPaused &&
           !feedback.firstLoss &&
           !hasHumanCasualty &&
-          managerCalls.length === 0 &&
           !isFinalMatch
       });
     }
@@ -2464,7 +2462,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     if (
       phase !== "season" ||
       view !== "play" ||
-      document.hidden ||
+      !pageVisible ||
       !seasonAutoplayKey ||
       seasonAutoplayStatus !== "running"
     ) {
@@ -2476,7 +2474,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
         void seasonAdvanceRef.current();
       }
     });
-  }, [phase, seasonAutoplayKey, seasonAutoplayStatus, view]);
+  }, [pageVisible, phase, seasonAutoplayKey, seasonAutoplayStatus, view]);
 
   function recordRoundAndAdvance() {
     if (!league || !currentResult) {
@@ -2941,12 +2939,17 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
   async function signInWithPassword(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setAuthMessage("");
+    const email = authEmail.trim();
+    if (!validateEmailFormat(email) || !authPassword) {
+      setAuthMessage("Enter a valid email address and password.");
+      return;
+    }
     const supabase = getSupabaseBrowserClient();
     if (!supabase) {
       setAuthMessage("Sign-in is unavailable until Supabase is configured.");
       return;
     }
-    const { error } = await supabase.auth.signInWithPassword({ email: authEmail.trim(), password: authPassword });
+    const { error } = await supabase.auth.signInWithPassword({ email, password: authPassword });
     if (error) {
       setAuthMessage(error.message);
       return;
@@ -2964,8 +2967,8 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
       return;
     }
     const email = authEmail.trim();
-    if (!email || authPassword.length < 6) {
-      setAuthMessage("Enter an email and a password of at least 6 characters.");
+    if (!validateEmailFormat(email) || authPassword.length < 6) {
+      setAuthMessage("Enter a valid email address and a password of at least 6 characters.");
       return;
     }
     const { data, error } = await supabase.auth.signUp({
@@ -3040,6 +3043,11 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
   async function signInWithEmail(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setAuthMessage("");
+    const risk = getEmailRisk(authEmail);
+    if (!risk.ok) {
+      setAuthMessage(risk.reason ?? "Enter a valid email address.");
+      return;
+    }
     const response = await fetch("/api/auth/email", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -3363,6 +3371,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
           records={careerRecords}
           identity={effectiveClubIdentity}
           activeRun={activeCareerRunMode !== null}
+          entitlementGrants={clubEntitlementGrants}
           onSave={saveClubIdentity}
         />
       )}
@@ -4046,7 +4055,13 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                   setSeasonOutOfFormChoice("bench");
                   setSeasonOutOfFormSubId(subId);
                 }}
-                onStart={playSeasonMatchAndAdvance}
+                onStart={() => {
+                  // The primary action means "start/resume the run", not "play
+                  // exactly one match". Keep moving through routine fixtures
+                  // until a real lineup decision or turning point needs attention.
+                  setSeasonAutoplayPaused(false);
+                  void playSeasonMatchAndAdvance();
+                }}
                 onToggleAutoplay={() => setSeasonAutoplayPaused((paused) => !paused)}
                 canStart={(seasonCompletionPending || canKickOffSeasonMatch()) && seasonAutoplayStatus !== "saving"}
               />
@@ -4593,6 +4608,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
                     value={authEmail}
                     onChange={(event) => setAuthEmail(event.target.value)}
                     placeholder="you@example.com"
+                    type="email"
                     inputMode="email"
                     autoComplete="email"
                   />
@@ -4708,18 +4724,24 @@ function TeamBadge({
     ...(resolved?.style ?? getTeamVisualStyle(teamCode ?? "FR")),
     ...(resolved?.badgeClipPath ? { clipPath: resolved.badgeClipPath } : {})
   } as CSSProperties;
+  if (resolved?.supporter && resolved.paletteId) {
+    return (
+      <SupporterBadge
+        className={`team-badge supporter-artwork-badge${small ? " team-badge--sm" : ""}`}
+        paletteId={resolved.paletteId}
+        size={small ? "compact" : "standard"}
+        title={`${resolvedName} FootyRush Supporter Edition badge`}
+      />
+    );
+  }
   return (
     <span
-      className={`team-badge${small ? " team-badge--sm" : ""}${resolved?.supporter ? " is-supporter" : ""}`}
+      className={`team-badge${small ? " team-badge--sm" : ""}`}
       style={resolvedStyle}
       role="img"
-      aria-label={resolved?.supporter
-        ? `${resolvedName} FootyRush Supporter Edition badge`
-        : `${resolvedName} colours`}
+      aria-label={`${resolvedName} colours`}
     >
-      {resolved?.supporter
-        ? <span className="supporter-brand-roundel"><FootyRushMark tone="light" /></span>
-        : resolvedMonogram}
+      {resolvedMonogram}
     </span>
   );
 }
@@ -4876,7 +4898,8 @@ function FormationPitch({
             }
             const isInjured = injuredPlayerIds.includes(pick.player.i);
             const isSuspended = suspendedPlayerIds.includes(pick.player.i);
-            const tokenClass = `pitch-token team-kit${squadIdentity?.supporter ? " is-supporter" : ""}${isInjured ? " injured" : isSuspended ? " suspended" : ""}`;
+            const supporterKit = Boolean(squadIdentity?.supporter && squadIdentity.paletteId);
+            const tokenClass = `pitch-token${supporterKit ? " supporter-pitch-token" : " team-kit"}${isInjured ? " injured" : isSuspended ? " suspended" : ""}`;
             const lastName = pick.player.n.split(/[\s.]+/).filter(Boolean).slice(-1)[0] ?? pick.player.n;
             return (
               <div
@@ -4889,9 +4912,20 @@ function FormationPitch({
                   className={tokenClass}
                   style={(squadStyle ?? getTeamVisualStyle(pick.teamCode)) as CSSProperties}
                 >
-                  <Shirt size={34} strokeWidth={1.5} className="kit-icon" />
-                  {squadIdentity?.supporter && <FootyRushMark tone="light" className="kit-supporter-mark" />}
-                  <span className="kit-num">{pick.player.num}</span>
+                  {supporterKit ? (
+                    <SupporterKit
+                      className="pitch-supporter-kit"
+                      paletteId={squadIdentity?.paletteId ?? "footyrush"}
+                      playerNumber={pick.player.num}
+                      size="micro"
+                      decorative
+                    />
+                  ) : (
+                    <>
+                      <Shirt size={34} strokeWidth={1.5} className="kit-icon" />
+                      <span className="kit-num">{pick.player.num}</span>
+                    </>
+                  )}
                   {isInjured && <span className="token-flag injury">＋</span>}
                   {isSuspended && <span className="token-flag susp">▌</span>}
                   {pick.boostActive && <span className="token-flag boost">B</span>}

@@ -2,9 +2,9 @@
 
 import { Check, Coffee, Heart, LockKeyhole, Palette, Save, Shirt, Sparkles, Shield } from "lucide-react";
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
-import FootyRushMark from "@/components/FootyRushMark";
+import SupporterBadge from "@/components/supporter/SupporterBadge";
+import SupporterKit from "@/components/supporter/SupporterKit";
 import {
-  unlockEntitlementGrants,
   unlockProgress,
   type UnlockProgress
 } from "@/lib/game/achievements";
@@ -30,7 +30,7 @@ interface UnlocksScreenProps {
   records: LeaderboardRecord[];
   identity: ClubIdentity;
   activeRun: boolean;
-  additionalGrants?: ClubEntitlementGrant[];
+  entitlementGrants: ClubEntitlementGrant[];
   onSave: (identity: ClubIdentity) => void;
 }
 
@@ -56,15 +56,11 @@ export default function UnlocksScreen({
   records,
   identity,
   activeRun,
-  additionalGrants = [],
+  entitlementGrants,
   onSave
 }: UnlocksScreenProps) {
   const progress = useMemo(() => unlockProgress(records), [records]);
-  const earnedGrants = useMemo(() => unlockEntitlementGrants(records), [records]);
-  const grants = useMemo(
-    () => [...earnedGrants, ...additionalGrants],
-    [additionalGrants, earnedGrants]
-  );
+  const grants = entitlementGrants;
   const entitlements = useMemo(() => resolveClubEntitlements(grants), [grants]);
   const progressByReward = useMemo(
     () => new Map(progress.map((unlock) => [unlock.reward, unlock])),
@@ -83,7 +79,7 @@ export default function UnlocksScreen({
   const stylesUnlocked = entitlements.has("kit_style_basic");
   const badgesUnlocked = entitlements.has("badge_style_basic");
   const supporterUnlocked = entitlements.has("supporter_edition");
-  const supporterActive = draft.editionId === "supporter";
+  const supporterActive = supporterUnlocked && draft.editionId === "supporter";
   const palettesUnlocked = palettePathUnlocked || (supporterUnlocked && supporterActive);
   const completedCount = progress.filter((unlock) => unlock.completed).length;
   const dirty = JSON.stringify(draft) !== JSON.stringify(identity);
@@ -183,21 +179,37 @@ export default function UnlocksScreen({
               <Sparkles size={20} aria-hidden="true" />
             </div>
             <div className="club-preview-stage">
-              <span
-                className={`team-badge club-preview-badge${supporterActive ? " is-supporter" : ""}`}
-                style={badgeStyle}
-                role="img"
-                aria-label={`${draft.clubName}${supporterActive ? " Supporter Edition" : ""} badge preview`}
-              >
-                {supporterActive ? (
-                  <span className="supporter-brand-roundel"><FootyRushMark tone="light" /></span>
-                ) : getTeamMonogram("", draft.clubName)}
-              </span>
-              <span className={`club-preview-kit team-kit${supporterActive ? " is-supporter" : ""}`} style={draftVisualStyle} aria-hidden="true">
-                <Shirt size={98} strokeWidth={1.25} className="kit-icon" />
-                {supporterActive && <FootyRushMark tone="light" className="kit-supporter-mark" />}
-                <span className="kit-num">10</span>
-              </span>
+              {supporterActive ? (
+                <SupporterBadge
+                  className="club-preview-supporter-badge"
+                  paletteId={draft.paletteId}
+                  size="preview"
+                  title={`${draft.clubName} Founders’ Rush supporter badge preview`}
+                />
+              ) : (
+                <span
+                  className="team-badge club-preview-badge"
+                  style={badgeStyle}
+                  role="img"
+                  aria-label={`${draft.clubName} badge preview`}
+                >
+                  {getTeamMonogram("", draft.clubName)}
+                </span>
+              )}
+              {supporterActive ? (
+                <SupporterKit
+                  className="club-preview-supporter-kit"
+                  paletteId={draft.paletteId}
+                  playerNumber={10}
+                  size="preview"
+                  title={`${draft.clubName} Founders’ Rush supporter kit preview`}
+                />
+              ) : (
+                <span className="club-preview-kit team-kit" style={draftVisualStyle} aria-hidden="true">
+                  <Shirt size={98} strokeWidth={1.25} className="kit-icon" />
+                  <span className="kit-num">10</span>
+                </span>
+              )}
             </div>
             <p>
               {activeRun
@@ -343,17 +355,17 @@ export default function UnlocksScreen({
 
         <section className="supporter-unlock" aria-labelledby="supporter-unlock-title">
           <div className="supporter-unlock-copy">
-            <div className="supporter-kicker"><Heart size={16} aria-hidden="true" /> Supporter unlock</div>
-            <p className="eyebrow">One-off contribution · about one coffee</p>
-            <h3 id="supporter-unlock-title">FootyRush Supporter Edition</h3>
+            <div className="supporter-kicker"><Heart size={16} aria-hidden="true" /> Supporter purchase</div>
+            <p className="eyebrow">£4.99 once · about one coffee</p>
+            <h3 id="supporter-unlock-title">FootyRush Supporter Edition — Founders’ Rush</h3>
             <p>
-              Help cover development and server costs, then wear a permanent cosmetic thank-you:
-              the FootyRush crest, signature rush sash and an immutable gold frame.
+              Support development and server costs, then unlock a permanent cosmetic thank-you:
+              the FootyRush crest, signature rush sash and fixed gold supporter frame.
             </p>
             <ul>
               <li>Choose any club palette for this edition; the standard palette path stays independent.</li>
               <li>The gold trim and FootyRush mark always identify a supporter.</li>
-              <li>No gameplay advantage, recurring fee or competitive boost.</li>
+              <li>One payment. No subscription, gameplay advantage or competitive boost.</li>
             </ul>
             <button
               className={supporterUnlocked ? "primary-button" : "secondary-button"}
@@ -374,28 +386,22 @@ export default function UnlocksScreen({
               <Coffee size={17} aria-hidden="true" />
               {supporterUnlocked
                 ? supporterActive ? "Use standard edition" : "Wear Supporter Edition"
-                : "Support checkout coming soon"}
+                : "£4.99 checkout coming soon"}
             </button>
             {!supporterUnlocked && (
               <small>
                 Preview only. Checkout stays disabled until payment verification can grant this securely to an account.
-                This will be a supporter contribution, not a charitable or tax-deductible donation.
+                This will be a one-off purchase of digital cosmetic content, not a charitable or tax-deductible donation.
               </small>
             )}
           </div>
-          <div className="supporter-preview" style={draftVisualStyle} aria-label="Supporter Edition badge and kit preview">
-            <div className="supporter-preview-label"><Shield size={15} /> Gold Rush design</div>
+          <div className="supporter-preview" style={draftVisualStyle} role="group" aria-label="Supporter Edition badge and kit preview">
+            <div className="supporter-preview-label"><Shield size={15} /> Founders’ Rush Sash · recommended</div>
             <div className="supporter-preview-stage">
-              <span className="team-badge club-preview-badge is-supporter" style={badgeStyle} aria-hidden="true">
-                <span className="supporter-brand-roundel"><FootyRushMark tone="light" /></span>
-              </span>
-              <span className="club-preview-kit team-kit is-supporter" style={draftVisualStyle} aria-hidden="true">
-                <Shirt size={98} strokeWidth={1.25} className="kit-icon" />
-                <FootyRushMark tone="light" className="kit-supporter-mark" />
-                <span className="kit-num">10</span>
-              </span>
+              <SupporterBadge paletteId={draft.paletteId} size="preview" decorative />
+              <SupporterKit paletteId={draft.paletteId} playerNumber={10} size="preview" decorative />
             </div>
-            <p>Signature gold stays fixed. Primary and secondary colours come from your club palette.</p>
+            <p>Signature gold, the shield and the FR crest stay fixed. Your two club colours remain yours.</p>
           </div>
         </section>
       </div>

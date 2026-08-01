@@ -1,7 +1,8 @@
 import {
   clubBadgeClipPath,
   clubIdentityToTeamVisual,
-  normalizeClubIdentity
+  normalizeClubIdentity,
+  type ClubPaletteId
 } from "./club-identity";
 import type { ManagerSquad } from "./types";
 
@@ -197,6 +198,8 @@ export interface ResolvedManagerIdentity {
   teamCode: string | null;
   visual: TeamVisual;
   style: TeamVisualStyle;
+  /** Controlled palette ID for custom artwork; historical teams have none. */
+  paletteId: ClubPaletteId | null;
   badgeClipPath: string | null;
   supporter: boolean;
 }
@@ -237,7 +240,10 @@ export function resolveManagerIdentity(manager: ManagerSquad): ResolvedManagerId
       teamCode: null,
       visual,
       style: getTeamVisualStyle(visual),
-      badgeClipPath: clubBadgeClipPath(identity),
+      paletteId: identity.paletteId,
+      // Supporter Edition owns a fixed shield; standard badge choices must not
+      // change or spoof its paid visual treatment.
+      badgeClipPath: identity.editionId === "supporter" ? null : clubBadgeClipPath(identity),
       supporter: identity.editionId === "supporter"
     };
   }
@@ -251,6 +257,7 @@ export function resolveManagerIdentity(manager: ManagerSquad): ResolvedManagerId
       teamCode: historicalTeamCode,
       visual,
       style: getTeamVisualStyle(visual),
+      paletteId: null,
       badgeClipPath: null,
       supporter: false
     };
@@ -263,6 +270,7 @@ export function resolveManagerIdentity(manager: ManagerSquad): ResolvedManagerId
     teamCode: null,
     visual,
     style: getTeamVisualStyle(visual),
+    paletteId: null,
     badgeClipPath: null,
     supporter: false
   };

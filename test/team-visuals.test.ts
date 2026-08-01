@@ -135,6 +135,7 @@ describe("team visuals", () => {
       monogram: "NA",
       teamCode: null,
       visual: { primary: "#1849A9", secondary: "#F5C400", pattern: "stripes" },
+      paletteId: "royal_gold",
       badgeClipPath: "circle(50% at 50% 50%)",
       supporter: false
     });
@@ -158,9 +159,11 @@ describe("team visuals", () => {
     expect(resolved).toMatchObject({
       clubName: "Supporter FC",
       supporter: true,
+      paletteId: "green_white",
+      badgeClipPath: null,
       visual: { primary: "#08783D", secondary: "#F5F7FA", pattern: "halves" }
     });
-    expect(resolved.badgeClipPath).toContain("polygon");
+    expect(resolved.badgeClipPath).toBeNull();
   });
 
   it("preserves a historical club identity when its picks are reordered", () => {
@@ -180,6 +183,8 @@ describe("team visuals", () => {
       clubName: "Blackburn Rovers 1994–95",
       monogram: "BLB",
       teamCode: "BLB",
+      paletteId: null,
+      badgeClipPath: null,
       visual: TEAM_VISUALS.BLB
     });
   });

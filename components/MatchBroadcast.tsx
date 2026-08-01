@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import FootyRushMark from "@/components/FootyRushMark";
+import SupporterBadge from "@/components/supporter/SupporterBadge";
 import { renderCommentary } from "@/lib/game/commentary";
 import {
   buildScoreTimeline,
@@ -66,21 +66,26 @@ function TeamIdentity({ manager, side }: { manager: ManagerSquad; side: "home" |
     <div
       className={`match-broadcast-team match-broadcast-team--${side}${manager.kind === "human" ? " is-human" : ""}`}
     >
-      <span
-        className={`match-broadcast-badge team-badge${identity.supporter ? " is-supporter" : ""}`}
-        style={{
-          ...identity.style,
-          ...(identity.badgeClipPath ? { clipPath: identity.badgeClipPath } : {})
-        } as CSSProperties}
-        role="img"
-        aria-label={identity.supporter
-          ? `${identity.clubName} FootyRush Supporter Edition badge`
-          : `${identity.clubName} colours`}
-      >
-        {identity.supporter
-          ? <span className="supporter-brand-roundel"><FootyRushMark tone="light" /></span>
-          : identity.monogram}
-      </span>
+      {identity.supporter && identity.paletteId ? (
+        <SupporterBadge
+          className="match-broadcast-badge team-badge supporter-artwork-badge"
+          paletteId={identity.paletteId}
+          size="broadcast"
+          title={`${identity.clubName} FootyRush Supporter Edition badge`}
+        />
+      ) : (
+        <span
+          className="match-broadcast-badge team-badge"
+          style={{
+            ...identity.style,
+            ...(identity.badgeClipPath ? { clipPath: identity.badgeClipPath } : {})
+          } as CSSProperties}
+          role="img"
+          aria-label={`${identity.clubName} colours`}
+        >
+          {identity.monogram}
+        </span>
+      )}
       <span className="match-broadcast-team-copy">
         <small>{manager.kind === "human" ? "You" : side === "home" ? "Home" : "Away"}</small>
         <strong>{identity.clubName}</strong>

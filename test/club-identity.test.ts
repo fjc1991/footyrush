@@ -24,6 +24,12 @@ const earnedName: ClubEntitlementGrant = {
   sourceRef: "club_identity"
 };
 
+const supporterGrant: ClubEntitlementGrant = {
+  entitlement: "supporter_edition",
+  source: "purchase",
+  sourceRef: "checkout-1"
+};
+
 const customIdentity: ClubIdentity = {
   clubName: "Seoul United",
   paletteId: "claret_sky",
@@ -66,32 +72,49 @@ describe("club identity", () => {
     expect(validateClubIdentity({ ...customIdentity, badgeStyle: "url(evil)" }).valid).toBe(false);
   });
 
-  it("requires a distinct entitlement for every non-default field", () => {
+  it("requires standard entitlements for standard artwork fields", () => {
+    const standardIdentity: ClubIdentity = {
+      ...customIdentity,
+      editionId: "standard"
+    };
+
     expect(requiredClubEntitlements({ ...DEFAULT_CLUB_IDENTITY })).toEqual([]);
+    expect(requiredClubEntitlements(standardIdentity)).toEqual([
+      "club_name_custom",
+      "kit_palette_basic",
+      "kit_style_basic",
+      "badge_style_basic"
+    ]);
+  });
+
+  it("requires the supporter grant but not dormant standard kit or badge grants", () => {
     expect(requiredClubEntitlements(customIdentity)).toEqual([
       "club_name_custom",
-      "kit_style_basic",
-      "badge_style_basic",
       "supporter_edition"
     ]);
-
-    const locked = validateClubIdentity(customIdentity, []);
-    expect(locked).toMatchObject({
+    expect(validateClubIdentity(customIdentity, [earnedName])).toMatchObject({
       valid: false,
-      missingEntitlements: [
-        "club_name_custom",
-        "kit_style_basic",
-        "badge_style_basic",
-        "supporter_edition"
-      ]
+      missingEntitlements: ["supporter_edition"]
+    });
+    expect(validateClubIdentity(customIdentity, [earnedName, supporterGrant])).toMatchObject({
+      valid: true,
+      missingEntitlements: []
     });
   });
 
-  it("clamps each locked field independently instead of resetting the whole identity", () => {
+  it("clamps an ungranted local supporter identity back to earned standard fields", () => {
     expect(applyClubEntitlements(customIdentity, [earnedName])).toEqual({
       ...DEFAULT_CLUB_IDENTITY,
       clubName: "Seoul United"
     });
+    expect(applyClubEntitlements({
+      ...DEFAULT_CLUB_IDENTITY,
+      paletteId: "green_white",
+      editionId: "supporter"
+    }, [])).toEqual(DEFAULT_CLUB_IDENTITY);
+  });
+
+  it("clamps each independently earned standard field without granting supporter status", () => {
     expect(applyClubEntitlements(customIdentity, [{
       entitlement: "badge_style_basic",
       source: "unlock",
@@ -100,11 +123,7 @@ describe("club identity", () => {
       ...DEFAULT_CLUB_IDENTITY,
       badgeStyle: "round"
     });
-    expect(applyClubEntitlements(customIdentity, [{
-      entitlement: "supporter_edition",
-      source: "purchase",
-      sourceRef: "checkout-1"
-    }])).toEqual({
+    expect(applyClubEntitlements(customIdentity, [supporterGrant])).toEqual({
       ...DEFAULT_CLUB_IDENTITY,
       paletteId: "claret_sky",
       editionId: "supporter"
@@ -112,18 +131,19 @@ describe("club identity", () => {
   });
 
   it("lets a supporter choose colours without skipping the standard palette path", () => {
-    const supporterGrant: ClubEntitlementGrant = {
-      entitlement: "supporter_edition",
-      source: "purchase",
-      sourceRef: "checkout-1"
-    };
     const supporterColours: ClubIdentity = {
       ...DEFAULT_CLUB_IDENTITY,
       paletteId: "green_white",
+      kitStyle: "hoops",
+      badgeStyle: "round",
       editionId: "supporter"
     };
     expect(validateClubIdentity(supporterColours, [supporterGrant])).toMatchObject({ valid: true });
-    expect(applyClubEntitlements(supporterColours, [supporterGrant])).toEqual(supporterColours);
+    expect(applyClubEntitlements(supporterColours, [supporterGrant])).toEqual({
+      ...supporterColours,
+      kitStyle: DEFAULT_CLUB_IDENTITY.kitStyle,
+      badgeStyle: DEFAULT_CLUB_IDENTITY.badgeStyle
+    });
     expect(applyClubEntitlements({ ...supporterColours, editionId: "standard" }, [supporterGrant])).toEqual(
       DEFAULT_CLUB_IDENTITY
     );

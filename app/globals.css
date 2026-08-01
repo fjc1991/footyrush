@@ -5082,102 +5082,35 @@ p {
   font-weight: 900;
 }
 
-.team-badge.is-supporter {
-  --supporter-gold-highlight: #ffe8a3;
-  --supporter-gold: #d6a72a;
-  --supporter-gold-shadow: #7a4d08;
-  position: relative;
-  isolation: isolate;
-  padding: 4px;
-  background: linear-gradient(145deg, var(--supporter-gold-highlight), var(--supporter-gold) 52%, var(--supporter-gold-shadow));
+.team-badge.supporter-artwork-badge {
+  padding: 0;
+  overflow: visible;
+  clip-path: none;
+  background: transparent;
+  text-shadow: none;
 }
 
-.team-badge.is-supporter::before {
-  content: "";
-  position: absolute;
-  z-index: 0;
-  inset: 3px;
-  clip-path: inherit;
-  background: linear-gradient(
-    132deg,
-    var(--team-primary) 0 39%,
-    var(--team-secondary) 39% 51%,
-    var(--team-primary) 51% 100%
-  );
-  box-shadow: inset 0 0 0 1px #07162f;
+.supporter-pitch-token {
+  width: 34px;
+  height: 36px;
 }
 
-.team-badge--sm.is-supporter {
-  padding: 3px;
+.pitch-supporter-kit,
+.club-preview-supporter-badge,
+.club-preview-supporter-kit {
+  display: block;
+  overflow: visible;
+  filter: drop-shadow(0 8px 12px rgba(3, 12, 28, 0.3));
 }
 
-.team-badge--sm.is-supporter::before {
-  inset: 2px;
-}
-
-.supporter-brand-roundel {
-  position: relative;
-  z-index: 1;
-  display: grid;
-  place-items: center;
-  width: 62%;
-  aspect-ratio: 1;
-  border-radius: 50%;
-  background: #07162f;
-  box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.92);
-}
-
-.supporter-brand-roundel .footyrush-mark {
-  width: 72%;
-  height: 72%;
-}
-
-.team-kit.is-supporter::before {
-  background: linear-gradient(
-    132deg,
-    var(--team-primary) 0 39%,
-    var(--team-secondary) 39% 51%,
-    var(--team-primary) 51% 100%
-  );
-  box-shadow:
-    inset 0 0 0 2px #d6a72a,
-    inset 0 0 0 3px rgba(255, 232, 163, 0.45);
-}
-
-.team-kit.is-supporter .kit-icon {
-  color: #d6a72a;
-  filter: drop-shadow(0 0 1px #7a4d08);
-}
-
-.kit-supporter-mark {
-  position: absolute;
-  z-index: 3;
-  top: 31%;
-  left: 50%;
-  width: 11px;
-  height: 11px;
-  transform: translate(-50%, -50%);
-  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.65));
-}
-
-.team-kit.is-supporter .kit-num {
-  top: 62%;
+.pitch-supporter-kit {
+  filter: none;
 }
 
 .club-preview.is-supporter,
 .supporter-preview {
   border-color: color-mix(in srgb, #d6a72a 72%, var(--line));
   box-shadow: inset 0 0 0 1px color-mix(in srgb, #ffe8a3 36%, transparent);
-}
-
-.club-preview-kit.is-supporter .kit-supporter-mark {
-  top: 38%;
-  width: 25px;
-  height: 25px;
-}
-
-.club-preview-kit.is-supporter .kit-num {
-  top: 66%;
 }
 
 .supporter-unlock {
@@ -5314,25 +5247,6 @@ p {
   .supporter-unlock {
     padding: 18px;
   }
-}
-
-/* Keep the paid crest recognizable in the smallest league-table badges. */
-.table-panel .team-badge--sm.is-supporter {
-  padding: 2px;
-}
-
-.table-panel .team-badge--sm.is-supporter::before {
-  inset: 2px;
-}
-
-.table-panel .team-badge--sm.is-supporter .supporter-brand-roundel {
-  width: 76%;
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.94);
-}
-
-.table-panel .team-badge--sm.is-supporter .supporter-brand-roundel .footyrush-mark {
-  width: 82%;
-  height: 82%;
 }
 
 .squad-run-story {

@@ -208,10 +208,12 @@ export function requiredClubEntitlements(identity: ClubIdentity): ClubEntitlemen
   if (identity.paletteId !== DEFAULT_CLUB_IDENTITY.paletteId && !supporterEdition) {
     required.push("kit_palette_basic");
   }
-  if (identity.kitStyle !== DEFAULT_CLUB_IDENTITY.kitStyle) {
+  // Supporter artwork owns a fixed sash and shield. Standard pattern/shape
+  // selections stay dormant and return when the player switches editions.
+  if (!supporterEdition && identity.kitStyle !== DEFAULT_CLUB_IDENTITY.kitStyle) {
     required.push("kit_style_basic");
   }
-  if (identity.badgeStyle !== DEFAULT_CLUB_IDENTITY.badgeStyle) {
+  if (!supporterEdition && identity.badgeStyle !== DEFAULT_CLUB_IDENTITY.badgeStyle) {
     required.push("badge_style_basic");
   }
   if (supporterEdition) {
