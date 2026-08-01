@@ -49,29 +49,61 @@ export const CLUB_KIT_STYLES = {
   hoops: { label: "Hoops", pattern: "hoops" }
 } as const satisfies Record<string, { label: string; pattern: TeamPattern }>;
 
+export const CLUB_BADGE_STYLES = {
+  shield: {
+    label: "Shield",
+    clipPath: "polygon(12% 0, 88% 0, 100% 18%, 92% 76%, 50% 100%, 8% 76%, 0 18%)"
+  },
+  round: {
+    label: "Roundel",
+    clipPath: "circle(50% at 50% 50%)"
+  },
+  diamond: {
+    label: "Diamond",
+    clipPath: "polygon(50% 0, 96% 50%, 50% 100%, 4% 50%)"
+  },
+  hexagon: {
+    label: "Hexagon",
+    clipPath: "polygon(25% 0, 75% 0, 100% 50%, 75% 100%, 25% 100%, 0 50%)"
+  }
+} as const satisfies Record<string, { label: string; clipPath: string }>;
+
+export const CLUB_EDITIONS = {
+  standard: { label: "Standard" },
+  supporter: { label: "Supporter Edition" }
+} as const;
+
 export type ClubPaletteId = keyof typeof CLUB_PALETTES;
 export type ClubKitStyleId = keyof typeof CLUB_KIT_STYLES;
+export type ClubBadgeStyleId = keyof typeof CLUB_BADGE_STYLES;
+export type ClubEditionId = keyof typeof CLUB_EDITIONS;
 
 export interface ClubIdentity {
   clubName: string;
   paletteId: ClubPaletteId;
   kitStyle: ClubKitStyleId;
+  badgeStyle: ClubBadgeStyleId;
+  editionId: ClubEditionId;
 }
 
 export const DEFAULT_CLUB_IDENTITY: Readonly<ClubIdentity> = Object.freeze({
   clubName: "FootyRush FC",
   paletteId: "footyrush",
-  kitStyle: "solid"
+  kitStyle: "solid",
+  badgeStyle: "shield",
+  editionId: "standard"
 });
 
 export type ClubEntitlement =
   | "club_name_custom"
   | "kit_palette_basic"
-  | "kit_style_basic";
+  | "kit_style_basic"
+  | "badge_style_basic"
+  | "supporter_edition";
 
 /**
  * One independently revocable reason that an account may use a customization.
- * Achievement, purchase and administrator grants can therefore coexist without
+ * Gameplay unlock, purchase and administrator grants can therefore coexist without
  * one source accidentally removing another.
  */
 export interface ClubEntitlementGrant {
@@ -117,6 +149,14 @@ export function isClubKitStyleId(value: unknown): value is ClubKitStyleId {
   return typeof value === "string" && Object.prototype.hasOwnProperty.call(CLUB_KIT_STYLES, value);
 }
 
+export function isClubBadgeStyleId(value: unknown): value is ClubBadgeStyleId {
+  return typeof value === "string" && Object.prototype.hasOwnProperty.call(CLUB_BADGE_STYLES, value);
+}
+
+export function isClubEditionId(value: unknown): value is ClubEditionId {
+  return typeof value === "string" && Object.prototype.hasOwnProperty.call(CLUB_EDITIONS, value);
+}
+
 /** Convert the persisted controlled IDs into the visual shape used by badges and kits. */
 export function clubIdentityToTeamVisual(identity: ClubIdentity): TeamVisual {
   const palette = CLUB_PALETTES[identity.paletteId];
@@ -129,9 +169,13 @@ export function clubIdentityToTeamVisual(identity: ClubIdentity): TeamVisual {
   };
 }
 
+export function clubBadgeClipPath(identity: Pick<ClubIdentity, "badgeStyle">): string {
+  return CLUB_BADGE_STYLES[identity.badgeStyle].clipPath;
+}
+
 /**
  * Merge all active grant sources. Callers may append future purchase or admin
- * grants to the achievement grants without changing the unlock checks.
+ * grants to earned gameplay grants without changing the unlock checks.
  */
 export function resolveClubEntitlements(
   grants: Iterable<ClubEntitlementGrant>
@@ -155,16 +199,73 @@ export function hasClubEntitlement(
 
 export function requiredClubEntitlements(identity: ClubIdentity): ClubEntitlement[] {
   const required: ClubEntitlement[] = [];
+  const supporterEdition = identity.editionId === "supporter";
   if (normalizeClubName(identity.clubName) !== DEFAULT_CLUB_IDENTITY.clubName) {
     required.push("club_name_custom");
   }
-  if (identity.paletteId !== DEFAULT_CLUB_IDENTITY.paletteId) {
+  // Supporter Edition includes colour freedom for its own kit and badge. The
+  // standard edition still needs the independent career-goals palette unlock.
+  if (identity.paletteId !== DEFAULT_CLUB_IDENTITY.paletteId && !supporterEdition) {
     required.push("kit_palette_basic");
   }
   if (identity.kitStyle !== DEFAULT_CLUB_IDENTITY.kitStyle) {
     required.push("kit_style_basic");
   }
+  if (identity.badgeStyle !== DEFAULT_CLUB_IDENTITY.badgeStyle) {
+    required.push("badge_style_basic");
+  }
+  if (supporterEdition) {
+    required.push("supporter_edition");
+  }
   return required;
+}
+
+/**
+ * Render only the fields currently earned by this account. Locked selections
+ * remain in storage and can return later without one locked field suppressing
+ * every other part of the identity.
+ */
+export function applyClubEntitlements(
+  value: unknown,
+  grants: Iterable<ClubEntitlementGrant>
+): ClubIdentity {
+  const identity = normalizeClubIdentity(value);
+  const entitlements = resolveClubEntitlements(grants);
+  const supporterActive = identity.editionId === "supporter" && entitlements.has("supporter_edition");
+  return {
+    clubName: entitlements.has("club_name_custom")
+      ? identity.clubName
+      : DEFAULT_CLUB_IDENTITY.clubName,
+    paletteId: entitlements.has("kit_palette_basic") || supporterActive
+      ? identity.paletteId
+      : DEFAULT_CLUB_IDENTITY.paletteId,
+    kitStyle: entitlements.has("kit_style_basic")
+      ? identity.kitStyle
+      : DEFAULT_CLUB_IDENTITY.kitStyle,
+    badgeStyle: entitlements.has("badge_style_basic")
+      ? identity.badgeStyle
+      : DEFAULT_CLUB_IDENTITY.badgeStyle,
+    editionId: supporterActive ? "supporter" : DEFAULT_CLUB_IDENTITY.editionId
+  };
+}
+
+/** Merge edits to earned fields without deleting dormant locked selections. */
+export function mergeEntitledClubIdentity(
+  storedValue: unknown,
+  editedValue: unknown,
+  grants: Iterable<ClubEntitlementGrant>
+): ClubIdentity {
+  const stored = normalizeClubIdentity(storedValue);
+  const edited = normalizeClubIdentity(editedValue);
+  const entitlements = resolveClubEntitlements(grants);
+  const supporterActive = edited.editionId === "supporter" && entitlements.has("supporter_edition");
+  return {
+    clubName: entitlements.has("club_name_custom") ? edited.clubName : stored.clubName,
+    paletteId: entitlements.has("kit_palette_basic") || supporterActive ? edited.paletteId : stored.paletteId,
+    kitStyle: entitlements.has("kit_style_basic") ? edited.kitStyle : stored.kitStyle,
+    badgeStyle: entitlements.has("badge_style_basic") ? edited.badgeStyle : stored.badgeStyle,
+    editionId: entitlements.has("supporter_edition") ? edited.editionId : stored.editionId
+  };
 }
 
 /**
@@ -181,23 +282,41 @@ export function validateClubIdentity(
   }
   const candidate = value as Record<string, unknown>;
   const clubName = normalizeClubName(candidate.clubName);
+  // v1 caches predate badge and edition fields; migrate those two fields only.
+  const badgeStyle = candidate.badgeStyle === undefined
+    ? DEFAULT_CLUB_IDENTITY.badgeStyle
+    : candidate.badgeStyle;
+  const editionId = candidate.editionId === undefined
+    ? DEFAULT_CLUB_IDENTITY.editionId
+    : candidate.editionId;
   const errors: string[] = [];
   const nameError = clubNameValidationMessage(clubName);
   if (nameError) errors.push(nameError);
   if (!isClubPaletteId(candidate.paletteId)) errors.push("Choose a valid club palette.");
   if (!isClubKitStyleId(candidate.kitStyle)) errors.push("Choose a valid kit style.");
-  if (errors.length > 0 || !isClubPaletteId(candidate.paletteId) || !isClubKitStyleId(candidate.kitStyle)) {
+  if (!isClubBadgeStyleId(badgeStyle)) errors.push("Choose a valid badge style.");
+  if (!isClubEditionId(editionId)) errors.push("Choose a valid club edition.");
+  if (
+    errors.length > 0 ||
+    !isClubPaletteId(candidate.paletteId) ||
+    !isClubKitStyleId(candidate.kitStyle) ||
+    !isClubBadgeStyleId(badgeStyle) ||
+    !isClubEditionId(editionId)
+  ) {
     return { valid: false, errors, missingEntitlements: [] };
   }
 
   const identity: ClubIdentity = {
     clubName,
     paletteId: candidate.paletteId,
-    kitStyle: candidate.kitStyle
+    kitStyle: candidate.kitStyle,
+    badgeStyle,
+    editionId
   };
-  const missingEntitlements = grants === undefined
+  const resolved = grants === undefined ? null : resolveClubEntitlements(grants);
+  const missingEntitlements = resolved === null
     ? []
-    : requiredClubEntitlements(identity).filter((entitlement) => !hasClubEntitlement(grants, entitlement));
+    : requiredClubEntitlements(identity).filter((entitlement) => !resolved.has(entitlement));
   return {
     valid: missingEntitlements.length === 0,
     value: identity,

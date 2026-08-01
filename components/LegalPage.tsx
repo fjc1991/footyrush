@@ -1,4 +1,5 @@
 import Link from "next/link";
+import FootyRushMark from "@/components/FootyRushMark";
 import { legalCopy, type LegalKind, type LegalLocale } from "@/lib/legal";
 
 export default function LegalPage({ locale, kind }: { locale: LegalLocale; kind: LegalKind }) {
@@ -9,7 +10,7 @@ export default function LegalPage({ locale, kind }: { locale: LegalLocale; kind:
     <main className="legal-shell">
       <header className="legal-topbar">
         <Link className="legal-brand" href={`/${locale}`} aria-label={copy.homeAria}>
-          <span className="legal-brand-mark" aria-hidden="true">FR</span>
+          <span className="legal-brand-mark" aria-hidden="true"><FootyRushMark /></span>
           <span>
             <strong>FOOTYRUSH</strong>
             <small>Draft your XI. Chase the table.</small>

@@ -52,7 +52,7 @@ export const legalCopy: Record<LegalLocale, LegalCopy> = {
             heading: "1. Information we collect",
             paragraphs: [
               "When you create or use an account, we receive your email address, authentication-provider identifier, and any basic profile details that you choose to share through X or Supabase. We also store the manager ID you select.",
-              "We record game information needed to provide FootyRush, such as drafts, squads, match results, season progress, scores, achievements, and leaderboard entries."
+              "We record game information needed to provide FootyRush, such as drafts, squads, match results, season progress, scores, unlock progress, and leaderboard entries."
             ],
             bullets: [
               "Technical and security information, including a privacy-preserving hash of an IP address for guest-play limits and abuse prevention.",

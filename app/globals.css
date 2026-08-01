@@ -4394,7 +4394,7 @@ p {
   }
 }
 
-/* ── Achievement-led club identity ─────────────────────────────── */
+/* ── Unlock-led club identity ─────────────────────────────────── */
 
 .achievements-screen {
   width: min(100%, 1480px);
@@ -4859,6 +4859,480 @@ p {
   .achievement-progress-track > span {
     transition: none;
   }
+}
+
+/* ── Unlock paths, reusable brand mark and Supporter Edition ── */
+
+.footyrush-mark {
+  --fr-footy: var(--navy-900);
+  --fr-rush: var(--accent);
+  display: block;
+  width: 1em;
+  height: 1em;
+  overflow: visible;
+}
+
+.footyrush-mark-footy {
+  fill: var(--fr-footy);
+}
+
+.footyrush-mark-rush {
+  fill: var(--fr-rush);
+}
+
+.footyrush-mark--gold {
+  --fr-footy: #ffe8a3;
+  --fr-rush: #d6a72a;
+}
+
+.footyrush-mark--light {
+  --fr-footy: #ffffff;
+  --fr-rush: #ffffff;
+}
+
+.brand-mark .brand-logo {
+  --fr-footy: var(--navy-900);
+  --fr-rush: var(--accent);
+}
+
+.brand-mark .footyrush-mark.brand-logo {
+  width: 36px;
+  height: 36px;
+}
+
+.legal-brand-mark .footyrush-mark {
+  width: 28px;
+  height: 28px;
+  --fr-footy: var(--navy-900);
+  --fr-rush: var(--accent);
+}
+
+.unlocks-panel {
+  gap: clamp(22px, 2.6vw, 34px);
+}
+
+.unlocks-hero > div:first-child {
+  max-width: 790px;
+}
+
+.unlocks-hero h2 {
+  letter-spacing: 0.055em;
+}
+
+.unlock-total {
+  border-color: color-mix(in srgb, var(--accent) 48%, var(--line));
+  background: color-mix(in srgb, var(--accent) 9%, var(--panel));
+  color: var(--accent);
+}
+
+.unlock-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.unlock-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 250px;
+  padding: clamp(18px, 2vw, 23px);
+}
+
+.unlock-card-heading {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+}
+
+.unlock-card .achievement-card-copy > span {
+  color: var(--accent);
+}
+
+.unlock-card.is-complete .achievement-card-copy > span {
+  color: var(--success);
+}
+
+.unlock-card h3 {
+  margin: 2px 0 0;
+  font-size: clamp(1.12rem, 1.7vw, 1.34rem);
+}
+
+.unlock-state {
+  align-self: start;
+  padding: 6px 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  background: var(--panel-strong);
+  color: var(--muted);
+  font-size: 0.66rem;
+  font-weight: 900;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.unlock-state.is-unlocked {
+  border-color: color-mix(in srgb, var(--success) 55%, var(--line));
+  color: var(--success);
+}
+
+.unlock-goal {
+  color: var(--text);
+  font-size: 0.9rem;
+}
+
+.unlock-card > p {
+  flex: 1;
+  font-size: 0.82rem;
+}
+
+.unlock-progress-copy {
+  margin-top: 5px;
+  font-size: 0.78rem;
+}
+
+.unlock-progress-copy > strong {
+  color: var(--text);
+  font-family: var(--font-display), "Arial Narrow", sans-serif;
+  font-size: 1.22rem;
+}
+
+.unlock-progress-copy > strong span {
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.unlock-progress-track {
+  height: 12px;
+  border: 1px solid color-mix(in srgb, var(--line) 82%, var(--muted));
+  background: color-mix(in srgb, var(--panel-strong) 78%, var(--line));
+}
+
+.unlock-progress-track > span {
+  min-width: 0;
+  box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 32%, transparent);
+}
+
+.unlock-metric-label {
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 800;
+}
+
+.club-badge-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 7px;
+}
+
+.club-badge-choice {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  min-height: 52px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--panel-strong);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.74rem;
+  font-weight: 800;
+  text-align: left;
+  cursor: pointer;
+}
+
+.club-badge-choice:hover:not(:disabled),
+.club-badge-choice.is-selected {
+  border-color: var(--accent);
+}
+
+.club-badge-choice.is-selected {
+  background: color-mix(in srgb, var(--accent) 11%, var(--panel-strong));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+.club-badge-choice:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.club-badge-choice > svg {
+  margin-left: auto;
+  flex: 0 0 auto;
+  color: var(--muted);
+}
+
+.club-badge-choice-preview {
+  --team-primary: var(--navy-800);
+  --team-secondary: var(--accent);
+  --team-ink: #ffffff;
+  --team-pattern: var(--team-primary);
+  display: grid;
+  place-items: center;
+  width: 31px;
+  height: 35px;
+  flex: 0 0 auto;
+  background: var(--team-pattern);
+  color: var(--team-ink);
+  font-family: var(--font-display), "Arial Narrow", sans-serif;
+  font-size: 0.6rem;
+  font-weight: 900;
+}
+
+.team-badge.is-supporter {
+  --supporter-gold-highlight: #ffe8a3;
+  --supporter-gold: #d6a72a;
+  --supporter-gold-shadow: #7a4d08;
+  position: relative;
+  isolation: isolate;
+  padding: 4px;
+  background: linear-gradient(145deg, var(--supporter-gold-highlight), var(--supporter-gold) 52%, var(--supporter-gold-shadow));
+}
+
+.team-badge.is-supporter::before {
+  content: "";
+  position: absolute;
+  z-index: 0;
+  inset: 3px;
+  clip-path: inherit;
+  background: linear-gradient(
+    132deg,
+    var(--team-primary) 0 39%,
+    var(--team-secondary) 39% 51%,
+    var(--team-primary) 51% 100%
+  );
+  box-shadow: inset 0 0 0 1px #07162f;
+}
+
+.team-badge--sm.is-supporter {
+  padding: 3px;
+}
+
+.team-badge--sm.is-supporter::before {
+  inset: 2px;
+}
+
+.supporter-brand-roundel {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 62%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: #07162f;
+  box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.92);
+}
+
+.supporter-brand-roundel .footyrush-mark {
+  width: 72%;
+  height: 72%;
+}
+
+.team-kit.is-supporter::before {
+  background: linear-gradient(
+    132deg,
+    var(--team-primary) 0 39%,
+    var(--team-secondary) 39% 51%,
+    var(--team-primary) 51% 100%
+  );
+  box-shadow:
+    inset 0 0 0 2px #d6a72a,
+    inset 0 0 0 3px rgba(255, 232, 163, 0.45);
+}
+
+.team-kit.is-supporter .kit-icon {
+  color: #d6a72a;
+  filter: drop-shadow(0 0 1px #7a4d08);
+}
+
+.kit-supporter-mark {
+  position: absolute;
+  z-index: 3;
+  top: 31%;
+  left: 50%;
+  width: 11px;
+  height: 11px;
+  transform: translate(-50%, -50%);
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.65));
+}
+
+.team-kit.is-supporter .kit-num {
+  top: 62%;
+}
+
+.club-preview.is-supporter,
+.supporter-preview {
+  border-color: color-mix(in srgb, #d6a72a 72%, var(--line));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, #ffe8a3 36%, transparent);
+}
+
+.club-preview-kit.is-supporter .kit-supporter-mark {
+  top: 38%;
+  width: 25px;
+  height: 25px;
+}
+
+.club-preview-kit.is-supporter .kit-num {
+  top: 66%;
+}
+
+.supporter-unlock {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(300px, 0.85fr);
+  gap: 16px;
+  padding: clamp(20px, 2.8vw, 32px);
+  border: 1px solid color-mix(in srgb, #d6a72a 62%, var(--line));
+  border-radius: var(--r-xl);
+  background:
+    radial-gradient(circle at 92% 10%, color-mix(in srgb, #ffe8a3 14%, transparent), transparent 34%),
+    linear-gradient(145deg, color-mix(in srgb, #d6a72a 7%, var(--panel)), var(--panel));
+}
+
+.supporter-unlock-copy {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.supporter-kicker,
+.supporter-preview-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--amber);
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+:root[data-theme="dark"] .supporter-kicker,
+:root[data-theme="dark"] .supporter-preview-label {
+  color: #f1c85d;
+}
+
+.supporter-unlock-copy .eyebrow {
+  margin: 2px 0 -4px;
+  color: var(--muted);
+}
+
+.supporter-unlock h3 {
+  margin: 0;
+  font-size: clamp(1.55rem, 2.7vw, 2.35rem);
+}
+
+.supporter-unlock-copy > p:not(.eyebrow) {
+  max-width: 700px;
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.supporter-unlock ul {
+  display: grid;
+  gap: 6px;
+  margin: 4px 0 6px;
+  padding-left: 20px;
+  color: var(--text);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.supporter-unlock-copy > small {
+  max-width: 700px;
+  color: var(--muted);
+  font-size: 0.7rem;
+  line-height: 1.45;
+}
+
+.supporter-preview {
+  display: grid;
+  align-content: space-between;
+  min-height: 300px;
+  padding: 18px;
+  border: 1px solid color-mix(in srgb, #d6a72a 70%, var(--line));
+  border-radius: var(--r-xl);
+  background:
+    radial-gradient(circle at 50% 50%, color-mix(in srgb, var(--team-primary) 32%, transparent), transparent 48%),
+    var(--panel-strong);
+}
+
+.supporter-preview-stage {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(25px, 4vw, 46px);
+}
+
+.supporter-preview > p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.72rem;
+  line-height: 1.45;
+  text-align: center;
+}
+
+@media (max-width: 980px) {
+  .unlock-grid,
+  .supporter-unlock {
+    grid-template-columns: 1fr;
+  }
+
+  .supporter-preview {
+    min-height: 245px;
+  }
+}
+
+@media (max-width: 640px) {
+  .brand-mark .footyrush-mark.brand-logo {
+    width: 32px;
+    height: 32px;
+  }
+
+  .unlock-card {
+    min-height: 0;
+  }
+
+  .unlock-card-heading {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .unlock-state {
+    grid-column: 2;
+    justify-self: start;
+  }
+
+  .club-badge-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .supporter-unlock {
+    padding: 18px;
+  }
+}
+
+/* Keep the paid crest recognizable in the smallest league-table badges. */
+.table-panel .team-badge--sm.is-supporter {
+  padding: 2px;
+}
+
+.table-panel .team-badge--sm.is-supporter::before {
+  inset: 2px;
+}
+
+.table-panel .team-badge--sm.is-supporter .supporter-brand-roundel {
+  width: 76%;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.94);
+}
+
+.table-panel .team-badge--sm.is-supporter .supporter-brand-roundel .footyrush-mark {
+  width: 82%;
+  height: 82%;
 }
 
 .squad-run-story {

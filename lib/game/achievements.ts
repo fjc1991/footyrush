@@ -5,112 +5,175 @@ import type {
 } from "./club-identity";
 import type { LeaderboardRecord } from "./types";
 
-export type AchievementId = "first_campaign" | "goal_getter" | "club_established";
-export type AchievementMetric = "completed_runs" | "career_goals";
+export type UnlockId =
+  | "club_identity"
+  | "club_colours"
+  | "kit_designer"
+  | "badge_heritage";
 
-export interface AchievementDefinition {
-  id: AchievementId;
+export type UnlockMetric =
+  | "completed_runs"
+  | "career_goals"
+  | "career_points"
+  | "league_titles";
+
+type GameplayUnlockEntitlement = Exclude<ClubEntitlement, "supporter_edition">;
+
+export interface UnlockDefinition {
+  id: UnlockId;
+  pathLabel: string;
   title: string;
   description: string;
-  metric: AchievementMetric;
+  metric: UnlockMetric;
   target: number;
-  reward: ClubEntitlement;
+  unitSingular: string;
+  unitPlural: string;
+  reward: GameplayUnlockEntitlement;
   rewardLabel: string;
 }
 
-export interface AchievementProgress extends AchievementDefinition {
+export interface UnlockProgress extends UnlockDefinition {
   current: number;
   remaining: number;
+  /** A display-safe percentage that never reaches 100 before the target is met. */
   progressPercent: number;
   completed: boolean;
 }
 
-export const ACHIEVEMENT_CATALOG: readonly AchievementDefinition[] = Object.freeze([
+/**
+ * Personalization is intentionally a set of long-term, independent paths.
+ * Each reward uses a different durable career metric, so one strong run cannot
+ * open the entire customizer at once.
+ */
+export const UNLOCK_CATALOG: readonly UnlockDefinition[] = Object.freeze([
   {
-    id: "first_campaign",
-    title: "First Campaign",
-    description: "Complete your first Mini League or Invincible campaign.",
+    id: "club_identity",
+    pathLabel: "Identity path",
+    title: "Name your club",
+    description: "Build a lasting managerial history across either competition.",
     metric: "completed_runs",
-    target: 1,
+    target: 50,
+    unitSingular: "completed campaign",
+    unitPlural: "completed campaigns",
     reward: "club_name_custom",
     rewardLabel: "Custom club name"
   },
   {
-    id: "goal_getter",
-    title: "Goal Getter",
-    description: "Score 10 goals across completed campaigns.",
+    id: "club_colours",
+    pathLabel: "Scoring path",
+    title: "Choose your colours",
+    description: "Every goal in a completed campaign moves your visual identity forward.",
     metric: "career_goals",
-    target: 10,
+    target: 500,
+    unitSingular: "career goal",
+    unitPlural: "career goals",
     reward: "kit_palette_basic",
     rewardLabel: "Club colour palettes"
   },
   {
-    id: "club_established",
-    title: "Club Established",
-    description: "Complete three Mini League or Invincible campaigns.",
-    metric: "completed_runs",
-    target: 3,
+    id: "kit_designer",
+    pathLabel: "Performance path",
+    title: "Design your kit",
+    description: "Bank points over time in Mini League and Be Invincible campaigns.",
+    metric: "career_points",
+    target: 2_500,
+    unitSingular: "career point",
+    unitPlural: "career points",
     reward: "kit_style_basic",
     rewardLabel: "Kit patterns"
+  },
+  {
+    id: "badge_heritage",
+    pathLabel: "Champion path",
+    title: "Shape your badge",
+    description: "Only competition titles count toward the final piece of your club identity.",
+    metric: "league_titles",
+    target: 100,
+    unitSingular: "league title",
+    unitPlural: "league titles",
+    reward: "badge_style_basic",
+    rewardLabel: "Badge shapes"
   }
 ]);
 
-export interface AchievementTotals {
+export interface UnlockTotals {
   completedRuns: number;
   careerGoals: number;
+  careerPoints: number;
+  leagueTitles: number;
 }
 
 /**
- * Completed human records are normalized first, so retries, legacy data and
- * malformed totals cannot inflate achievement progress.
+ * Completed human records are normalized first, so retries, reserve rows and
+ * malformed totals cannot inflate unlock progress.
  */
-export function achievementTotals(records: readonly LeaderboardRecord[]): AchievementTotals {
+export function unlockTotals(records: readonly LeaderboardRecord[]): UnlockTotals {
   const normalized = normalizeCareerRecords(records);
   return {
     completedRuns: normalized.length,
     careerGoals: normalized.reduce(
       (total, record) => total + Math.min(record.competitionMode === "invincible" ? 300 : 100, record.goalsFor),
       0
-    )
+    ),
+    careerPoints: normalized.reduce((total, record) => total + record.matchPoints, 0),
+    leagueTitles: normalized.reduce((total, record) => total + record.leagueTitles, 0)
   };
 }
 
-function metricValue(metric: AchievementMetric, totals: AchievementTotals): number {
-  return metric === "career_goals" ? totals.careerGoals : totals.completedRuns;
+function metricValue(metric: UnlockMetric, totals: UnlockTotals): number {
+  switch (metric) {
+    case "career_goals":
+      return totals.careerGoals;
+    case "career_points":
+      return totals.careerPoints;
+    case "league_titles":
+      return totals.leagueTitles;
+    default:
+      return totals.completedRuns;
+  }
 }
 
-export function achievementProgress(
-  records: readonly LeaderboardRecord[]
-): AchievementProgress[] {
-  const totals = achievementTotals(records);
-  return ACHIEVEMENT_CATALOG.map((achievement) => {
-    const current = metricValue(achievement.metric, totals);
-    const completed = current >= achievement.target;
+function boundedProgressPercent(current: number, target: number, completed: boolean): number {
+  if (completed) return 100;
+  if (target <= 0 || current <= 0) return 0;
+  // One decimal keeps a 499/500 path visibly incomplete instead of rounding to 100%.
+  return Math.min(99.9, Math.floor((current / target) * 1_000) / 10);
+}
+
+export function unlockProgress(records: readonly LeaderboardRecord[]): UnlockProgress[] {
+  const totals = unlockTotals(records);
+  return UNLOCK_CATALOG.map((unlock) => {
+    const current = metricValue(unlock.metric, totals);
+    const completed = current >= unlock.target;
     return {
-      ...achievement,
+      ...unlock,
       current,
-      remaining: Math.max(0, achievement.target - current),
-      progressPercent: Math.max(0, Math.min(100, Math.round((current / achievement.target) * 100))),
+      remaining: Math.max(0, unlock.target - current),
+      progressPercent: boundedProgressPercent(current, unlock.target, completed),
       completed
     };
   });
 }
 
-/** Achievement rewards expressed in the same source-neutral grant model as future purchases. */
-export function achievementEntitlementGrants(
+/** Earned rewards use the same source-neutral grant model as future supporter purchases. */
+export function unlockEntitlementGrants(
   records: readonly LeaderboardRecord[]
 ): ClubEntitlementGrant[] {
-  return achievementProgress(records)
-    .filter((achievement) => achievement.completed)
-    .map((achievement) => ({
-      entitlement: achievement.reward,
-      source: "achievement",
-      sourceRef: achievement.id
+  return unlockProgress(records)
+    .filter((unlock) => unlock.completed)
+    .map((unlock) => ({
+      entitlement: unlock.reward,
+      source: "unlock",
+      sourceRef: unlock.id
     }));
 }
 
-export function achievementById(id: AchievementId): AchievementDefinition {
-  const achievement = ACHIEVEMENT_CATALOG.find((candidate) => candidate.id === id);
-  if (!achievement) throw new Error(`Unknown achievement: ${id}`);
-  return achievement;
+export function unlockById(id: UnlockId): UnlockDefinition {
+  const unlock = UNLOCK_CATALOG.find((candidate) => candidate.id === id);
+  if (!unlock) throw new Error(`Unknown unlock: ${id}`);
+  return unlock;
+}
+
+export function unlockForEntitlement(entitlement: ClubEntitlement): UnlockDefinition | null {
+  return UNLOCK_CATALOG.find((candidate) => candidate.reward === entitlement) ?? null;
 }

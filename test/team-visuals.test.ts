@@ -110,7 +110,9 @@ describe("team visuals", () => {
     const clubIdentity = {
       clubName: "Northbank Athletic",
       paletteId: "royal_gold" as const,
-      kitStyle: "stripes" as const
+      kitStyle: "stripes" as const,
+      badgeStyle: "round" as const,
+      editionId: "standard" as const
     };
     const first = resolveManagerIdentity(manager(["ARS", "CHE", "LIV"], {
       id: "human",
@@ -132,9 +134,33 @@ describe("team visuals", () => {
       clubName: "Northbank Athletic",
       monogram: "NA",
       teamCode: null,
-      visual: { primary: "#1849A9", secondary: "#F5C400", pattern: "stripes" }
+      visual: { primary: "#1849A9", secondary: "#F5C400", pattern: "stripes" },
+      badgeClipPath: "circle(50% at 50% 50%)",
+      supporter: false
     });
     expect(first.style).toEqual(getTeamVisualStyle(first.visual));
+  });
+
+  it("marks a paid edition as supporter-owned without changing its chosen colours", () => {
+    const resolved = resolveManagerIdentity(manager(["ARS", "CHE"], {
+      id: "human",
+      kind: "human",
+      source: "human",
+      clubIdentity: {
+        clubName: "Supporter FC",
+        paletteId: "green_white",
+        kitStyle: "halves",
+        badgeStyle: "hexagon",
+        editionId: "supporter"
+      }
+    }));
+
+    expect(resolved).toMatchObject({
+      clubName: "Supporter FC",
+      supporter: true,
+      visual: { primary: "#08783D", secondary: "#F5F7FA", pattern: "halves" }
+    });
+    expect(resolved.badgeClipPath).toContain("polygon");
   });
 
   it("preserves a historical club identity when its picks are reordered", () => {

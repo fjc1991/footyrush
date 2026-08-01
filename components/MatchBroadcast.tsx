@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import FootyRushMark from "@/components/FootyRushMark";
 import { renderCommentary } from "@/lib/game/commentary";
 import {
   buildScoreTimeline,
@@ -66,12 +67,19 @@ function TeamIdentity({ manager, side }: { manager: ManagerSquad; side: "home" |
       className={`match-broadcast-team match-broadcast-team--${side}${manager.kind === "human" ? " is-human" : ""}`}
     >
       <span
-        className="match-broadcast-badge team-badge"
-        style={identity.style as CSSProperties}
+        className={`match-broadcast-badge team-badge${identity.supporter ? " is-supporter" : ""}`}
+        style={{
+          ...identity.style,
+          ...(identity.badgeClipPath ? { clipPath: identity.badgeClipPath } : {})
+        } as CSSProperties}
         role="img"
-        aria-label={`${identity.clubName} colours`}
+        aria-label={identity.supporter
+          ? `${identity.clubName} FootyRush Supporter Edition badge`
+          : `${identity.clubName} colours`}
       >
-        {identity.monogram}
+        {identity.supporter
+          ? <span className="supporter-brand-roundel"><FootyRushMark tone="light" /></span>
+          : identity.monogram}
       </span>
       <span className="match-broadcast-team-copy">
         <small>{manager.kind === "human" ? "You" : side === "home" ? "Home" : "Away"}</small>

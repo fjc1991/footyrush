@@ -62,6 +62,13 @@ test("home renders without runtime errors and both modes are selectable", async 
   await expect(page.getByRole("button", { name: /Continue with Google/i })).toHaveCount(0);
   await page.getByRole("button", { name: "Close sign-in", exact: true }).click();
 
+  await page.getByRole("button", { name: "UNLOCKS", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "UNLOCKS", exact: true })).toBeVisible();
+  await expect(page.getByLabel("Personalization unlock progress").getByRole("progressbar")).toHaveCount(4);
+  await expect(page.getByText("FootyRush Supporter Edition", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Support checkout coming soon", exact: true })).toBeDisabled();
+  await page.getByRole("button", { name: "Play", exact: true }).click();
+
   // Both modes are selectable.
   await beInvincible.click();
   await expect(beInvincible).toHaveClass(/active/);
@@ -188,15 +195,137 @@ test("reduced-motion Invincible auto-play advances routine matches without a man
   await draftCompleteSquad(page);
   await page.getByRole("button", { name: "Start Be Invincible season", exact: true }).click();
 
+  const kickOffSeason = page.getByRole("button", { name: "Kick off season", exact: true });
+  await expect(kickOffSeason).toBeVisible();
   const outOfFormDecision = page.locator(".season-event-card").filter({ hasText: "Out of form" });
-  if (await outOfFormDecision.isVisible().catch(() => false)) {
+  if (await outOfFormDecision.count()) {
+    await expect(outOfFormDecision).toBeVisible();
     await outOfFormDecision.locator(".sub-option").first().click();
   }
 
-  await page.getByRole("button", { name: "Kick off season", exact: true }).click();
+  await expect(kickOffSeason).toBeEnabled();
+  await kickOffSeason.click();
   await expect(page.getByText("Match 2 of 38", { exact: true })).toBeVisible({ timeout: 8_000 });
   await expect(page.getByRole("button", { name: "Continue", exact: true })).toHaveCount(0);
   expect(pageErrors, `Unexpected runtime errors: ${pageErrors.join("; ")}`).toEqual([]);
+});
+
+test("UNLOCKS keeps long-term paths independent and preserves legacy links", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.addInitScript(() => {
+    window.localStorage.setItem("footyrush.analyticsConsent", "denied");
+    // Testing mode deliberately clears anonymous progress on a fresh visit.
+    // A demo profile keeps this fixture scoped to the guest history key while
+    // still exercising the same local-only migration path as a returning player.
+    window.localStorage.setItem("footyrush.profile", JSON.stringify({
+      id: "unlock-seed",
+      displayName: "Unlock Seed",
+      demo: true
+    }));
+    if (window.localStorage.getItem("footyrush.unlockE2EPhase") === "complete") return;
+    const records = Array.from({ length: 99 }, (_, index) => ({
+      id: `unlock-seed-${index}`,
+      userId: "unlock-seed",
+      displayName: "Unlock Seed",
+      kind: "human",
+      competitionMode: "minileague",
+      runId: `unlock-seed-${index}`,
+      gamesPlayed: 5,
+      finalPosition: 1,
+      periodAt: "2026-08-01T00:00:00.000Z",
+      matchPoints: 0,
+      goalDifference: 0,
+      goalsFor: index < 4 ? 100 : index === 4 ? 99 : 0,
+      leagueTitles: 1,
+      opponentStrength: 500,
+      completedAt: "2026-08-01T00:00:00.000Z"
+    }));
+    window.localStorage.setItem("footyrush.leaderboardRecords", JSON.stringify(records));
+  });
+
+  await page.goto("/en#achievements");
+  await expect(page.locator("[data-app-ready='true']")).toBeVisible({ timeout: 15_000 });
+  await expect(page).toHaveURL(/\/en#unlocks$/);
+  await expect(page.getByRole("heading", { name: "UNLOCKS", exact: true })).toBeVisible();
+
+  const nameProgress = page.getByRole("progressbar", { name: "Custom club name unlock progress" });
+  const colourProgress = page.getByRole("progressbar", { name: "Club colour palettes unlock progress" });
+  const kitProgress = page.getByRole("progressbar", { name: "Kit patterns unlock progress" });
+  const badgeProgress = page.getByRole("progressbar", { name: "Badge shapes unlock progress" });
+  await expect(nameProgress).toHaveAttribute("aria-valuenow", "50");
+  await expect(nameProgress).toHaveAttribute("aria-valuemax", "50");
+  await expect(colourProgress).toHaveAttribute("aria-valuenow", "499");
+  await expect(colourProgress).toHaveAttribute("aria-valuemax", "500");
+  await expect(colourProgress).toHaveAttribute("aria-valuetext", /1 remaining/);
+  await expect(kitProgress).toHaveAttribute("aria-valuenow", "0");
+  await expect(badgeProgress).toHaveAttribute("aria-valuenow", "99");
+  await expect(badgeProgress).toHaveAttribute("aria-valuemax", "100");
+
+  await expect(page.getByRole("textbox", { name: /Club name/ })).toBeEnabled();
+  await expect(page.getByRole("button", { name: /Red & white/ })).toBeDisabled();
+  await expect(page.getByRole("button", { name: /Stripes/ })).toBeDisabled();
+  await expect(page.getByRole("button", { name: /Roundel/ })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Support checkout coming soon", exact: true })).toBeDisabled();
+  const supporterMarks = page.locator(".supporter-preview .footyrush-mark");
+  await expect(supporterMarks).toHaveCount(2);
+  await expect(supporterMarks.first()).toBeVisible();
+  await expect(supporterMarks.last()).toBeVisible();
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBe(0);
+
+  // Cross every threshold independently, then prove the earned choices persist.
+  await page.evaluate(() => {
+    const stored = window.localStorage.getItem("footyrush.leaderboardRecords") ?? "[]";
+    const records = JSON.parse(stored) as Array<{
+      id: string;
+      runId: string;
+      competitionMode: string;
+      gamesPlayed: number;
+      matchPoints: number;
+      goalsFor: number;
+      leagueTitles: number;
+    }>;
+    records.forEach((record, index) => {
+      record.competitionMode = "invincible";
+      record.gamesPlayed = 38;
+      record.matchPoints = index < 21 ? 114 : index === 21 ? 106 : 0;
+    });
+    records[4].goalsFor = 100;
+    records.push({
+      ...records[0],
+      id: "unlock-seed-99",
+      runId: "unlock-seed-99",
+      matchPoints: 0,
+      goalsFor: 0,
+      leagueTitles: 1
+    });
+    window.localStorage.setItem("footyrush.leaderboardRecords", JSON.stringify(records));
+    window.localStorage.setItem("footyrush.unlockE2EPhase", "complete");
+  });
+  await page.reload();
+  await expect(page.locator("[data-app-ready='true']")).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByLabel("Personalization unlock progress").getByRole("progressbar")).toHaveCount(4);
+  for (const progressbar of [nameProgress, colourProgress, kitProgress, badgeProgress]) {
+    await expect(progressbar).toHaveAttribute("aria-valuetext", /unlocked/);
+  }
+
+  const clubName = page.getByRole("textbox", { name: /Club name/ });
+  await clubName.fill("Seoul Rush");
+  const redWhite = page.getByRole("button", { name: "Red & white", exact: true });
+  const stripes = page.getByRole("button", { name: "Stripes", exact: true });
+  const roundel = page.getByRole("button", { name: "FR Roundel", exact: true });
+  await redWhite.click();
+  await stripes.click();
+  await roundel.click();
+  await page.getByRole("button", { name: "Save club identity", exact: true }).click();
+  await expect(page.getByText("Saved for your next campaign", { exact: true })).toBeVisible();
+
+  await page.reload();
+  await expect(page.locator("[data-app-ready='true']")).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByRole("textbox", { name: /Club name/ })).toHaveValue("Seoul Rush");
+  await expect(page.getByRole("button", { name: "Red & white", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: "Stripes", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: "FR Roundel", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: "Support checkout coming soon", exact: true })).toBeDisabled();
 });
 
 test("X account legal pages are public and connected", async ({ page }) => {

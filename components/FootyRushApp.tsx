@@ -23,9 +23,11 @@ import {
   type CareerMilestone,
   type CareerSummary
 } from "@/lib/game/career";
-import { achievementEntitlementGrants } from "@/lib/game/achievements";
+import { unlockEntitlementGrants } from "@/lib/game/achievements";
 import {
   DEFAULT_CLUB_IDENTITY,
+  applyClubEntitlements,
+  mergeEntitledClubIdentity,
   normalizeClubIdentity,
   validateClubIdentity,
   type ClubIdentity
@@ -106,7 +108,8 @@ import { getSupabaseBrowserClient, hasSupabaseConfig } from "@/lib/supabase/clie
 import { useAccountActivity } from "@/lib/user/account-activity";
 import MyHomeAccount from "@/components/MyHomeAccount";
 import MatchBroadcast from "@/components/MatchBroadcast";
-import AchievementsScreen from "@/components/AchievementsScreen";
+import UnlocksScreen from "@/components/AchievementsScreen";
+import FootyRushMark from "@/components/FootyRushMark";
 import ProfileCompletionReminder from "@/components/ProfileCompletionReminder";
 import type { Session } from "@supabase/supabase-js";
 import type {
@@ -125,7 +128,7 @@ import type {
 
 type Copy = typeof en;
 type Phase = "setup" | "draft" | "league" | "complete" | "exhibition" | "season" | "invincible_complete";
-type MainView = "play" | "leaderboards" | "achievements" | "personal";
+type MainView = "play" | "leaderboards" | "unlocks" | "personal";
 type GameMode = "minileague" | "be_invincible";
 
 function canSafelyStartXLogin(phase: Phase): boolean {
@@ -1000,16 +1003,14 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     [leaderboardRecords]
   );
   const careerSummary = useMemo(() => summarizeCareer(careerRecords), [careerRecords]);
-  const clubAchievementGrants = useMemo(
-    () => achievementEntitlementGrants(careerRecords),
+  const clubEntitlementGrants = useMemo(
+    () => unlockEntitlementGrants(careerRecords),
     [careerRecords]
   );
-  const effectiveClubIdentity = useMemo(() => {
-    const validation = validateClubIdentity(clubIdentity, clubAchievementGrants);
-    return validation.valid && validation.value
-      ? validation.value
-      : { ...DEFAULT_CLUB_IDENTITY };
-  }, [clubAchievementGrants, clubIdentity]);
+  const effectiveClubIdentity = useMemo(
+    () => applyClubEntitlements(clubIdentity, clubEntitlementGrants),
+    [clubEntitlementGrants, clubIdentity]
+  );
   const miniRunStats = useMemo(
     () => aggregateRunStats({ mode: "minileague", results: league?.results ?? [] }),
     [league?.results]
@@ -1179,11 +1180,18 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
       const hashView = window.location.hash.replace("#", "");
       if (
         hashView === "leaderboards" ||
-        hashView === "achievements" ||
+        hashView === "unlocks" ||
         hashView === "personal" ||
         hashView === "play"
       ) {
         setView(hashView);
+      } else if (hashView === "achievements") {
+        setView("unlocks");
+        window.history.replaceState(
+          null,
+          "",
+          `${window.location.pathname}${window.location.search}#unlocks`
+        );
       }
     }
 
@@ -1749,14 +1757,19 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
   }
 
   function saveClubIdentity(nextIdentity: ClubIdentity) {
-    const validation = validateClubIdentity(nextIdentity, clubAchievementGrants);
+    const validation = validateClubIdentity(nextIdentity, clubEntitlementGrants);
     if (!validation.valid || !validation.value) {
       return;
     }
-    setClubIdentity(validation.value);
+    const mergedIdentity = mergeEntitledClubIdentity(
+      clubIdentity,
+      validation.value,
+      clubEntitlementGrants
+    );
+    setClubIdentity(mergedIdentity);
     window.localStorage.setItem(
       clubIdentityStorageKey(profile),
-      JSON.stringify(validation.value)
+      JSON.stringify(mergedIdentity)
     );
   }
 
@@ -2695,7 +2708,12 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
   function readCommunitySnapshots(): ManagerSquad[] {
     try {
       const stored = window.localStorage.getItem(snapshotsKey);
-      return stored ? (JSON.parse(stored) as ManagerSquad[]) : [];
+      const parsed = stored ? (JSON.parse(stored) as ManagerSquad[]) : [];
+      if (!Array.isArray(parsed)) return [];
+      // Local snapshot JSON is not an entitlement authority. Strip historical
+      // custom identity so a stale or edited cache cannot display paid/locked
+      // cosmetics when used as an exhibition opponent.
+      return parsed.map((snapshot) => ({ ...snapshot, clubIdentity: undefined }));
     } catch {
       return [];
     }
@@ -2708,6 +2726,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     }
     const snapshot: ManagerSquad = {
       ...human,
+      clubIdentity: undefined,
       id: `snapshot-${Date.now()}`,
       displayName: human.clubIdentity?.clubName ?? `${profile?.displayName ?? "Guest Manager"} XI`,
       kind: "reserve",
@@ -3206,13 +3225,13 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
           </button>
           <button
             type="button"
-            className={`banner-tab${view === "achievements" ? " active" : ""}`}
-            onClick={() => !isPlaying && !exhibitionPlaying && switchView("achievements")}
+            className={`banner-tab${view === "unlocks" ? " active" : ""}`}
+            onClick={() => !isPlaying && !exhibitionPlaying && switchView("unlocks")}
             disabled={isPlaying || exhibitionPlaying}
             title={isPlaying || exhibitionPlaying ? copy.tabLockedHint : undefined}
-            aria-current={view === "achievements" ? "page" : undefined}
+            aria-current={view === "unlocks" ? "page" : undefined}
           >
-            Achievements
+            UNLOCKS
           </button>
           <button
             type="button"
@@ -3339,8 +3358,8 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
         />
       )}
 
-      {view === "achievements" && (
-        <AchievementsScreen
+      {view === "unlocks" && (
+        <UnlocksScreen
           records={careerRecords}
           identity={effectiveClubIdentity}
           activeRun={activeCareerRunMode !== null}
@@ -4278,7 +4297,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
               </div>
               <p>
                 {season.officialAward && season.awardProduction !== false
-                  ? "The hidden eligibility gate confirmed this as an official Be Invincible achievement."
+                  ? "The hidden eligibility gate confirmed this as an official Be Invincible award."
                   : seasonHumanStanding?.losses === 0
                     ? "This was an unbeaten season, but official Invincible awards are only granted to randomly assigned attempts."
                     : "Only unbeaten seasons can qualify for the official Invincible award."}
@@ -4635,14 +4654,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
 function FootyRushLogo() {
   return (
     <div className="brand-mark" aria-hidden="true">
-      <svg viewBox="0 0 64 64" className="brand-logo">
-        <path className="brand-logo-trail" d="M 8 40 C 17 28 28 22 46 20" />
-        <path className="brand-logo-trail short" d="M 11 49 C 22 39 34 34 55 33" />
-        <circle className="brand-logo-ball" cx="40" cy="26" r="13" />
-        <path className="brand-logo-seam" d="M 32 18 L 40 13 L 48 18 L 45 29 L 35 29 Z" />
-        <path className="brand-logo-seam" d="M 28 27 L 35 29 M 45 29 L 53 27 M 32 18 L 28 27 M 48 18 L 53 27" />
-      </svg>
-      <span>FR</span>
+      <FootyRushMark className="brand-logo" />
     </div>
   );
 }
@@ -4692,14 +4704,22 @@ function TeamBadge({
   const resolvedMonogram = monogram
     ?? resolved?.monogram
     ?? getTeamMonogram(teamCode ?? "", resolvedName);
+  const resolvedStyle = {
+    ...(resolved?.style ?? getTeamVisualStyle(teamCode ?? "FR")),
+    ...(resolved?.badgeClipPath ? { clipPath: resolved.badgeClipPath } : {})
+  } as CSSProperties;
   return (
     <span
-      className={`team-badge${small ? " team-badge--sm" : ""}`}
-      style={(resolved?.style ?? getTeamVisualStyle(teamCode ?? "FR")) as CSSProperties}
+      className={`team-badge${small ? " team-badge--sm" : ""}${resolved?.supporter ? " is-supporter" : ""}`}
+      style={resolvedStyle}
       role="img"
-      aria-label={`${resolvedName} colours`}
+      aria-label={resolved?.supporter
+        ? `${resolvedName} FootyRush Supporter Edition badge`
+        : `${resolvedName} colours`}
     >
-      {resolvedMonogram}
+      {resolved?.supporter
+        ? <span className="supporter-brand-roundel"><FootyRushMark tone="light" /></span>
+        : resolvedMonogram}
     </span>
   );
 }
@@ -4800,7 +4820,8 @@ function FormationPitch({
   injuredPlayerIds?: number[];
   suspendedPlayerIds?: number[];
 }) {
-  const squadStyle = manager ? resolveManagerIdentity(manager).style : null;
+  const squadIdentity = manager ? resolveManagerIdentity(manager) : null;
+  const squadStyle = squadIdentity?.style ?? null;
   const slots = getStarterSlots(formationId);
   const lineYPct: Record<string, number> = { keeper: 88, defense: 66, midfield: 42, attack: 17 };
 
@@ -4855,7 +4876,7 @@ function FormationPitch({
             }
             const isInjured = injuredPlayerIds.includes(pick.player.i);
             const isSuspended = suspendedPlayerIds.includes(pick.player.i);
-            const tokenClass = `pitch-token team-kit${isInjured ? " injured" : isSuspended ? " suspended" : ""}`;
+            const tokenClass = `pitch-token team-kit${squadIdentity?.supporter ? " is-supporter" : ""}${isInjured ? " injured" : isSuspended ? " suspended" : ""}`;
             const lastName = pick.player.n.split(/[\s.]+/).filter(Boolean).slice(-1)[0] ?? pick.player.n;
             return (
               <div
@@ -4869,6 +4890,7 @@ function FormationPitch({
                   style={(squadStyle ?? getTeamVisualStyle(pick.teamCode)) as CSSProperties}
                 >
                   <Shirt size={34} strokeWidth={1.5} className="kit-icon" />
+                  {squadIdentity?.supporter && <FootyRushMark tone="light" className="kit-supporter-mark" />}
                   <span className="kit-num">{pick.player.num}</span>
                   {isInjured && <span className="token-flag injury">＋</span>}
                   {isSuspended && <span className="token-flag susp">▌</span>}

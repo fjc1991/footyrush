@@ -1,4 +1,5 @@
 import {
+  clubBadgeClipPath,
   clubIdentityToTeamVisual,
   normalizeClubIdentity
 } from "./club-identity";
@@ -196,6 +197,8 @@ export interface ResolvedManagerIdentity {
   teamCode: string | null;
   visual: TeamVisual;
   style: TeamVisualStyle;
+  badgeClipPath: string | null;
+  supporter: boolean;
 }
 
 function historicalManagerTeamCode(manager: ManagerSquad): string | null {
@@ -233,7 +236,9 @@ export function resolveManagerIdentity(manager: ManagerSquad): ResolvedManagerId
       monogram: getTeamMonogram("", identity.clubName),
       teamCode: null,
       visual,
-      style: getTeamVisualStyle(visual)
+      style: getTeamVisualStyle(visual),
+      badgeClipPath: clubBadgeClipPath(identity),
+      supporter: identity.editionId === "supporter"
     };
   }
 
@@ -245,7 +250,9 @@ export function resolveManagerIdentity(manager: ManagerSquad): ResolvedManagerId
       monogram: getTeamMonogram(historicalTeamCode, manager.displayName),
       teamCode: historicalTeamCode,
       visual,
-      style: getTeamVisualStyle(visual)
+      style: getTeamVisualStyle(visual),
+      badgeClipPath: null,
+      supporter: false
     };
   }
 
@@ -255,6 +262,8 @@ export function resolveManagerIdentity(manager: ManagerSquad): ResolvedManagerId
     monogram: getTeamMonogram("", manager.displayName),
     teamCode: null,
     visual,
-    style: getTeamVisualStyle(visual)
+    style: getTeamVisualStyle(visual),
+    badgeClipPath: null,
+    supporter: false
   };
 }
