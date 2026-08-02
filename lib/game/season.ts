@@ -1,13 +1,19 @@
 import { getStarterSlots } from "./formations";
 import { INVINCIBLE_IMPACT_SUB_LIMIT } from "./impact-sub";
-import { buildRoundRobin, createHistoricalOpponent, getSkillBand } from "./matchmaking";
+import {
+  buildRoundRobin,
+  createHistoricalOpponent,
+  getSkillBand,
+  opponentManagerRatingForBand,
+  type SkillBand
+} from "./matchmaking";
 import { createRng, pickOne, shuffle } from "./rng";
 import { calculateSquadStrength } from "./simulation";
 import type { ClubIdentity } from "./club-identity";
 import type { DraftMode, DraftPick, Fixture, FixtureResult, ManagerSquad, MatchEvent, SeasonCasualtyKind } from "./types";
 
 export const OUT_OF_FORM_EXPECTED_GOALS_PENALTY = 0.12;
-/** Calibrated to a 54.8% elite-human title rate across 500 full deterministic seasons. */
+/** Helps the strongest AI challengers punish the wider field without altering human fixtures. */
 export const INVINCIBLE_CONTENDER_XG_BONUS = 0.53;
 /** Keeps elite appointed managers valuable without letting their edge trivialize a 38-match title race. */
 export const INVINCIBLE_MANAGER_RATING_CAP = 75;
@@ -46,7 +52,7 @@ export interface InvincibleSeason {
   id: string;
   managers: ManagerSquad[];
   rounds: Fixture[][];
-  skillBand: string;
+  skillBand: SkillBand;
   currentMatchday: number;
   results: FixtureResult[];
   injuryGamesByPlayerId: Record<number, number>;
@@ -103,7 +109,7 @@ export function createInvincibleSeason(params: {
       usedCombos: usedHistoricalCombos,
       mmr: Math.max(0, Math.round(params.mmr + (rng() - 0.5) * 220)),
       completedLeagues: Math.floor(rng() * 24),
-      managerRating: 42 + Math.round(rng() * 30)
+      managerRating: opponentManagerRatingForBand(42 + Math.round(rng() * 30), skillBand)
     })
   );
 

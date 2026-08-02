@@ -67,10 +67,12 @@ export default function UnlocksScreen({
     [progress]
   );
   const [draft, setDraft] = useState(identity);
+  const [supporterPreviewPalette, setSupporterPreviewPalette] = useState<ClubPaletteId>(identity.paletteId);
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
     setDraft(identity);
+    setSupporterPreviewPalette(identity.paletteId);
   }, [identity]);
 
   const validation = validateClubIdentity(draft, grants);
@@ -84,6 +86,11 @@ export default function UnlocksScreen({
   const completedCount = progress.filter((unlock) => unlock.completed).length;
   const dirty = JSON.stringify(draft) !== JSON.stringify(identity);
   const draftVisualStyle = visualStyle(draft);
+  const supporterPreviewVisualStyle = visualStyle({
+    ...draft,
+    paletteId: supporterPreviewPalette,
+    editionId: "supporter"
+  });
   const badgeStyle = {
     ...draftVisualStyle,
     clipPath: clubBadgeClipPath(draft)
@@ -114,10 +121,10 @@ export default function UnlocksScreen({
               campaigns count toward your progress.
             </p>
           </div>
-          <div className="achievement-total unlock-total" aria-label={`${completedCount} of ${progress.length} personalization unlocks earned`}>
+          <div className="achievement-total unlock-total" aria-label={`${completedCount} of ${progress.length} career personalization unlocks earned`}>
             <LockKeyhole size={24} aria-hidden="true" />
             <strong>{completedCount}/{progress.length}</strong>
-            <span>unlocked</span>
+            <span>career unlocked</span>
           </div>
         </header>
 
@@ -168,6 +175,80 @@ export default function UnlocksScreen({
             );
           })}
         </div>
+
+        <section className="supporter-unlock" aria-labelledby="supporter-unlock-title">
+          <div className="supporter-unlock-copy">
+            <div className="supporter-kicker"><Heart size={16} aria-hidden="true" /> Supporter purchase</div>
+            <p className="eyebrow">£4.99 once · about one coffee</p>
+            <h3 id="supporter-unlock-title">FootyRush Supporter Edition — Founders’ Rush</h3>
+            <p>
+              Support development and server costs, then unlock a permanent cosmetic thank-you:
+              the FootyRush crest, signature rush sash and fixed gold supporter frame.
+            </p>
+            <ul>
+              <li>Choose any club palette for this edition; the standard palette path stays independent.</li>
+              <li>The gold trim and FootyRush mark always identify a supporter.</li>
+              <li>One payment. No subscription, gameplay advantage or competitive boost.</li>
+            </ul>
+            <button
+              className={supporterUnlocked ? "primary-button" : "secondary-button"}
+              type="button"
+              disabled={!supporterUnlocked}
+              aria-pressed={supporterActive}
+              onClick={() => {
+                setSaved(false);
+                setDraft((current) => ({
+                  ...current,
+                  editionId: current.editionId === "supporter" ? "standard" : "supporter",
+                  paletteId: current.editionId === "supporter" && !palettePathUnlocked
+                    ? "footyrush"
+                    : current.paletteId
+                }));
+              }}
+            >
+              <Coffee size={17} aria-hidden="true" />
+              {supporterUnlocked
+                ? supporterActive ? "Use standard edition" : "Wear Supporter Edition"
+                : "£4.99 checkout coming soon"}
+            </button>
+            {!supporterUnlocked && (
+              <small>
+                Preview only. Checkout stays disabled until payment verification can grant this securely to an account.
+                This will be a one-off purchase of digital cosmetic content, not a charitable or tax-deductible donation.
+              </small>
+            )}
+          </div>
+          <div className="supporter-preview" style={supporterPreviewVisualStyle} role="group" aria-label="Supporter Edition badge and kit preview">
+            <div className="supporter-preview-label"><Shield size={15} /> Founders’ Rush Sash</div>
+            <div className="supporter-preview-stage">
+              <SupporterBadge paletteId={supporterPreviewPalette} size="preview" decorative />
+              <SupporterKit paletteId={supporterPreviewPalette} playerNumber={10} size="preview" decorative />
+            </div>
+            <fieldset className="supporter-preview-colours">
+              <legend>Preview your club colours</legend>
+              <div className="club-palette-grid">
+                {(Object.entries(CLUB_PALETTES) as Array<[ClubPaletteId, (typeof CLUB_PALETTES)[ClubPaletteId]]>).map(([id, palette]) => (
+                  <button
+                    key={id}
+                    className={`club-palette-choice${supporterPreviewPalette === id ? " is-selected" : ""}`}
+                    type="button"
+                    aria-label={`Preview supporter colours: ${palette.label}`}
+                    aria-pressed={supporterPreviewPalette === id}
+                    onClick={() => setSupporterPreviewPalette(id)}
+                  >
+                    <span
+                      className="club-palette-swatch"
+                      style={{ background: `linear-gradient(135deg, ${palette.primary} 0 50%, ${palette.secondary} 50% 100%)` }}
+                      aria-hidden="true"
+                    />
+                    <span>{palette.label}</span>
+                  </button>
+                ))}
+              </div>
+            </fieldset>
+            <p>Signature gold, the shield and the FR crest stay fixed. These preview colours do not unlock or save anything.</p>
+          </div>
+        </section>
 
         <div className="club-customizer">
           <div className={`club-preview${supporterActive ? " is-supporter" : ""}`} style={draftVisualStyle}>
@@ -353,57 +434,6 @@ export default function UnlocksScreen({
           </div>
         </div>
 
-        <section className="supporter-unlock" aria-labelledby="supporter-unlock-title">
-          <div className="supporter-unlock-copy">
-            <div className="supporter-kicker"><Heart size={16} aria-hidden="true" /> Supporter purchase</div>
-            <p className="eyebrow">£4.99 once · about one coffee</p>
-            <h3 id="supporter-unlock-title">FootyRush Supporter Edition — Founders’ Rush</h3>
-            <p>
-              Support development and server costs, then unlock a permanent cosmetic thank-you:
-              the FootyRush crest, signature rush sash and fixed gold supporter frame.
-            </p>
-            <ul>
-              <li>Choose any club palette for this edition; the standard palette path stays independent.</li>
-              <li>The gold trim and FootyRush mark always identify a supporter.</li>
-              <li>One payment. No subscription, gameplay advantage or competitive boost.</li>
-            </ul>
-            <button
-              className={supporterUnlocked ? "primary-button" : "secondary-button"}
-              type="button"
-              disabled={!supporterUnlocked}
-              aria-pressed={supporterActive}
-              onClick={() => {
-                setSaved(false);
-                setDraft((current) => ({
-                  ...current,
-                  editionId: current.editionId === "supporter" ? "standard" : "supporter",
-                  paletteId: current.editionId === "supporter" && !palettePathUnlocked
-                    ? "footyrush"
-                    : current.paletteId
-                }));
-              }}
-            >
-              <Coffee size={17} aria-hidden="true" />
-              {supporterUnlocked
-                ? supporterActive ? "Use standard edition" : "Wear Supporter Edition"
-                : "£4.99 checkout coming soon"}
-            </button>
-            {!supporterUnlocked && (
-              <small>
-                Preview only. Checkout stays disabled until payment verification can grant this securely to an account.
-                This will be a one-off purchase of digital cosmetic content, not a charitable or tax-deductible donation.
-              </small>
-            )}
-          </div>
-          <div className="supporter-preview" style={draftVisualStyle} role="group" aria-label="Supporter Edition badge and kit preview">
-            <div className="supporter-preview-label"><Shield size={15} /> Founders’ Rush Sash · recommended</div>
-            <div className="supporter-preview-stage">
-              <SupporterBadge paletteId={draft.paletteId} size="preview" decorative />
-              <SupporterKit paletteId={draft.paletteId} playerNumber={10} size="preview" decorative />
-            </div>
-            <p>Signature gold, the shield and the FR crest stay fixed. Your two club colours remain yours.</p>
-          </div>
-        </section>
       </div>
     </section>
   );

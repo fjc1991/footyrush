@@ -11,7 +11,17 @@ export interface MiniLeagueIncidentSchedule {
   kind: SeasonCasualtyKind;
 }
 
-export function getSkillBand(completedLeagues: number, mmr: number): string {
+export type SkillBand = "rookie" | "bronze" | "silver" | "gold" | "elite";
+
+export const SKILL_BAND_MANAGER_OFFSETS: Readonly<Record<SkillBand, number>> = Object.freeze({
+  rookie: -10,
+  bronze: -5,
+  silver: 0,
+  gold: 8,
+  elite: 15
+});
+
+export function getSkillBand(completedLeagues: number, mmr: number): SkillBand {
   if (completedLeagues < 3) {
     return "rookie";
   }
@@ -25,6 +35,15 @@ export function getSkillBand(completedLeagues: number, mmr: number): string {
     return "gold";
   }
   return "elite";
+}
+
+/**
+ * Skill bands should change the football, not just the label. Reuse the
+ * simulation's existing manager-quality channel so harder opponents make
+ * better use of the same historical squads without inventing hidden ratings.
+ */
+export function opponentManagerRatingForBand(baseRating: number, band: SkillBand): number {
+  return Math.max(25, Math.min(90, Math.round(baseRating) + SKILL_BAND_MANAGER_OFFSETS[band]));
 }
 
 export function createMinileague(params: {
@@ -42,7 +61,7 @@ export function createMinileague(params: {
   id: string;
   managers: ManagerSquad[];
   rounds: Fixture[][];
-  skillBand: string;
+  skillBand: SkillBand;
   incidentSchedule: MiniLeagueIncidentSchedule;
 } {
   const rng = createRng(params.seed);
@@ -74,7 +93,7 @@ export function createMinileague(params: {
       usedCombos: usedHistoricalCombos,
       mmr: Math.max(0, Math.round(params.mmr + bandOffset + (rng() - 0.5) * 90)),
       completedLeagues: skillBand === "rookie" ? Math.floor(rng() * 3) : 3 + Math.floor(rng() * 20),
-      managerRating: 45 + Math.round(rng() * 20)
+      managerRating: opponentManagerRatingForBand(45 + Math.round(rng() * 20), skillBand)
     });
   });
 

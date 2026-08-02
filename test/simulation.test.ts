@@ -171,6 +171,57 @@ describe("match simulation", () => {
     expect(strength.attack).toBeCloseTo(expectedAttack, 5);
   });
 
+  it("makes injuries and red cards affect the match after the player leaves", () => {
+    const { home, away, fixture } = makeManagers();
+    let calmGoalDifference = 0;
+    let injuryGoalDifference = 0;
+    let redCardGoalDifference = 0;
+    let changedInjuryScores = 0;
+    let changedRedCardScores = 0;
+
+    for (let index = 0; index < 300; index += 1) {
+      const seed = `casualty-score-effect-${index}`;
+      const calm = simulateFixture({
+        fixture,
+        home,
+        away,
+        seed,
+        homeCasualty: null,
+        awayCasualty: null
+      });
+      const injury = simulateFixture({
+        fixture,
+        home,
+        away,
+        seed,
+        homeCasualty: { kind: "injury" },
+        awayCasualty: null
+      });
+      const redCard = simulateFixture({
+        fixture,
+        home,
+        away,
+        seed,
+        homeCasualty: { kind: "redCard" },
+        awayCasualty: null
+      });
+      calmGoalDifference += calm.homeGoals - calm.awayGoals;
+      injuryGoalDifference += injury.homeGoals - injury.awayGoals;
+      redCardGoalDifference += redCard.homeGoals - redCard.awayGoals;
+      if (injury.homeGoals !== calm.homeGoals || injury.awayGoals !== calm.awayGoals) {
+        changedInjuryScores += 1;
+      }
+      if (redCard.homeGoals !== calm.homeGoals || redCard.awayGoals !== calm.awayGoals) {
+        changedRedCardScores += 1;
+      }
+    }
+
+    expect(changedInjuryScores).toBeGreaterThan(0);
+    expect(changedRedCardScores).toBeGreaterThan(changedInjuryScores);
+    expect(injuryGoalDifference).toBeLessThan(calmGoalDifference - 5);
+    expect(redCardGoalDifference).toBeLessThan(injuryGoalDifference - 20);
+  });
+
   it("active boosts increase squad strength", () => {
     const picks = draftTeamSeasonSquad({
       teamCode: "MCI",

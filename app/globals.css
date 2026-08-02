@@ -5202,6 +5202,36 @@ p {
   gap: clamp(25px, 4vw, 46px);
 }
 
+.supporter-preview-colours {
+  min-width: 0;
+  margin: 14px 0 6px;
+  padding: 0;
+  border: 0;
+}
+
+.supporter-preview-colours legend {
+  margin-bottom: 8px;
+  color: var(--text);
+  font-size: 0.72rem;
+  font-weight: 900;
+}
+
+.supporter-preview-colours .club-palette-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-bottom: 0;
+}
+
+.supporter-preview-colours .club-palette-choice {
+  min-height: 40px;
+  padding: 6px 8px;
+  font-size: 0.68rem;
+}
+
+.supporter-preview-colours .club-palette-swatch {
+  width: 21px;
+  height: 21px;
+}
+
 .supporter-preview > p {
   margin: 0;
   color: var(--muted);

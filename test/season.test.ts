@@ -2,7 +2,11 @@ import { beforeAll, describe, expect, it } from "vitest";
 import rawData from "../data.json";
 import { seedFootballData } from "@/lib/game/data";
 import { autoDraftManager } from "@/lib/game/draft";
-import { createMinileague } from "@/lib/game/matchmaking";
+import {
+  createMinileague,
+  getSkillBand,
+  opponentManagerRatingForBand
+} from "@/lib/game/matchmaking";
 import {
   INVINCIBLE_CONTENDER_XG_BONUS,
   INVINCIBLE_MANAGER_RATING_CAP,
@@ -64,6 +68,95 @@ describe("Be Invincible season", () => {
       const played = allFixtures.filter((fixture) => fixture.homeId === manager.id || fixture.awayId === manager.id);
       expect(played).toHaveLength(38);
     }
+  });
+
+  it("turns career bands into progressively stronger opposition", () => {
+    expect(getSkillBand(0, 0)).toBe("rookie");
+    expect(getSkillBand(3, 299)).toBe("bronze");
+    expect(getSkillBand(3, 300)).toBe("silver");
+    expect(getSkillBand(3, 600)).toBe("gold");
+    expect(getSkillBand(3, 900)).toBe("elite");
+    expect(opponentManagerRatingForBand(55, "rookie")).toBe(45);
+    expect(opponentManagerRatingForBand(55, "bronze")).toBe(50);
+    expect(opponentManagerRatingForBand(55, "silver")).toBe(55);
+    expect(opponentManagerRatingForBand(55, "gold")).toBe(63);
+    expect(opponentManagerRatingForBand(55, "elite")).toBe(70);
+    expect(opponentManagerRatingForBand(20, "rookie")).toBe(25);
+    expect(opponentManagerRatingForBand(90, "elite")).toBe(90);
+
+    const base = human("difficulty-human");
+    const common = {
+      humanPicks: base.picks,
+      humanName: "Tester",
+      formationId: base.formationId,
+      mode: "classic" as const,
+      managerRating: 55,
+      attemptId: "attempt-difficulty",
+      seed: "season-difficulty"
+    };
+    const rookie = createInvincibleSeason({ ...common, completedLeagues: 0, mmr: 0 });
+    const elite = createInvincibleSeason({ ...common, completedLeagues: 3, mmr: 900 });
+
+    expect(rookie.skillBand).toBe("rookie");
+    expect(elite.skillBand).toBe("elite");
+    rookie.managers.slice(1).forEach((opponent, index) => {
+      const eliteOpponent = elite.managers[index + 1];
+      expect(eliteOpponent.formationId).toBe(opponent.formationId);
+      expect(eliteOpponent.picks.map((pick) => pick.player.i)).toEqual(
+        opponent.picks.map((pick) => pick.player.i)
+      );
+      expect(eliteOpponent.managerRating - opponent.managerRating).toBe(25);
+    });
+
+    const rookieMini = createMinileague({
+      ...common,
+      completedLeagues: 0,
+      mmr: 0
+    });
+    const eliteMini = createMinileague({
+      ...common,
+      completedLeagues: 3,
+      mmr: 900
+    });
+    rookieMini.managers.slice(1).forEach((opponent, index) => {
+      const eliteOpponent = eliteMini.managers[index + 1];
+      expect(eliteOpponent.picks.map((pick) => pick.player.i)).toEqual(
+        opponent.picks.map((pick) => pick.player.i)
+      );
+      expect(eliteOpponent.managerRating - opponent.managerRating).toBe(25);
+    });
+  });
+
+  it("makes elite fixtures materially harder across a deterministic cohort", () => {
+    const base = human("difficulty-cohort-human");
+    const common = {
+      humanPicks: base.picks,
+      humanName: "Tester",
+      formationId: base.formationId,
+      mode: "classic" as const,
+      managerRating: 55,
+      attemptId: "attempt-difficulty-cohort",
+      seed: "season-difficulty-cohort"
+    };
+    const rookie = createInvincibleSeason({ ...common, completedLeagues: 0, mmr: 0 });
+    const elite = createInvincibleSeason({ ...common, completedLeagues: 3, mmr: 900 });
+    const humanManager = rookie.managers[0];
+    const rookieOpponent = rookie.managers[1];
+    const eliteOpponent = elite.managers[1];
+    let rookiePoints = 0;
+    let elitePoints = 0;
+
+    for (let index = 0; index < 100; index += 1) {
+      const fixture = { id: `difficulty-${index}`, round: index + 1, homeId: "human", awayId: rookieOpponent.id };
+      const seed = `difficulty-result-${index}`;
+      const rookieResult = simulateFixture({ fixture, home: humanManager, away: rookieOpponent, seed });
+      const eliteResult = simulateFixture({ fixture, home: humanManager, away: eliteOpponent, seed });
+      rookiePoints += rookieResult.homeGoals > rookieResult.awayGoals ? 3 : rookieResult.homeGoals === rookieResult.awayGoals ? 1 : 0;
+      elitePoints += eliteResult.homeGoals > eliteResult.awayGoals ? 3 : eliteResult.homeGoals === eliteResult.awayGoals ? 1 : 0;
+    }
+
+    expect(elitePoints).toBeLessThan(rookiePoints);
+    expect(rookiePoints - elitePoints).toBeGreaterThanOrEqual(10);
   });
 
   it("builds reproducible four-or-five incident arcs with a clear finale and recovery beats", () => {

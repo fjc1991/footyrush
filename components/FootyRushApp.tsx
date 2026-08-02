@@ -47,7 +47,7 @@ import {
   miniLeagueMilestoneKind,
   type MilestoneKind
 } from "@/lib/game/milestones";
-import { createMinileague } from "@/lib/game/matchmaking";
+import { createMinileague, type SkillBand } from "@/lib/game/matchmaking";
 import { canonicalAccountRunId } from "@/lib/game/result-id";
 import { aggregateRunStats, type RunStats } from "@/lib/game/run-stats";
 import { renderCommentary } from "@/lib/game/commentary";
@@ -95,6 +95,7 @@ import {
   EXPERT_SCORE_THRESHOLD,
   MIN_MANAGER_SCORE,
   STARTING_MANAGER_SCORE,
+  careerMatchmakingScore,
   expertProgress,
   hasExpertAccess,
   isExpertUnlocked,
@@ -271,7 +272,7 @@ interface OAuthResumeSnapshot {
 
 interface LeagueState {
   id: string;
-  skillBand: string;
+  skillBand: SkillBand;
   managers: ManagerSquad[];
   rounds: ReturnType<typeof createMinileague>["rounds"];
   incidentSchedule: ReturnType<typeof createMinileague>["incidentSchedule"];
@@ -303,6 +304,7 @@ const clubIdentityKey = "footyrush.clubIdentity.v1";
 const oauthResumeKey = "footyrush.oauthResume.v1";
 const OAUTH_RESUME_MAX_AGE_MS = 60 * 60 * 1000;
 const AUTH_RESTORE_GRACE_MS = 1_500;
+const INVINCIBLE_ATTEMPT_TIMEOUT_MS = 2_500;
 const TESTING_MODE = process.env.NEXT_PUBLIC_TESTING_MODE === "true";
 const DRAFT_RESHUFFLE_LIMIT = 5;
 const MANAGER_SPIN_LIMIT = 3;
@@ -339,6 +341,17 @@ function mergeRunRecords(...groups: LeaderboardRecord[][]): LeaderboardRecord[] 
   return Array.from(byRun.values()).sort(
     (first, second) => Date.parse(second.completedAt) - Date.parse(first.completedAt)
   );
+}
+
+function skillBandLabel(skillBand: SkillBand, copy: Copy): string {
+  const labels: Record<SkillBand, string> = {
+    rookie: copy.skillBandRookie,
+    bronze: copy.skillBandBronze,
+    silver: copy.skillBandSilver,
+    gold: copy.skillBandGold,
+    elite: copy.skillBandElite
+  };
+  return labels[skillBand];
 }
 
 function completedResultFingerprint(record: LeaderboardRecord): string {
@@ -1006,6 +1019,12 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
     [leaderboardRecords]
   );
   const careerSummary = useMemo(() => summarizeCareer(careerRecords), [careerRecords]);
+  const completedCareerRuns = Math.max(completedLeagues, careerSummary.totalRuns);
+  const matchmakingScore = careerMatchmakingScore(
+    managerScore,
+    completedCareerRuns,
+    careerSummary.totalTitles
+  );
   const clubEntitlementGrants = useMemo(
     () => unlockEntitlementGrants(careerRecords),
     [careerRecords]
@@ -1879,19 +1898,29 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
   }
 
   async function createInvincibleAttempt(): Promise<string> {
-    const response = await fetch("/api/invincible-attempts", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...(await authHeaders()) },
-      body: JSON.stringify({})
-    });
-    if (!response.ok) {
-      throw new Error("Invincible attempt could not be registered.");
+    const controller = new AbortController();
+    const timeout = window.setTimeout(
+      () => controller.abort(),
+      INVINCIBLE_ATTEMPT_TIMEOUT_MS
+    );
+    try {
+      const response = await fetch("/api/invincible-attempts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+        body: JSON.stringify({}),
+        signal: controller.signal
+      });
+      if (!response.ok) {
+        throw new Error("Invincible attempt could not be registered.");
+      }
+      const result = (await response.json()) as { attemptId?: string };
+      if (!result.attemptId) {
+        throw new Error("Invincible attempt response was missing an id.");
+      }
+      return result.attemptId;
+    } finally {
+      window.clearTimeout(timeout);
     }
-    const result = (await response.json()) as { attemptId?: string };
-    if (!result.attemptId) {
-      throw new Error("Invincible attempt response was missing an id.");
-    }
-    return result.attemptId;
   }
 
   function prepareSeasonMatch(nextSeason: InvincibleSeason): InvincibleSeason {
@@ -1961,8 +1990,8 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
         humanClubIdentity: effectiveClubIdentity,
         formationId,
         mode: draftMode,
-        completedLeagues,
-        mmr: managerScore,
+        completedLeagues: completedCareerRuns,
+        mmr: matchmakingScore,
         managerRating: selectedManager?.rating ?? managerScore,
         attemptId,
         seed: `${Date.now()}:${profile?.id ?? "guest"}:invincible`
@@ -1981,8 +2010,8 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
       humanClubIdentity: effectiveClubIdentity,
       formationId,
       mode: draftMode,
-      completedLeagues,
-      mmr: managerScore,
+      completedLeagues: completedCareerRuns,
+      mmr: matchmakingScore,
       managerRating: selectedManager?.rating ?? managerScore,
       seed: `${Date.now()}:${profile?.id ?? "guest"}`
     });
@@ -3867,7 +3896,7 @@ export default function FootyRushApp({ copy, locale }: { copy: Copy; locale: str
           <div className="panel match-panel">
             <div className="panel-header">
               <div>
-                <p className="eyebrow">Historical league · {league.skillBand}</p>
+                <p className="eyebrow">Historical league · {copy.difficulty} {skillBandLabel(league.skillBand, copy)}</p>
                 <h2>Round {league.currentRound + 1}</h2>
               </div>
               <BroadcastClock minute={liveSecond} running={isPlaying} />
@@ -5501,7 +5530,7 @@ function SeasonPreMatchPanel({
       <div className="next-game-hero" data-autoplay-state={autoplayStatus}>
         <div className="next-game-copy">
           <span className="next-game-kicker">
-            {copy.nextGame} · Match {season.currentMatchday + 1} of {season.rounds.length} · {season.skillBand}
+            {copy.nextGame} · Match {season.currentMatchday + 1} of {season.rounds.length} · {copy.difficulty} {skillBandLabel(season.skillBand, copy)}
           </span>
           <div className="next-game-matchup-row">
             <TeamBadge manager={human} teamName={humanClubName} />
@@ -5649,9 +5678,13 @@ function SeasonPreMatchPanel({
       )}
 
       {unavailableStarters.length > 0 && (
-        <div className="season-event-card danger season-sub-card">
-          <strong>Selection required</strong>
-          <p>Choose replacements before the next game. Injured and suspended players return automatically when their match counter reaches zero.</p>
+        <div className={`season-event-card ${missingSubstitutions.length > 0 ? "danger" : "active"} season-sub-card`}>
+          <strong>{missingSubstitutions.length > 0 ? "Selection required" : "Lineup ready"}</strong>
+          <p>
+            {missingSubstitutions.length > 0
+              ? "Choose replacements before the next game. Injured and suspended players return automatically when their match counter reaches zero."
+              : "Your replacement lineup is set. Start now or resume auto-play; unavailable players return automatically when their match counter reaches zero."}
+          </p>
           <div className="season-absence-list">
             {unavailableStarters.map((starter) => {
               const selectedSubId = human.substitutions[starter.player.i];

@@ -5,6 +5,8 @@ import {
   normalizeCareerRecords,
   summarizeCareer
 } from "@/lib/game/career";
+import { getSkillBand } from "@/lib/game/matchmaking";
+import { careerMatchmakingScore } from "@/lib/game/progression";
 import type { LeaderboardRecord } from "@/lib/game/types";
 
 function record(
@@ -56,6 +58,22 @@ describe("career summaries", () => {
       miniLeague: { runs: 2, titles: 1, totalPoints: 21, bestPoints: 12 },
       invincible: { runs: 2, titles: 1, totalPoints: 160, bestPoints: 86 }
     });
+  });
+
+  it("feeds mixed-mode career history into one performance-aware difficulty band", () => {
+    const summary = summarizeCareer([
+      ...Array.from({ length: 5 }, (_, index) =>
+        record(`mixed-mini-${index}`, "minileague", { leagueTitles: index < 2 ? 1 : 0 })
+      ),
+      ...Array.from({ length: 5 }, (_, index) =>
+        record(`mixed-season-${index}`, "invincible", { leagueTitles: index < 2 ? 1 : 0 })
+      )
+    ]);
+    const score = careerMatchmakingScore(0, summary.totalRuns, summary.totalTitles);
+
+    expect(summary).toMatchObject({ totalRuns: 10, totalTitles: 4 });
+    expect(score).toBe(360);
+    expect(getSkillBand(summary.totalRuns, score)).toBe("silver");
   });
 
   it("deduplicates completion retries and ignores non-human board rows", () => {

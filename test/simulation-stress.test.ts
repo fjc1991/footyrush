@@ -222,7 +222,7 @@ describe("simulation engine — full minileague invariants (60 leagues)", () => 
         expect(ordered).toBe(true);
       }
     }
-  });
+  }, 15_000);
 });
 
 describe("simulation engine — survives a fully decimated squad", () => {

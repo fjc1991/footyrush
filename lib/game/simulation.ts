@@ -15,6 +15,12 @@ interface StrengthProfile {
   benchDepth: number;
 }
 
+/** Small in-match swings make incidents matter without letting one event decide every result. */
+export const INJURY_OWN_EXPECTED_GOALS_PENALTY = 0.06;
+export const INJURY_OPPONENT_EXPECTED_GOALS_BONUS = 0.06;
+export const RED_CARD_OWN_EXPECTED_GOALS_PENALTY = 0.22;
+export const RED_CARD_OPPONENT_EXPECTED_GOALS_BONUS = 0.3;
+
 interface ActivePlayer {
   pick: DraftPick | null;
   rating: number;
@@ -187,6 +193,26 @@ export function simulateFixture(params: {
     activation: homeImpactSub,
     modifier: homeImpactSub?.opponentExpectedGoalsModifier ?? 0,
     seed: `${params.seed}:impact:home-on-away`
+  });
+  goalSchedule = applyCasualtyGoalModifiers({
+    schedule: goalSchedule,
+    affected: params.home,
+    affectedOff: homeOff,
+    affectedImpactSub: homeImpactSub,
+    opponent: params.away,
+    opponentOff: awayOff,
+    opponentImpactSub: awayImpactSub,
+    seed: `${params.seed}:casualty:home`
+  });
+  goalSchedule = applyCasualtyGoalModifiers({
+    schedule: goalSchedule,
+    affected: params.away,
+    affectedOff: awayOff,
+    affectedImpactSub: awayImpactSub,
+    opponent: params.home,
+    opponentOff: homeOff,
+    opponentImpactSub: homeImpactSub,
+    seed: `${params.seed}:casualty:away`
   }).sort((first, second) => first.second - second.second || first.order - second.order);
 
   const homeGoals = goalSchedule.filter((goal) => goal.manager.id === params.home.id).length;
@@ -376,20 +402,81 @@ function applyImpactGoalModifier(params: {
   seed: string;
 }): ScheduledGoal[] {
   if (!params.activation || params.modifier === 0) return params.schedule;
+  return applyTimedGoalModifier({
+    schedule: params.schedule,
+    target: params.target,
+    targetOff: params.targetOff,
+    targetImpactSub: params.targetImpactSub,
+    firstAffectedSecond: Math.min(89, params.activation.minute + 1),
+    modifier: params.modifier,
+    seed: params.seed
+  });
+}
+
+function applyCasualtyGoalModifiers(params: {
+  schedule: ScheduledGoal[];
+  affected: ManagerSquad;
+  affectedOff: Map<number, Casualty>;
+  affectedImpactSub: ImpactSubPlan | null;
+  opponent: ManagerSquad;
+  opponentOff: Map<number, Casualty>;
+  opponentImpactSub: ImpactSubPlan | null;
+  seed: string;
+}): ScheduledGoal[] {
+  return Array.from(params.affectedOff.values())
+    .sort((first, second) => first.second - second.second || first.kind.localeCompare(second.kind))
+    .reduce((schedule, casualty, index) => {
+      const ownPenalty = casualty.kind === "redCard"
+        ? RED_CARD_OWN_EXPECTED_GOALS_PENALTY
+        : INJURY_OWN_EXPECTED_GOALS_PENALTY;
+      const opponentBonus = casualty.kind === "redCard"
+        ? RED_CARD_OPPONENT_EXPECTED_GOALS_BONUS
+        : INJURY_OPPONENT_EXPECTED_GOALS_BONUS;
+      const firstAffectedSecond = Math.min(89, casualty.second + 1);
+      const afterOwnPenalty = applyTimedGoalModifier({
+        schedule,
+        target: params.affected,
+        targetOff: params.affectedOff,
+        targetImpactSub: params.affectedImpactSub,
+        firstAffectedSecond,
+        modifier: -ownPenalty,
+        seed: `${params.seed}:${index}:${casualty.kind}:own`
+      });
+      return applyTimedGoalModifier({
+        schedule: afterOwnPenalty,
+        target: params.opponent,
+        targetOff: params.opponentOff,
+        targetImpactSub: params.opponentImpactSub,
+        firstAffectedSecond,
+        modifier: opponentBonus,
+        seed: `${params.seed}:${index}:${casualty.kind}:opponent`
+      });
+    }, params.schedule);
+}
+
+function applyTimedGoalModifier(params: {
+  schedule: ScheduledGoal[];
+  target: ManagerSquad;
+  targetOff: Map<number, Casualty>;
+  targetImpactSub: ImpactSubPlan | null;
+  firstAffectedSecond: number;
+  modifier: number;
+  seed: string;
+}): ScheduledGoal[] {
+  if (params.modifier === 0) return params.schedule;
   const rng = createRng(params.seed);
-  const firstAffectedSecond = Math.min(89, params.activation.minute + 1);
 
   if (params.modifier > 0) {
     const extraGoals = sampleGoals(params.modifier, rng);
     if (extraGoals === 0) return params.schedule;
-    const remainingSeconds = Math.max(1, 90 - firstAffectedSecond);
+    const remainingSeconds = Math.max(1, 90 - params.firstAffectedSecond);
     return [
       ...params.schedule,
       ...Array.from({ length: extraGoals }, (): ScheduledGoal => ({
         manager: params.target,
         off: params.targetOff,
         impactSub: params.targetImpactSub,
-        second: firstAffectedSecond + Math.floor(rng() * remainingSeconds),
+        second: params.firstAffectedSecond + Math.floor(rng() * remainingSeconds),
         order: rng()
       }))
     ];
@@ -402,7 +489,7 @@ function applyImpactGoalModifier(params: {
     .filter(
       ({ goal }) =>
         goal.manager.id === params.target.id &&
-        goal.second >= firstAffectedSecond
+        goal.second >= params.firstAffectedSecond
     )
     .sort((first, second) => first.order - second.order)
     .slice(0, suppressions);

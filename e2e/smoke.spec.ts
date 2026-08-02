@@ -185,6 +185,13 @@ test("reduced-motion Invincible auto-play advances routine matches without a man
   test.setTimeout(60_000);
   const pageErrors: string[] = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));
+  await page.route("**/api/invincible-attempts", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ attemptId: "playwright-invincible-attempt" })
+    });
+  });
   await page.addInitScript(() => {
     window.localStorage.setItem("footyrush.analyticsConsent", "denied");
     Date.now = () => 1_700_000_000_000;
@@ -269,7 +276,7 @@ test("UNLOCKS keeps long-term paths independent and preserves legacy links", asy
   await expect(badgeProgress).toHaveAttribute("aria-valuemax", "100");
 
   await expect(page.getByRole("textbox", { name: /Club name/ })).toBeEnabled();
-  await expect(page.getByRole("button", { name: /Red & white/ })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Red & white Locked", exact: true })).toBeDisabled();
   await expect(page.getByRole("button", { name: /Stripes/ })).toBeDisabled();
   await expect(page.getByRole("button", { name: /Roundel/ })).toBeDisabled();
   await expect(page.getByRole("button", { name: "£4.99 checkout coming soon", exact: true })).toBeDisabled();
